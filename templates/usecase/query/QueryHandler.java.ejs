@@ -1,0 +1,22 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= usecaseName %>ResponseDto;
+import <%= packageName %>.<%= moduleName %>.application.queries.<%= usecaseName %>Query;
+import <%= packageName %>.shared.annotations.ApplicationComponent;
+import <%= packageName %>.shared.interfaces.QueryHandler;
+
+
+@ApplicationComponent
+public class <%= usecaseName %>QueryHandler implements QueryHandler<<%= usecaseName %>Query, <%= usecaseName %>ResponseDto> {
+
+  
+
+  public <%= usecaseName %>QueryHandler(
+         
+  ) {}
+
+  @Override
+  public <%= usecaseName %>ResponseDto handle(<%= usecaseName %>Query query) {
+    return null;
+  }
+}

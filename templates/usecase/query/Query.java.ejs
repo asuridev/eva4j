@@ -1,0 +1,8 @@
+package <%= packageName %>.<%= moduleName %>.application.queries;
+
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= usecaseName %>ResponseDto;
+import <%= packageName %>.shared.interfaces.Query;
+
+public record <%= usecaseName %>Query(
+
+) implements Query<<%= usecaseName %>ResponseDto> { }

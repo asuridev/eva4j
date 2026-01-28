@@ -6,6 +6,7 @@ const packageJson = require('../package.json');
 const createCommand = require('../src/commands/create');
 const addModuleCommand = require('../src/commands/add-module');
 const addKafkaClientCommand = require('../src/commands/add-kafka-client');
+const generateUsecaseCommand = require('../src/commands/generate-usecase');
 const infoCommand = require('../src/commands/info');
 
 const program = new Command();
@@ -66,6 +67,32 @@ program
     }
   });
 
+// Generate command
+program
+  .command('generate <type> <name> <module>')
+  .description('Generate components (usecase)')
+  .action(async (type, name, module, options) => {
+    if (type !== 'usecase') {
+      console.error(chalk.red(`❌ Unknown type: ${type}`));
+      console.log(chalk.yellow('\nUsage: eva4j generate usecase <name> <module>'));
+      console.log(chalk.gray('Example: eva4j generate usecase create-provider provider\n'));
+      process.exit(1);
+    }
+
+    if (!name || !module) {
+      console.error(chalk.red('❌ Both use case name and module name are required'));
+      console.log(chalk.gray('Usage: eva4j generate usecase <name> <module>\n'));
+      process.exit(1);
+    }
+    
+    try {
+      await generateUsecaseCommand(name, module, options);
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
 // Info command
 program
   .command('info')
@@ -87,6 +114,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j add module user'));
   console.log(chalk.gray('  $ eva4j add module product'));
   console.log(chalk.gray('  $ eva4j add kafka-client'));
+  console.log(chalk.gray('  $ eva4j generate usecase create-provider provider'));
   console.log(chalk.gray('  $ eva4j info'));
   console.log('');
   console.log(chalk.blue('For more information, visit:'));

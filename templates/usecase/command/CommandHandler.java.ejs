@@ -1,0 +1,21 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.command.<%= usecaseName %>Command;
+import <%= packageName %>.shared.annotations.ApplicationComponent;
+import <%= packageName %>.shared.interfaces.CommandHandler;
+
+
+@ApplicationComponent
+public class <%= usecaseName %>CommandHandler implements CommandHandler<<%= usecaseName %>Command> {
+  
+
+  public <%= usecaseName %>CommandHandler() {
+   
+  }
+
+  @Override
+  public void handle(<%= usecaseName %>Command command) {
+   
+  }
+
+}
