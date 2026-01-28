@@ -21,95 +21,117 @@ class SharedGenerator {
     const { packagePath } = this.context;
     const sharedBasePath = path.join(this.projectDir, 'src', 'main', 'java', packagePath, 'shared');
     
-    // Generate domain/base classes
-    await this.generateDomainBase(sharedBasePath);
+    // Generate package-info
+    await this.generatePackageInfo(sharedBasePath);
     
-    // Generate value objects
-    await this.generateValueObjects(sharedBasePath);
+    // Generate annotations
+    await this.generateAnnotations(sharedBasePath);
     
-    // Generate domain exceptions
-    await this.generateDomainExceptions(sharedBasePath);
+    // Generate interfaces
+    await this.generateInterfaces(sharedBasePath);
     
-    // Generate DTOs
-    await this.generateDTOs(sharedBasePath);
+    // Generate custom exceptions
+    await this.generateCustomExceptions(sharedBasePath);
     
-    // Generate enums
-    await this.generateEnums(sharedBasePath);
+    // Generate error messages
+    await this.generateErrorMessages(sharedBasePath);
     
-    // Generate constants
-    await this.generateConstants(sharedBasePath);
+    // Generate event envelope
+    await this.generateEventEnvelope(sharedBasePath);
+    
+    // Generate handler exception
+    await this.generateHandlerException(sharedBasePath);
+    
+    // Generate configurations
+    await this.generateConfigurations(sharedBasePath);
   }
 
-  async generateDomainBase(basePath) {
-    const domainBasePath = path.join(basePath, 'domain', 'base');
-    
-    await this.generateFile('domain/base/Identifiable.java.ejs', 
-      path.join(domainBasePath, 'Identifiable.java'));
-    await this.generateFile('domain/base/BaseEntity.java.ejs', 
-      path.join(domainBasePath, 'BaseEntity.java'));
-    await this.generateFile('domain/base/AuditableEntity.java.ejs', 
-      path.join(domainBasePath, 'AuditableEntity.java'));
-    await this.generateFile('domain/base/SoftDeletableEntity.java.ejs', 
-      path.join(domainBasePath, 'SoftDeletableEntity.java'));
+  async generatePackageInfo(basePath) {
+    await this.generateFile('package-info.java.ejs', 
+      path.join(basePath, 'package-info.java'));
   }
 
-  async generateValueObjects(basePath) {
-    const voPath = path.join(basePath, 'domain', 'valueobject');
+  async generateAnnotations(basePath) {
+    const annotationsPath = path.join(basePath, 'annotations');
+    const files = ['ApplicationComponent', 'DomainComponent', 'LogAfter', 'LogBefore', 'LogExceptions', 'LogTimer'];
     
-    await this.generateFile('domain/valueobject/ValueObject.java.ejs', 
-      path.join(voPath, 'ValueObject.java'));
-    await this.generateFile('domain/valueobject/Money.java.ejs', 
-      path.join(voPath, 'Money.java'));
-    await this.generateFile('domain/valueobject/Email.java.ejs', 
-      path.join(voPath, 'Email.java'));
-    await this.generateFile('domain/valueobject/Address.java.ejs', 
-      path.join(voPath, 'Address.java'));
+    for (const file of files) {
+      await this.generateFile(`annotations/${file}.java.ejs`, 
+        path.join(annotationsPath, `${file}.java`));
+    }
   }
 
-  async generateDomainExceptions(basePath) {
-    const exceptionPath = path.join(basePath, 'domain', 'exception');
+  async generateInterfaces(basePath) {
+    const interfacesPath = path.join(basePath, 'interfaces');
+    const files = ['Command', 'CommandHandler', 'Dispatchable', 'Handler', 'Query', 'QueryHandler'];
     
-    await this.generateFile('domain/exception/DomainException.java.ejs', 
-      path.join(exceptionPath, 'DomainException.java'));
-    await this.generateFile('domain/exception/EntityNotFoundException.java.ejs', 
-      path.join(exceptionPath, 'EntityNotFoundException.java'));
-    await this.generateFile('domain/exception/ValidationException.java.ejs', 
-      path.join(exceptionPath, 'ValidationException.java'));
-    await this.generateFile('domain/exception/BusinessRuleViolationException.java.ejs', 
-      path.join(exceptionPath, 'BusinessRuleViolationException.java'));
-    await this.generateFile('domain/exception/DuplicateEntityException.java.ejs', 
-      path.join(exceptionPath, 'DuplicateEntityException.java'));
+    for (const file of files) {
+      await this.generateFile(`interfaces/${file}.java.ejs`, 
+        path.join(interfacesPath, `${file}.java`));
+    }
   }
 
-  async generateDTOs(basePath) {
-    const dtoPath = path.join(basePath, 'dto', 'base');
+  async generateCustomExceptions(basePath) {
+    const exceptionsPath = path.join(basePath, 'customExceptions');
+    const files = ['BadRequestException', 'ConflictException', 'ForbiddenException', 
+                   'ImportFileException', 'NotFoundException', 'UnauthorizedException', 'ValidationException'];
     
-    await this.generateFile('dto/base/ApiResponse.java.ejs', 
-      path.join(dtoPath, 'ApiResponse.java'));
-    await this.generateFile('dto/base/PageResponse.java.ejs', 
-      path.join(dtoPath, 'PageResponse.java'));
-    await this.generateFile('dto/base/ErrorDetail.java.ejs', 
-      path.join(dtoPath, 'ErrorDetail.java'));
+    for (const file of files) {
+      await this.generateFile(`customExceptions/${file}.java.ejs`, 
+        path.join(exceptionsPath, `${file}.java`));
+    }
   }
 
-  async generateEnums(basePath) {
-    const enumsPath = path.join(basePath, 'enums');
+  async generateErrorMessages(basePath) {
+    const errorMessagePath = path.join(basePath, 'errorMessage');
+    const files = ['ErrorMessage', 'FullErrorMessage', 'ShortErrorMessage'];
     
-    await this.generateFile('enums/Status.java.ejs', 
-      path.join(enumsPath, 'Status.java'));
-    await this.generateFile('enums/Currency.java.ejs', 
-      path.join(enumsPath, 'Currency.java'));
-    await this.generateFile('enums/Country.java.ejs', 
-      path.join(enumsPath, 'Country.java'));
-    await this.generateFile('enums/ErrorCode.java.ejs', 
-      path.join(enumsPath, 'ErrorCode.java'));
+    for (const file of files) {
+      await this.generateFile(`errorMessage/${file}.java.ejs`, 
+        path.join(errorMessagePath, `${file}.java`));
+    }
   }
 
-  async generateConstants(basePath) {
-    const constantsPath = path.join(basePath, 'constants');
+  async generateEventEnvelope(basePath) {
+    const eventEnvelopePath = path.join(basePath, 'eventEnvelope');
     
-    await this.generateFile('constants/DomainConstants.java.ejs', 
-      path.join(constantsPath, 'DomainConstants.java'));
+    await this.generateFile('eventEnvelope/EventEnvelope.java.ejs', 
+      path.join(eventEnvelopePath, 'EventEnvelope.java'));
+    await this.generateFile('eventEnvelope/EventMetadata.java.ejs', 
+      path.join(eventEnvelopePath, 'EventMetadata.java'));
+  }
+
+  async generateHandlerException(basePath) {
+    const handlerExceptionPath = path.join(basePath, 'handlerException');
+    
+    await this.generateFile('handlerException/HandlerExceptions.java.ejs', 
+      path.join(handlerExceptionPath, 'HandlerExceptions.java'));
+  }
+
+  async generateConfigurations(basePath) {
+    const configurationsPath = path.join(basePath, 'configurations');
+    
+    // Logger config
+    await this.generateFile('configurations/loggerConfig/HandlerLogs.java.ejs', 
+      path.join(configurationsPath, 'loggerConfig', 'HandlerLogs.java'));
+    
+    // Security config
+    await this.generateFile('configurations/securityConfig/SecurityConfig.java.ejs', 
+      path.join(configurationsPath, 'securityConfig', 'SecurityConfig.java'));
+    
+    // Swagger config
+    await this.generateFile('configurations/swaggerConfig/SwaggerConfig.java.ejs', 
+      path.join(configurationsPath, 'swaggerConfig', 'SwaggerConfig.java'));
+    
+    // UseCase config
+    await this.generateFile('configurations/useCaseConfig/UseCaseAutoRegister.java.ejs', 
+      path.join(configurationsPath, 'useCaseConfig', 'UseCaseAutoRegister.java'));
+    await this.generateFile('configurations/useCaseConfig/UseCaseConfig.java.ejs', 
+      path.join(configurationsPath, 'useCaseConfig', 'UseCaseConfig.java'));
+    await this.generateFile('configurations/useCaseConfig/UseCaseContainer.java.ejs', 
+      path.join(configurationsPath, 'useCaseConfig', 'UseCaseContainer.java'));
+    await this.generateFile('configurations/useCaseConfig/UseCaseMediator.java.ejs', 
+      path.join(configurationsPath, 'useCaseConfig', 'UseCaseMediator.java'));
   }
 
   async generateFile(templateRelPath, destPath) {

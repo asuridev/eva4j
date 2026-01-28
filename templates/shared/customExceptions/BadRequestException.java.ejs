@@ -1,0 +1,11 @@
+package <%= packageName %>.shared.customExceptions;
+
+public class BadRequestException extends RuntimeException{
+
+  public BadRequestException(String msg){
+    super(msg);
+  }
+
+  public BadRequestException(){}
+
+}

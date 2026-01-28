@@ -1,0 +1,25 @@
+package <%= packageName %>.shared.configurations.useCaseConfig;
+
+import <%= packageName %>.shared.annotations.ApplicationComponent;
+import <%= packageName %>.shared.annotations.DomainComponent;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
+
+@Configuration
+@ComponentScan(
+    basePackages = {
+        "<%= packageName %>"
+    },
+    includeFilters = {
+        @ComponentScan.Filter(
+            type = FilterType.ANNOTATION,
+            value = ApplicationComponent.class
+        ),
+        @ComponentScan.Filter(
+            type = FilterType.ANNOTATION,
+            value = DomainComponent.class
+        )
+    }
+)
+public class UseCaseConfig { }

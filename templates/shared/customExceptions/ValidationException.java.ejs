@@ -1,0 +1,17 @@
+package <%= packageName %>.shared.customExceptions;
+
+public class ValidationException extends RuntimeException {
+    private final Integer rowNumber;
+
+    public ValidationException(String message) {
+        super(message);
+        this.rowNumber = null;
+    }
+
+    public ValidationException(Integer rowNumber, String message) {
+        super(message);
+        this.rowNumber = rowNumber;
+    }
+
+    public Integer getRowNumber() { return rowNumber; }
+}

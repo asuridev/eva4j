@@ -1,0 +1,6 @@
+package <%= packageName %>.shared.errorMessage;
+
+public record ShortErrorMessage(
+        String message,
+        int statusCode
+      ) implements ErrorMessage { }

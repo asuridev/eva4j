@@ -1,0 +1,23 @@
+package <%= packageName %>.shared.eventEnvelope;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+public record EventMetadata(
+    String eventId,
+    String eventType,
+    LocalDateTime timestamp,
+    String correlationId,
+    String source
+) {
+
+    public static EventMetadata create(String eventType, String correlationId) {
+        return new EventMetadata(
+            UUID.randomUUID().toString(),
+            eventType,
+            LocalDateTime.now(),
+            correlationId,
+            "<%= projectName %>-api"
+        );
+    }
+}
