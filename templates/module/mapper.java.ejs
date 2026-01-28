@@ -1,0 +1,67 @@
+package <%= packageName %>.<%= moduleName %>.mapper;
+
+import <%= packageName %>.<%= moduleName %>.dto.*;
+import <%= packageName %>.<%= moduleName %>.model.<%= className %>;
+import <%= packageName %>.shared.enums.Status;
+import org.springframework.stereotype.Component;
+
+/**
+ * Mapper for <%= className %> entity and DTOs
+ */
+@Component
+public class <%= className %>Mapper {
+
+    /**
+     * Convert request DTO to entity
+     */
+    public <%= className %> toEntity(<%= className %>RequestDTO dto) {
+        if (dto == null) {
+            return null;
+        }
+        
+        return <%= className %>.builder()
+                .name(dto.getName())
+                .description(dto.getDescription())
+                .status(Status.ACTIVE)
+                .build();
+    }
+
+    /**
+     * Convert entity to response DTO
+     */
+    public <%= className %>ResponseDTO toResponseDTO(<%= className %> entity) {
+        if (entity == null) {
+            return null;
+        }
+        
+        return <%= className %>ResponseDTO.builder()
+                .id(entity.getId())
+                .name(entity.getName())
+                .description(entity.getDescription())
+                .status(entity.getStatus())
+<% if (hasAudit) { %>                .createdAt(entity.getCreatedAt())
+                .createdBy(entity.getCreatedBy())
+                .updatedAt(entity.getUpdatedAt())
+                .updatedBy(entity.getUpdatedBy())
+<% } %>                .build();
+    }
+
+    /**
+     * Update entity from DTO
+     */
+    public void updateEntityFromDTO(<%= className %>UpdateDTO dto, <%= className %> entity) {
+        if (dto == null || entity == null) {
+            return;
+        }
+        
+        if (dto.getName() != null) {
+            entity.setName(dto.getName());
+        }
+        if (dto.getDescription() != null) {
+            entity.setDescription(dto.getDescription());
+        }
+        if (dto.getStatus() != null) {
+            entity.setStatus(dto.getStatus());
+        }
+    }
+}

@@ -1,0 +1,88 @@
+package <%= packageName %>.<%= moduleName %>.controller;
+
+import <%= packageName %>.<%= moduleName %>.dto.*;
+import <%= packageName %>.<%= moduleName %>.service.<%= className %>Service;
+import <%= packageName %>.shared.enums.Status;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@WebMvcTest(<%= className %>Controller.class)
+class <%= className %>ControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @MockBean
+    private <%= className %>Service service;
+
+    private <%= className %>RequestDTO requestDTO;
+    private <%= className %>ResponseDTO responseDTO;
+
+    @BeforeEach
+    void setUp() {
+        requestDTO = <%= className %>RequestDTO.builder()
+                .name("Test <%= className %>")
+                .description("Test Description")
+                .build();
+
+        responseDTO = <%= className %>ResponseDTO.builder()
+                .id(1L)
+                .name("Test <%= className %>")
+                .description("Test Description")
+                .status(Status.ACTIVE)
+                .build();
+    }
+
+    @Test
+    void create_ShouldReturnCreated() throws Exception {
+        when(service.create(any(<%= className %>RequestDTO.class))).thenReturn(responseDTO);
+
+        mockMvc.perform(post("/api/v1/<%= moduleNamePlural %>")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(requestDTO)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.id").value(1))
+                .andExpect(jsonPath("$.data.name").value("Test <%= className %>"));
+
+        verify(service).create(any(<%= className %>RequestDTO.class));
+    }
+
+    @Test
+    void findById_ShouldReturnEntity() throws Exception {
+        when(service.findById(1L)).thenReturn(responseDTO);
+
+        mockMvc.perform(get("/api/v1/<%= moduleNamePlural %>/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.id").value(1))
+                .andExpect(jsonPath("$.data.name").value("Test <%= className %>"));
+
+        verify(service).findById(1L);
+    }
+
+    @Test
+    void delete_ShouldReturnSuccess() throws Exception {
+        mockMvc.perform(delete("/api/v1/<%= moduleNamePlural %>/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(service).delete(1L);
+    }
+}

@@ -1,0 +1,21 @@
+<% if (dependencies.includes('data-jpa')) { %>spring:
+  datasource:
+    url: ${DB_URL:<%= databaseUrl %>}
+    username: ${DB_USERNAME:<%= databaseUsername %>}
+    password: ${DB_PASSWORD:<%= databasePassword %>}
+    driver-class-name: <%= databaseDriverClass %>
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: <%= hibernateDialect %>
+
+logging:
+  level:
+    root: INFO
+    <%= packageName %>: DEBUG
+<% } %>

@@ -1,0 +1,96 @@
+package <%= packageName %>.<%= moduleName %>.controller;
+
+import <%= packageName %>.<%= moduleName %>.dto.*;
+import <%= packageName %>.<%= moduleName %>.service.<%= className %>Service;
+import <%= packageName %>.shared.dto.base.ApiResponse;
+import <%= packageName %>.shared.dto.base.PageResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+/**
+ * REST controller for <%= className %> operations
+ */
+@RestController
+@RequestMapping("/api/v1/<%= moduleNamePlural %>")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "<%= className %>", description = "<%= className %> Management API")
+public class <%= className %>Controller {
+
+    private final <%= className %>Service service;
+
+    @PostMapping
+    @Operation(summary = "Create a new <%= moduleName %>")
+    public ResponseEntity<ApiResponse<<%= className %>ResponseDTO>> create(
+            @Valid @RequestBody <%= className %>RequestDTO requestDTO) {
+        log.info("REST request to create <%= className %>: {}", requestDTO);
+        
+        <%= className %>ResponseDTO response = service.create(requestDTO);
+        
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(ApiResponse.success(response, "<%= className %> created successfully"));
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "Get <%= moduleName %> by ID")
+    public ResponseEntity<ApiResponse<<%= className %>ResponseDTO>> findById(@PathVariable Long id) {
+        log.info("REST request to get <%= className %>: {}", id);
+        
+        <%= className %>ResponseDTO response = service.findById(id);
+        
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping
+    @Operation(summary = "Get all <%= moduleNamePlural %>")
+    public ResponseEntity<ApiResponse<List<<%= className %>ResponseDTO>>> findAll() {
+        log.info("REST request to get all <%= className %>s");
+        
+        List<<%= className %>ResponseDTO> response = service.findAll();
+        
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/page")
+    @Operation(summary = "Get all <%= moduleNamePlural %> with pagination")
+    public ResponseEntity<ApiResponse<Page<<%= className %>ResponseDTO>>> findAllPaginated(Pageable pageable) {
+        log.info("REST request to get all <%= className %>s with pagination: {}", pageable);
+        
+        Page<<%= className %>ResponseDTO> response = service.findAll(pageable);
+        
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PutMapping("/{id}")
+    @Operation(summary = "Update <%= moduleName %>")
+    public ResponseEntity<ApiResponse<<%= className %>ResponseDTO>> update(
+            @PathVariable Long id,
+            @Valid @RequestBody <%= className %>UpdateDTO updateDTO) {
+        log.info("REST request to update <%= className %> {}: {}", id, updateDTO);
+        
+        <%= className %>ResponseDTO response = service.update(id, updateDTO);
+        
+        return ResponseEntity.ok(ApiResponse.success(response, "<%= className %> updated successfully"));
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Delete <%= moduleName %>")
+    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
+        log.info("REST request to delete <%= className %>: {}", id);
+        
+        service.delete(id);
+        
+        return ResponseEntity.ok(ApiResponse.success(null, "<%= className %> deleted successfully"));
+    }
+}

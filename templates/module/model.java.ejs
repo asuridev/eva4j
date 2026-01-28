@@ -1,0 +1,29 @@
+package <%= packageName %>.<%= moduleName %>.model;
+
+import <%= packageName %>.shared.domain.base.<%= baseEntityClass %>;
+import <%= packageName %>.shared.enums.Status;
+import jakarta.persistence.*;
+import lombok.*;
+
+/**
+ * <%= className %> entity
+ */
+@Entity
+@Table(name = "<%= tableName %>")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class <%= className %> extends <%= baseEntityClass %><Long> {
+    
+    @Column(nullable = false, length = 100)
+    private String name;
+    
+    @Column(length = 500)
+    private String description;
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Status status = Status.ACTIVE;
+}

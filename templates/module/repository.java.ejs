@@ -1,0 +1,26 @@
+package <%= packageName %>.<%= moduleName %>.repository;
+
+import <%= packageName %>.<%= moduleName %>.model.<%= className %>;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Repository for <%= className %> entity
+ */
+@Repository
+public interface <%= className %>Repository extends JpaRepository<<%= className %>, Long>, 
+        JpaSpecificationExecutor<<%= className %>> {
+    
+<% if (hasSoftDelete) { %>    Optional<<%= className %>> findByIdAndDeletedFalse(Long id);
+    
+    List<<%= className %>> findAllByDeletedFalse();
+    
+    boolean existsByNameAndDeletedFalse(String name);
+<% } else { %>    Optional<<%= className %>> findByName(String name);
+    
+    boolean existsByName(String name);
+<% } %>}

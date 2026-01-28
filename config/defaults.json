@@ -1,0 +1,45 @@
+{
+  "version": "1.0.0",
+  "javaVersion": 21,
+  "springBootVersion": "3.5.5",
+  "springModulithVersion": "1.4.6",
+  "springCloudVersion": "2024.0.0",
+  "gradleVersion": "8.7",
+  "encoding": "UTF-8",
+  "server": {
+    "port": 8080,
+    "contextPath": "/"
+  },
+  "database": {
+    "type": "h2",
+    "ddlAuto": "create-drop",
+    "showSql": true
+  },
+  "logging": {
+    "level": "INFO"
+  },
+  "features": {
+    "enableScheduling": false,
+    "enableAsync": false,
+    "includeSwagger": true,
+    "includeActuator": true,
+    "includeDevtools": true,
+    "includeLombok": true,
+    "includeDocker": true
+  },
+  "testing": {
+    "includeTestcontainers": false,
+    "includeIntegrationTests": true
+  },
+  "shared": {
+    "hasSoftDelete": true,
+    "hasAudit": true,
+    "includeValueObjects": true,
+    "includeDomainEvents": false
+  },
+  "module": {
+    "hasSoftDelete": true,
+    "hasAudit": true,
+    "generateTests": true
+  }
+}

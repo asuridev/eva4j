@@ -1,0 +1,22 @@
+package <%= packageName %>.shared.domain.exception;
+
+import <%= packageName %>.shared.enums.ErrorCode;
+
+/**
+ * Exception thrown when an entity is not found
+ */
+public class EntityNotFoundException extends DomainException {
+    
+    public EntityNotFoundException(String entityName, Object identifier) {
+        super(
+            String.format("%s not found with identifier: %s", entityName, identifier),
+            ErrorCode.ENTITY_NOT_FOUND,
+            entityName,
+            identifier
+        );
+    }
+    
+    public EntityNotFoundException(String message) {
+        super(message, ErrorCode.ENTITY_NOT_FOUND);
+    }
+}

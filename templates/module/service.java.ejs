@@ -1,0 +1,45 @@
+package <%= packageName %>.<%= moduleName %>.service;
+
+import <%= packageName %>.<%= moduleName %>.dto.<%= className %>RequestDTO;
+import <%= packageName %>.<%= moduleName %>.dto.<%= className %>ResponseDTO;
+import <%= packageName %>.<%= moduleName %>.dto.<%= className %>UpdateDTO;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
+import java.util.List;
+
+/**
+ * Service interface for <%= className %> operations
+ */
+public interface <%= className %>Service {
+    
+    /**
+     * Create a new <%= moduleName %>
+     */
+    <%= className %>ResponseDTO create(<%= className %>RequestDTO requestDTO);
+    
+    /**
+     * Find <%= moduleName %> by ID
+     */
+    <%= className %>ResponseDTO findById(Long id);
+    
+    /**
+     * Find all <%= moduleNamePlural %>
+     */
+    List<<%= className %>ResponseDTO> findAll();
+    
+    /**
+     * Find all <%= moduleNamePlural %> with pagination
+     */
+    Page<<%= className %>ResponseDTO> findAll(Pageable pageable);
+    
+    /**
+     * Update <%= moduleName %>
+     */
+    <%= className %>ResponseDTO update(Long id, <%= className %>UpdateDTO updateDTO);
+    
+    /**
+     * Delete <%= moduleName %>
+     */
+    void delete(Long id);
+}

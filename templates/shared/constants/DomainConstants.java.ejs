@@ -1,0 +1,26 @@
+package <%= packageName %>.shared.constants;
+
+/**
+ * Domain-level constants
+ */
+public final class DomainConstants {
+    
+    private DomainConstants() {
+        throw new UnsupportedOperationException("Utility class");
+    }
+    
+    // Pagination
+    public static final int DEFAULT_PAGE_SIZE = 20;
+    public static final int MAX_PAGE_SIZE = 100;
+    public static final String DEFAULT_SORT_DIRECTION = "ASC";
+    
+    // Length constraints
+    public static final int MAX_NAME_LENGTH = 255;
+    public static final int MAX_DESCRIPTION_LENGTH = 1000;
+    public static final int MAX_EMAIL_LENGTH = 255;
+    public static final int MIN_PASSWORD_LENGTH = 8;
+    
+    // Regex patterns
+    public static final String PHONE_REGEX = "^\\+?[1-9]\\d{1,14}$";
+    public static final String UUID_REGEX = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
+}

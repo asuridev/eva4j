@@ -1,0 +1,18 @@
+package <%= packageName %>.<%= moduleName %>.exception;
+
+import <%= packageName %>.shared.domain.exception.DomainException;
+import <%= packageName %>.shared.enums.ErrorCode;
+
+/**
+ * Exception for <%= className %> domain errors
+ */
+public class <%= className %>Exception extends DomainException {
+    
+    public <%= className %>Exception(String message) {
+        super(message, ErrorCode.BUSINESS_RULE_VIOLATION);
+    }
+    
+    public <%= className %>Exception(String message, Object... args) {
+        super(message, ErrorCode.BUSINESS_RULE_VIOLATION, args);
+    }
+}

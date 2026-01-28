@@ -1,0 +1,27 @@
+package <%= packageName %>;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.openfeign.EnableFeignClients;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
+<% if (features.enableScheduling) { %>import org.springframework.scheduling.annotation.EnableScheduling;
+<% } %><% if (features.enableAsync) { %>import org.springframework.scheduling.annotation.EnableAsync;
+<% } %>
+/**
+ * Main application class for <%= projectName %>
+ * 
+ * @author <%= author %>
+ * @version <%= version %>
+ * @since <%= createdDate %>
+ */
+@SpringBootApplication
+@EnableFeignClients
+@EnableJpaAuditing
+<% if (features.enableScheduling) { %>@EnableScheduling
+<% } %><% if (features.enableAsync) { %>@EnableAsync
+<% } %>public class <%= applicationClassName %> {
+
+    public static void main(String[] args) {
+        SpringApplication.run(<%= applicationClassName %>.class, args);
+    }
+}

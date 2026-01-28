@@ -1,0 +1,96 @@
+package <%= packageName %>.<%= moduleName %>.service;
+
+import <%= packageName %>.<%= moduleName %>.dto.*;
+import <%= packageName %>.<%= moduleName %>.mapper.<%= className %>Mapper;
+import <%= packageName %>.<%= moduleName %>.model.<%= className %>;
+import <%= packageName %>.<%= moduleName %>.repository.<%= className %>Repository;
+import <%= packageName %>.<%= moduleName %>.service.impl.<%= className %>ServiceImpl;
+import <%= packageName %>.shared.domain.exception.EntityNotFoundException;
+import <%= packageName %>.shared.enums.Status;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+
+@ExtendWith(MockitoExtension.class)
+class <%= className %>ServiceTest {
+
+    @Mock
+    private <%= className %>Repository repository;
+
+    @Mock
+    private <%= className %>Mapper mapper;
+
+    @InjectMocks
+    private <%= className %>ServiceImpl service;
+
+    private <%= className %> entity;
+    private <%= className %>RequestDTO requestDTO;
+    private <%= className %>ResponseDTO responseDTO;
+
+    @BeforeEach
+    void setUp() {
+        entity = <%= className %>.builder()
+                .id(1L)
+                .name("Test <%= className %>")
+                .description("Test Description")
+                .status(Status.ACTIVE)
+                .build();
+
+        requestDTO = <%= className %>RequestDTO.builder()
+                .name("Test <%= className %>")
+                .description("Test Description")
+                .build();
+
+        responseDTO = <%= className %>ResponseDTO.builder()
+                .id(1L)
+                .name("Test <%= className %>")
+                .description("Test Description")
+                .status(Status.ACTIVE)
+                .build();
+    }
+
+    @Test
+    void create_ShouldCreateSuccessfully() {
+        when(mapper.toEntity(requestDTO)).thenReturn(entity);
+        when(repository.save(any(<%= className %>.class))).thenReturn(entity);
+        when(mapper.toResponseDTO(entity)).thenReturn(responseDTO);
+
+        <%= className %>ResponseDTO result = service.create(requestDTO);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getName()).isEqualTo("Test <%= className %>");
+        verify(repository).save(any(<%= className %>.class));
+    }
+
+    @Test
+    void findById_ShouldReturnEntity() {
+<% if (hasSoftDelete) { %>        when(repository.findByIdAndDeletedFalse(1L)).thenReturn(Optional.of(entity));
+<% } else { %>        when(repository.findById(1L)).thenReturn(Optional.of(entity));
+<% } %>        when(mapper.toResponseDTO(entity)).thenReturn(responseDTO);
+
+        <%= className %>ResponseDTO result = service.findById(1L);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getId()).isEqualTo(1L);
+    }
+
+    @Test
+    void findById_ShouldThrowException_WhenNotFound() {
+<% if (hasSoftDelete) { %>        when(repository.findByIdAndDeletedFalse(1L)).thenReturn(Optional.empty());
+<% } else { %>        when(repository.findById(1L)).thenReturn(Optional.empty());
+<% } %>
+        assertThatThrownBy(() -> service.findById(1L))
+                .isInstanceOf(EntityNotFoundException.class);
+    }
+}

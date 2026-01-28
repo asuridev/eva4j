@@ -1,0 +1,112 @@
+package <%= packageName %>.<%= moduleName %>.service.impl;
+
+import <%= packageName %>.<%= moduleName %>.dto.*;
+import <%= packageName %>.<%= moduleName %>.exception.<%= className %>Exception;
+import <%= packageName %>.<%= moduleName %>.mapper.<%= className %>Mapper;
+import <%= packageName %>.<%= moduleName %>.model.<%= className %>;
+import <%= packageName %>.<%= moduleName %>.repository.<%= className %>Repository;
+import <%= packageName %>.<%= moduleName %>.service.<%= className %>Service;
+import <%= packageName %>.shared.domain.exception.EntityNotFoundException;
+import <%= packageName %>.shared.domain.exception.DuplicateEntityException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * Service implementation for <%= className %> operations
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+@Transactional
+public class <%= className %>ServiceImpl implements <%= className %>Service {
+
+    private final <%= className %>Repository repository;
+    private final <%= className %>Mapper mapper;
+
+    @Override
+    public <%= className %>ResponseDTO create(<%= className %>RequestDTO requestDTO) {
+        log.info("Creating new <%= moduleName %>: {}", requestDTO);
+        
+        // Check if <%= moduleName %> with same name already exists
+<% if (hasSoftDelete) { %>        if (repository.existsByNameAndDeletedFalse(requestDTO.getName())) {
+<% } else { %>        if (repository.existsByName(requestDTO.getName())) {
+<% } %>            throw new DuplicateEntityException("<%= className %>", "name", requestDTO.getName());
+        }
+        
+        <%= className %> entity = mapper.toEntity(requestDTO);
+        <%= className %> saved = repository.save(entity);
+        
+        log.info("<%= className %> created successfully with id: {}", saved.getId());
+        return mapper.toResponseDTO(saved);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public <%= className %>ResponseDTO findById(Long id) {
+        log.info("Finding <%= moduleName %> by id: {}", id);
+        
+<% if (hasSoftDelete) { %>        <%= className %> entity = repository.findByIdAndDeletedFalse(id)
+<% } else { %>        <%= className %> entity = repository.findById(id)
+<% } %>                .orElseThrow(() -> new EntityNotFoundException("<%= className %>", id));
+        
+        return mapper.toResponseDTO(entity);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<<%= className %>ResponseDTO> findAll() {
+        log.info("Finding all <%= moduleNamePlural %>");
+<% if (hasSoftDelete) { %>        return repository.findAllByDeletedFalse().stream()
+<% } else { %>        return repository.findAll().stream()
+<% } %>                .map(mapper::toResponseDTO)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<<%= className %>ResponseDTO> findAll(Pageable pageable) {
+        log.info("Finding all <%= moduleNamePlural %> with pagination: {}", pageable);
+        return repository.findAll(pageable).map(mapper::toResponseDTO);
+    }
+
+    @Override
+    public <%= className %>ResponseDTO update(Long id, <%= className %>UpdateDTO updateDTO) {
+        log.info("Updating <%= moduleName %> with id: {}", id);
+        
+<% if (hasSoftDelete) { %>        <%= className %> entity = repository.findByIdAndDeletedFalse(id)
+<% } else { %>        <%= className %> entity = repository.findById(id)
+<% } %>                .orElseThrow(() -> new EntityNotFoundException("<%= className %>", id));
+        
+        mapper.updateEntityFromDTO(updateDTO, entity);
+        <%= className %> updated = repository.save(entity);
+        
+        log.info("<%= className %> updated successfully: {}", id);
+        return mapper.toResponseDTO(updated);
+    }
+
+    @Override
+    public void delete(Long id) {
+        log.info("Deleting <%= moduleName %> with id: {}", id);
+        
+<% if (hasSoftDelete) { %>        <%= className %> entity = repository.findByIdAndDeletedFalse(id)
+                .orElseThrow(() -> new EntityNotFoundException("<%= className %>", id));
+        
+        entity.markAsDeleted("system"); // TODO: Get current user
+        repository.save(entity);
+        
+        log.info("<%= className %> soft deleted successfully: {}", id);
+<% } else { %>        <%= className %> entity = repository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("<%= className %>", id));
+        
+        repository.delete(entity);
+        
+        log.info("<%= className %> deleted successfully: {}", id);
+<% } %>    }
+}

@@ -1,0 +1,126 @@
+# <%= projectName %>
+
+<%= description %>
+
+## Built with eva4j CLI
+
+This project was generated using [eva4j](https://github.com/your-repo/eva4j), a CLI tool for generating Spring Boot projects with modular architecture.
+
+## Technologies
+
+- **Java**: <%= javaVersion %>
+- **Spring Boot**: <%= springBootVersion %>
+- **Build Tool**: Gradle <%= gradleVersion %>
+<% if (dependencies.includes('data-jpa')) { %>- **Database**: <%= databaseType.toUpperCase() %>
+<% } %><% if (dependencies.includes('web')) { %>- **REST API**: Spring Web
+<% } %><% if (dependencies.includes('security')) { %>- **Security**: Spring Security
+<% } %><% if (features.includeSwagger) { %>- **API Documentation**: Swagger/OpenAPI
+<% } %>
+
+## Project Structure
+
+```
+<%= artifactId %>/
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── <%= packagePath %>/
+│   │   │       ├── <%= applicationClassName %>.java
+│   │   │       ├── common/              # Infrastructure layer
+│   │   │       │   ├── config/
+│   │   │       │   ├── exception/
+│   │   │       │   └── util/
+│   │   │       ├── shared/              # Shared domain layer (generated with first module)
+│   │   │       └── [modules]/           # Domain modules (user, product, etc.)
+│   │   └── resources/
+│   │       └── application.yml
+│   └── test/
+├── build.gradle
+└── docker-compose.yml
+```
+
+## Getting Started
+
+### Prerequisites
+
+- Java <%= javaVersion %> or higher
+- Gradle <%= gradleVersion %> or use included wrapper
+<% if (dependencies.includes('data-jpa') && databaseType !== 'h2') { %>- <%= databaseType.toUpperCase() %> database
+<% } %>
+
+### Running the Application
+
+```bash
+# Using Gradle wrapper
+./gradlew bootRun
+
+# Or build and run
+./gradlew build
+java -jar build/libs/<%= artifactId %>-<%= version %>.jar
+```
+
+<% if (features.includeDocker && dependencies.includes('data-jpa') && databaseType !== 'h2') { %>### Using Docker Compose
+
+Start the database:
+
+```bash
+docker-compose up -d
+```
+<% } %>
+
+### Running Tests
+
+```bash
+./gradlew test
+```
+
+<% if (features.includeSwagger) { %>## API Documentation
+
+Once the application is running, you can access the API documentation at:
+
+- Swagger UI: http://localhost:<%= serverPort %>/swagger-ui.html
+- OpenAPI JSON: http://localhost:<%= serverPort %>/api-docs
+<% } %>
+
+<% if (dependencies.includes('actuator')) { %>## Actuator Endpoints
+
+Health check and metrics are available at:
+
+- Health: http://localhost:<%= serverPort %>/actuator/health
+- Metrics: http://localhost:<%= serverPort %>/actuator/metrics
+<% } %>
+
+## Adding Modules
+
+To add a new domain module (e.g., user, product):
+
+```bash
+eva4j add module user
+```
+
+This will generate:
+- Controller layer (REST endpoints)
+- Service layer (business logic)
+- Repository layer (data access)
+- Model/Entity (domain object)
+- DTOs (data transfer objects)
+- Mapper (entity ↔ DTO conversion)
+- Tests
+
+## Architecture
+
+This project follows a **modular monolith** architecture with **package-by-feature** organization:
+
+- **common**: Infrastructure and technical concerns (config, global exception handling)
+- **shared**: Cross-cutting domain concerns (base entities, value objects, domain exceptions)
+- **[module]**: Feature-based modules (user, product, order, etc.)
+
+Each module is self-contained with its own controller, service, repository, model, and DTOs.
+
+## License
+
+<%= license || 'MIT' %>
+
+## Author
+
+<%= author %>

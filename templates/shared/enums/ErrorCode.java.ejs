@@ -1,0 +1,34 @@
+package <%= packageName %>.shared.enums;
+
+import lombok.Getter;
+
+/**
+ * Standard error codes for the application
+ */
+@Getter
+public enum ErrorCode {
+    // Generic errors
+    INTERNAL_SERVER_ERROR(5000, "An internal server error occurred"),
+    VALIDATION_ERROR(4001, "Validation failed"),
+    
+    // Entity errors
+    ENTITY_NOT_FOUND(4040, "Entity not found"),
+    DUPLICATE_ENTITY(4090, "Entity already exists"),
+    
+    // Business logic errors
+    BUSINESS_RULE_VIOLATION(4220, "Business rule violation"),
+    UNAUTHORIZED_ACCESS(4030, "Unauthorized access"),
+    FORBIDDEN_OPERATION(4033, "Forbidden operation"),
+    
+    // Data errors
+    INVALID_INPUT(4002, "Invalid input data"),
+    MISSING_REQUIRED_FIELD(4003, "Required field is missing");
+    
+    private final int code;
+    private final String defaultMessage;
+    
+    ErrorCode(int code, String defaultMessage) {
+        this.code = code;
+        this.defaultMessage = defaultMessage;
+    }
+}

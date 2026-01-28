@@ -1,0 +1,25 @@
+package <%= packageName %>.<%= moduleName %>.dto;
+
+import <%= packageName %>.shared.constants.DomainConstants;
+import <%= packageName %>.shared.enums.Status;
+import jakarta.validation.constraints.Size;
+import lombok.*;
+
+/**
+ * DTO for updating <%= className %>
+ */
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class <%= className %>UpdateDTO {
+
+    @Size(min = 2, max = DomainConstants.MAX_NAME_LENGTH, message = "Name must be between 2 and 255 characters")
+    private String name;
+
+    @Size(max = DomainConstants.MAX_DESCRIPTION_LENGTH, message = "Description must not exceed 1000 characters")
+    private String description;
+    
+    private Status status;
+}

@@ -1,0 +1,39 @@
+package <%= packageName %>.shared.domain.exception;
+
+import <%= packageName %>.shared.enums.ErrorCode;
+import lombok.Getter;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Exception for validation failures
+ */
+@Getter
+public class ValidationException extends DomainException {
+    
+    private final Map<String, String> fieldErrors;
+    
+    public ValidationException(String message) {
+        super(message, ErrorCode.VALIDATION_ERROR);
+        this.fieldErrors = new HashMap<>();
+    }
+    
+    public ValidationException(String message, Map<String, String> fieldErrors) {
+        super(message, ErrorCode.VALIDATION_ERROR);
+        this.fieldErrors = fieldErrors;
+    }
+    
+    public ValidationException(String field, String error) {
+        super("Validation failed", ErrorCode.VALIDATION_ERROR);
+        this.fieldErrors = Map.of(field, error);
+    }
+    
+    public void addFieldError(String field, String error) {
+        this.fieldErrors.put(field, error);
+    }
+    
+    public boolean hasFieldErrors() {
+        return !fieldErrors.isEmpty();
+    }
+}
