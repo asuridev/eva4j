@@ -68,10 +68,17 @@ async function addModuleCommand(moduleName, options) {
   
   // Check ConfigManager for module tracking
   const configManager = new ConfigManager(projectDir);
+  let projectName = 'Project';
+  
   if (await configManager.exists()) {
     if (await configManager.moduleExists(moduleName)) {
       console.error(chalk.red(`❌ Module '${moduleName}' is already registered`));
       process.exit(1);
+    }
+    // Load project config to get projectName
+    const projectConfig = await configManager.loadProjectConfig();
+    if (projectConfig && projectConfig.projectName) {
+      projectName = projectConfig.projectName;
     }
   }
   
@@ -94,6 +101,7 @@ async function addModuleCommand(moduleName, options) {
   const baseContext = {
     packageName,
     packagePath,
+    projectName,
     groupId: groupMatch[1]
   };
   
