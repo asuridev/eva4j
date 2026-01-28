@@ -22,8 +22,8 @@ public class SwaggerConfig {
                 .version("1.0")
                 .description("Documentación de la API REST")
                 .contact(new Contact()
-                    .name("Humana Tech")
-                    .email("humana@med.com"))
+                    .name("<%= projectName %> Team")
+                    .email("<%= projectName.toLowerCase().replace(/\s+/g, '') %>@<%= groupId.split('.').reverse().join('.') %>"))
                 .license(new License()
                     .name("Apache 2.0")
                     .url("http://www.apache.org/licenses/LICENSE-2.0.html")));

@@ -39,24 +39,11 @@ async function createCommand(projectName, options) {
       default: defaults.springBootVersion
     },
     {
-      type: 'checkbox',
-      name: 'dependencies',
-      message: 'Select dependencies:',
-      choices: [
-        { name: 'Spring Web', value: 'web', checked: true },
-        { name: 'Spring Data JPA', value: 'data-jpa', checked: true },
-        { name: 'Spring Security', value: 'security' },
-        { name: 'Validation', value: 'validation', checked: true },
-        { name: 'Spring Actuator', value: 'actuator', checked: true }
-      ]
-    },
-    {
       type: 'list',
       name: 'databaseType',
       message: 'Database type:',
       choices: ['postgresql', 'mysql', 'h2'],
-      default: 'postgresql',
-      when: (answers) => answers.dependencies.includes('data-jpa')
+      default: 'postgresql'
     },
     {
       type: 'input',
@@ -65,6 +52,9 @@ async function createCommand(projectName, options) {
       default: 'Developer'
     }
   ]);
+  
+  // Set all required dependencies
+  answers.dependencies = ['web', 'data-jpa', 'security', 'validation', 'actuator'];
   
   // Build context
   const context = buildBaseContext(answers);
