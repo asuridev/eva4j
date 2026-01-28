@@ -109,6 +109,16 @@ class BaseGenerator {
       await this.generateFile('resources/parameters/production/db.yaml.ejs', 
         path.join(resourcesPath, 'parameters', 'production', 'db.yaml'));
     }
+
+    // CORS configuration per environment
+    await this.generateFile('resources/parameters/local/cors.yml.ejs', 
+      path.join(resourcesPath, 'parameters', 'local', 'cors.yml'));
+    await this.generateFile('resources/parameters/develop/cors.yml.ejs', 
+      path.join(resourcesPath, 'parameters', 'develop', 'cors.yml'));
+    await this.generateFile('resources/parameters/test/cors.yml.ejs', 
+      path.join(resourcesPath, 'parameters', 'test', 'cors.yml'));
+    await this.generateFile('resources/parameters/production/cors.yml.ejs', 
+      path.join(resourcesPath, 'parameters', 'production', 'cors.yml'));
   }
 
   async generateRootFiles() {
