@@ -5,6 +5,7 @@ const chalk = require('chalk');
 const packageJson = require('../package.json');
 const createCommand = require('../src/commands/create');
 const addModuleCommand = require('../src/commands/add-module');
+const addKafkaClientCommand = require('../src/commands/add-kafka-client');
 const infoCommand = require('../src/commands/info');
 
 const program = new Command();
@@ -29,13 +30,31 @@ program
 
 // Add module command
 program
-  .command('add <type> <name>')
-  .description('Add components to the project (module)')
+  .command('add <type> [name]')
+  .description('Add components to the project (module, kafka-client)')
   .action(async (type, name, options) => {
+    if (type === 'kafka-client') {
+      try {
+        await addKafkaClientCommand(options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+    
     if (type !== 'module') {
       console.error(chalk.red(`❌ Unknown type: ${type}`));
-      console.log(chalk.yellow('\nUsage: eva4j add module <module-name>'));
-      console.log(chalk.gray('Example: eva4j add module user\n'));
+      console.log(chalk.yellow('\nUsage:'));
+      console.log(chalk.gray('  eva4j add module <module-name>'));
+      console.log(chalk.gray('  eva4j add kafka-client'));
+      console.log(chalk.gray('\nExample: eva4j add module user\n'));
+      process.exit(1);
+    }
+    
+    if (!name) {
+      console.error(chalk.red('❌ Module name is required'));
+      console.log(chalk.gray('Usage: eva4j add module <module-name>\n'));
       process.exit(1);
     }
     
@@ -67,6 +86,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j create my-project'));
   console.log(chalk.gray('  $ eva4j add module user'));
   console.log(chalk.gray('  $ eva4j add module product'));
+  console.log(chalk.gray('  $ eva4j add kafka-client'));
   console.log(chalk.gray('  $ eva4j info'));
   console.log('');
   console.log(chalk.blue('For more information, visit:'));

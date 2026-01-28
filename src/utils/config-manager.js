@@ -115,6 +115,41 @@ class ConfigManager {
   getConfigPath() {
     return this.configFile;
   }
+
+  /**
+   * Check if a feature exists in the project
+   * @param {string} featureName - Name of the feature to check
+   * @returns {boolean} True if feature exists
+   */
+  async featureExists(featureName) {
+    const config = await this.loadProjectConfig();
+    if (!config || !config.features) return false;
+    
+    return config.features.includes(featureName);
+  }
+
+  /**
+   * Add a feature to the project configuration
+   * @param {string} featureName - Name of the feature to add
+   */
+  async addFeature(featureName) {
+    const config = await this.loadProjectConfig();
+    if (!config) {
+      throw new Error('Project configuration not found. Are you in an eva4j project?');
+    }
+
+    if (!config.features) {
+      config.features = [];
+    }
+
+    if (!config.features.includes(featureName)) {
+      config.features.push(featureName);
+      config.updatedAt = new Date().toISOString();
+      await fs.writeJson(this.configFile, config, { spaces: 2 });
+    }
+
+    return config;
+  }
 }
 
 module.exports = ConfigManager;
