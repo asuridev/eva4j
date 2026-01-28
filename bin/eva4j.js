@@ -70,6 +70,7 @@ program
 // Generate command
 program
   .command('generate <type> <name> <module>')
+  .alias('g')
   .description('Generate components (usecase)')
   .action(async (type, name, module, options) => {
     if (type !== 'usecase') {
@@ -115,6 +116,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j add module product'));
   console.log(chalk.gray('  $ eva4j add kafka-client'));
   console.log(chalk.gray('  $ eva4j generate usecase create-provider provider'));
+  console.log(chalk.gray('  $ eva4j g usecase get-all-products product'));
   console.log(chalk.gray('  $ eva4j info'));
   console.log('');
   console.log(chalk.blue('For more information, visit:'));
