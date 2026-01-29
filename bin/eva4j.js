@@ -7,6 +7,7 @@ const createCommand = require('../src/commands/create');
 const addModuleCommand = require('../src/commands/add-module');
 const addKafkaClientCommand = require('../src/commands/add-kafka-client');
 const generateUsecaseCommand = require('../src/commands/generate-usecase');
+const generateHttpExchangeCommand = require('../src/commands/generate-http-exchange');
 const infoCommand = require('../src/commands/info');
 
 const program = new Command();
@@ -71,27 +72,46 @@ program
 program
   .command('generate <type> <name> <module>')
   .alias('g')
-  .description('Generate components (usecase)')
+  .description('Generate components (usecase, http-exchange)')
   .action(async (type, name, module, options) => {
-    if (type !== 'usecase') {
-      console.error(chalk.red(`❌ Unknown type: ${type}`));
-      console.log(chalk.yellow('\nUsage: eva4j generate usecase <name> <module>'));
-      console.log(chalk.gray('Example: eva4j generate usecase create-provider provider\n'));
-      process.exit(1);
+    if (type === 'usecase') {
+      if (!name || !module) {
+        console.error(chalk.red('❌ Both use case name and module name are required'));
+        console.log(chalk.gray('Usage: eva4j generate usecase <name> <module>\n'));
+        process.exit(1);
+      }
+      try {
+        await generateUsecaseCommand(name, module, options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
     }
 
-    if (!name || !module) {
-      console.error(chalk.red('❌ Both use case name and module name are required'));
-      console.log(chalk.gray('Usage: eva4j generate usecase <name> <module>\n'));
-      process.exit(1);
+    if (type === 'http-exchange') {
+      if (!name || !module) {
+        console.error(chalk.red('❌ Both port name and module name are required'));
+        console.log(chalk.gray('Usage: eva4j generate http-exchange <port-name> <module>\n'));
+        process.exit(1);
+      }
+      try {
+        await generateHttpExchangeCommand(name, module, options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
     }
-    
-    try {
-      await generateUsecaseCommand(name, module, options);
-    } catch (error) {
-      console.error(chalk.red('Error:'), error.message);
-      process.exit(1);
-    }
+
+    console.error(chalk.red(`❌ Unknown type: ${type}`));
+    console.log(chalk.yellow('\nUsage:'));
+    console.log(chalk.gray('  eva4j generate usecase <name> <module>'));
+    console.log(chalk.gray('  eva4j generate http-exchange <port-name> <module>'));
+    console.log(chalk.gray('\nExamples:'));
+    console.log(chalk.gray('  eva4j generate usecase create-provider provider'));
+    console.log(chalk.gray('  eva4j g http-exchange user-service-port user\n'));
+    process.exit(1);
   });
 
 // Info command
@@ -117,6 +137,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j add kafka-client'));
   console.log(chalk.gray('  $ eva4j generate usecase create-provider provider'));
   console.log(chalk.gray('  $ eva4j g usecase get-all-products product'));
+  console.log(chalk.gray('  $ eva4j g http-exchange user-service-port user'));
   console.log(chalk.gray('  $ eva4j info'));
   console.log('');
   console.log(chalk.blue('For more information, visit:'));

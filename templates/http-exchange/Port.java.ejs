@@ -1,0 +1,14 @@
+package <%= packageName %>.<%= moduleName %>.application.ports;
+
+public interface <%= portName %> {
+  
+  Object findAll();
+  
+  Object findById(Long id);
+  
+  Object create(Object request);
+  
+  Object update(Long id, Object request);
+  
+  void delete(Long id);
+}

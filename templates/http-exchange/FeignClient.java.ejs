@@ -1,0 +1,23 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= portNameCamelCase %>;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.*;
+
+@FeignClient(name = "<%= feignClientName %>", url = "${<%= baseUrlProperty %>}", configuration = <%= portName %>Config.class)
+public interface <%= portName %>FeignClient {
+  
+  @GetMapping("/api/resources")
+  Object findAll();
+  
+  @GetMapping("/api/resources/{id}")
+  Object findById(@PathVariable("id") Long id);
+  
+  @PostMapping("/api/resources")
+  Object create(@RequestBody Object request);
+  
+  @PutMapping("/api/resources/{id}")
+  Object update(@PathVariable("id") Long id, @RequestBody Object request);
+  
+  @DeleteMapping("/api/resources/{id}")
+  void delete(@PathVariable("id") Long id);
+}

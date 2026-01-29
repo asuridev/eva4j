@@ -1,0 +1,39 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= portNameCamelCase %>;
+
+import <%= packageName %>.<%= moduleName %>.application.ports.<%= portName %>;
+import org.springframework.stereotype.Component;
+
+@Component
+public class <%= portName %>Adapter implements <%= portName %> {
+
+  private final <%= portName %>FeignClient feignClient;
+
+  public <%= portName %>Adapter(<%= portName %>FeignClient feignClient) {
+    this.feignClient = feignClient;
+  }
+
+  @Override
+  public Object findAll() {
+    return feignClient.findAll();
+  }
+
+  @Override
+  public Object findById(Long id) {
+    return feignClient.findById(id);
+  }
+
+  @Override
+  public Object create(Object request) {
+    return feignClient.create(request);
+  }
+
+  @Override
+  public Object update(Long id, Object request) {
+    return feignClient.update(id, request);
+  }
+
+  @Override
+  public void delete(Long id) {
+    feignClient.delete(id);
+  }
+}
