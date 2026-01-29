@@ -86,9 +86,9 @@ async function generateHttpExchangeCommand(portName, moduleName) {
   const spinner = ora('Generating HTTP exchange adapter...').start();
 
   try {
-    // Generate property name for base URL configuration
-    const baseUrlProperty = `${toKebabCase(portName)}.base-url`;
-    const feignClientName = toKebabCase(portName);
+    // Generate property name for base URL configuration with module prefix
+    const baseUrlProperty = `${toKebabCase(moduleName)}.${toKebabCase(portName)}.base-url`;
+    const feignClientName = `${toKebabCase(moduleName)}-${toKebabCase(portName)}`;
 
     const context = {
       packageName,
@@ -201,10 +201,20 @@ async function createOrUpdateUrlsConfig(projectDir, propertyName, propertyValue)
       urlsContent = yaml.load(existingContent) || {};
     }
 
-    // Check if property already exists
-    if (!urlsContent[propertyName]) {
-      // Add new property
-      urlsContent[propertyName] = propertyValue;
+    // Parse property name to extract module and port (format: module.port.base-url)
+    const propertyParts = propertyName.split('.');
+    const moduleKey = propertyParts[0];
+    const portProperty = propertyParts.slice(1).join('.');
+
+    // Initialize module object if it doesn't exist
+    if (!urlsContent[moduleKey]) {
+      urlsContent[moduleKey] = {};
+    }
+
+    // Check if property already exists within the module
+    if (!urlsContent[moduleKey][portProperty]) {
+      // Add new property under module
+      urlsContent[moduleKey][portProperty] = propertyValue;
 
       // Write back to file
       const yamlContent = yaml.dump(urlsContent, {
