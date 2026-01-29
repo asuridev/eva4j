@@ -63,7 +63,7 @@ async function generateUsecaseCommand(usecaseName, moduleName) {
 
   // Check if files already exist
   if (usecaseType === 'command') {
-    const commandPath = path.join(moduleBasePath, 'application', 'command', `${normalizedUsecaseName}Command.java`);
+    const commandPath = path.join(moduleBasePath, 'application', 'commands', `${normalizedUsecaseName}Command.java`);
     const handlerPath = path.join(moduleBasePath, 'application', 'usecases', `${normalizedUsecaseName}CommandHandler.java`);
     
     if (await fs.pathExists(commandPath)) {
@@ -108,7 +108,7 @@ async function generateUsecaseCommand(usecaseName, moduleName) {
       spinner.succeed(chalk.green('Command use case generated successfully! ✨'));
       
       console.log(chalk.blue('\n📦 Generated files:'));
-      console.log(chalk.gray(`  ├── application/command/${normalizedUsecaseName}Command.java`));
+      console.log(chalk.gray(`  ├── application/commands/${normalizedUsecaseName}Command.java`));
       console.log(chalk.gray(`  └── application/usecases/${normalizedUsecaseName}CommandHandler.java`));
     } else {
       await generateQuery(projectDir, moduleBasePath, context);
@@ -145,7 +145,7 @@ async function generateCommand(projectDir, moduleBasePath, context) {
   
   // Generate Command record
   const commandTemplate = path.join(templatesDir, 'Command.java.ejs');
-  const commandOutput = path.join(moduleBasePath, 'application', 'command', `${context.usecaseName}Command.java`);
+  const commandOutput = path.join(moduleBasePath, 'application', 'commands', `${context.usecaseName}Command.java`);
   await renderAndWrite(commandTemplate, commandOutput, context);
 
   // Generate CommandHandler class
