@@ -44,6 +44,9 @@ class SharedGenerator {
     
     // Generate configurations
     await this.generateConfigurations(sharedBasePath);
+    
+    // Generate filters
+    await this.generateFilters(sharedBasePath);
   }
 
   async generatePackageInfo(basePath) {
@@ -132,6 +135,13 @@ class SharedGenerator {
       path.join(configurationsPath, 'useCaseConfig', 'UseCaseContainer.java'));
     await this.generateFile('configurations/useCaseConfig/UseCaseMediator.java.ejs', 
       path.join(configurationsPath, 'useCaseConfig', 'UseCaseMediator.java'));
+  }
+
+  async generateFilters(basePath) {
+    const filtersPath = path.join(basePath, 'filters');
+    
+    await this.generateFile('filters/CorrelationIdFilter.java.ejs', 
+      path.join(filtersPath, 'CorrelationIdFilter.java'));
   }
 
   async generateFile(templateRelPath, destPath) {

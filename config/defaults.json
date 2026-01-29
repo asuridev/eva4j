@@ -2,12 +2,13 @@
   "version": "1.0.0",
   "javaVersion": 21,
   "springBootVersion": "3.5.5",
+  "dependencyManagementVersion": "1.1.7",
   "springModulithVersion": "1.4.6",
-  "springCloudVersion": "2024.0.0",
+  "springCloudVersion": "2025.0.0",
   "gradleVersion": "8.7",
   "encoding": "UTF-8",
   "server": {
-    "port": 8080,
+    "port": 8040,
     "contextPath": "/"
   },
   "database": {

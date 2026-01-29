@@ -1,7 +1,7 @@
 plugins {
     id 'java'
     id 'org.springframework.boot' version '<%= springBootVersion %>'
-    id 'io.spring.dependency-management' version '1.1.4'
+    id 'io.spring.dependency-management' version '<%= dependencyManagementVersion %>'
 }
 
 group = '<%= groupId %>'
@@ -43,7 +43,7 @@ dependencies {
 <% } %><% if (dependencies.includes('data-jpa')) { %>    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 <% } %><% if (dependencies.includes('security')) { %>    implementation 'org.springframework.boot:spring-boot-starter-security'
 <% } %><% if (dependencies.includes('validation')) { %>    implementation 'org.springframework.boot:spring-boot-starter-validation'
-<% } %><% if (dependencies.includes('actuator')) { %>    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+<% } %><% if (dependencies.includes('actuator')) { %>    implementation 'org.springframework.boot:spring-boot-starter-aop'
 <% } %><% if (features.includeDevtools) { %>    developmentOnly 'org.springframework.boot:spring-boot-devtools'
 <% } %><% if (features.includeLombok) { %>    
     compileOnly 'org.projectlombok:lombok'

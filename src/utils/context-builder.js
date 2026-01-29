@@ -27,6 +27,7 @@ function buildBaseContext(answers) {
     applicationClassName,
     javaVersion: answers.javaVersion || defaults.javaVersion,
     springBootVersion: answers.springBootVersion || defaults.springBootVersion,
+    dependencyManagementVersion: defaults.dependencyManagementVersion,
     springModulithVersion: defaults.springModulithVersion,
     springCloudVersion: defaults.springCloudVersion,
     gradleVersion: defaults.gradleVersion,
