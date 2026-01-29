@@ -1,0 +1,7 @@
+  @Value("<%= topicSpringProperty %>")
+  private String <%= valueFieldName %>;
+
+  @Bean
+  public NewTopic <%= beanMethodName %>() {
+    return new NewTopic(<%= valueFieldName %>, <%= partitions %>, (short) <%= replicas %>);
+  }

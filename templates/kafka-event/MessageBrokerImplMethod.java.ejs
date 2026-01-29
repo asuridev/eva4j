@@ -1,0 +1,9 @@
+  @Override
+  public void publish<%= eventClassName %>(<%= eventClassName %> event) {
+    EventEnvelope<<%= eventClassName %>> envelope = EventEnvelope.of(
+      <%= valueFieldName %>,
+      event,
+      "" // TODO: Add correlation ID if needed
+    );
+    kafkaTemplate.send(<%= valueFieldName %>, envelope);
+  }

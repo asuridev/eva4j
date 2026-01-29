@@ -1,0 +1,8 @@
+package <%= packageName %>.<%= moduleName %>.application.ports;
+
+import <%= packageName %>.<%= moduleName %>.application.events.<%= eventClassName %>;
+
+public interface MessageBroker {
+
+  void publish<%= eventClassName %>(<%= eventClassName %> event);
+}
