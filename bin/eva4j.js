@@ -34,7 +34,7 @@ program
 // Add module command
 program
   .command('add <type> [name]')
-  .description('Add components to the project (module, kafka-client)')
+  .description('Add components to the project. Use: module [name], kafka-client')
   .action(async (type, name, options) => {
     if (type === 'kafka-client') {
       try {
@@ -49,15 +49,11 @@ program
     if (type !== 'module') {
       console.error(chalk.red(`❌ Unknown type: ${type}`));
       console.log(chalk.yellow('\nUsage:'));
-      console.log(chalk.gray('  eva4j add module <module-name>'));
+      console.log(chalk.gray('  eva4j add module [module-name]  # Interactive or with name'));
       console.log(chalk.gray('  eva4j add kafka-client'));
-      console.log(chalk.gray('\nExample: eva4j add module user\n'));
-      process.exit(1);
-    }
-    
-    if (!name) {
-      console.error(chalk.red('❌ Module name is required'));
-      console.log(chalk.gray('Usage: eva4j add module <module-name>\n'));
+      console.log(chalk.gray('\nExamples:'));
+      console.log(chalk.gray('  eva4j add module user'));
+      console.log(chalk.gray('  eva4j add module  # Will prompt for name\n'));
       process.exit(1);
     }
     

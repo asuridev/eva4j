@@ -20,6 +20,25 @@ async function addModuleCommand(moduleName, options) {
     process.exit(1);
   }
   
+  // Prompt for module name if not provided
+  if (!moduleName) {
+    const nameAnswer = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'moduleName',
+        message: 'Enter module name (camelCase):',
+        validate: (input) => {
+          const validation = validateModuleName(input);
+          if (validation !== true) {
+            return `${validation}. Examples: user, product, orderItem`;
+          }
+          return true;
+        }
+      }
+    ]);
+    moduleName = nameAnswer.moduleName;
+  }
+  
   // Read build.gradle to get project info
   const buildGradle = await fs.readFile(path.join(projectDir, 'build.gradle'), 'utf-8');
   const groupMatch = buildGradle.match(/group\s*=\s*['"](.+)['"]/);
