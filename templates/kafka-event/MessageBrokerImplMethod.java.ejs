@@ -3,7 +3,7 @@
     EventEnvelope<<%= eventClassName %>> envelope = EventEnvelope.of(
       <%= valueFieldName %>,
       event,
-      "" // TODO: Add correlation ID if needed
+      MDC.get("correlationId")
     );
     kafkaTemplate.send(<%= valueFieldName %>, envelope);
   }

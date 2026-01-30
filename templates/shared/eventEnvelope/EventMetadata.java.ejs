@@ -1,12 +1,13 @@
 package <%= packageName %>.shared.eventEnvelope;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 public record EventMetadata(
     String eventId,
     String eventType,
-    LocalDateTime timestamp,
+    String timestamp,
     String correlationId,
     String source
 ) {
@@ -15,7 +16,7 @@ public record EventMetadata(
         return new EventMetadata(
             UUID.randomUUID().toString(),
             eventType,
-            LocalDateTime.now(),
+            LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
             correlationId,
             "<%= projectName %>-api"
         );

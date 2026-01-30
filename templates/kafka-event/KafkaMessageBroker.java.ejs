@@ -6,6 +6,7 @@ import <%= packageName %>.shared.eventEnvelope.EventEnvelope;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
+import org.slf4j.MDC;
 
 @Component
 public class KafkaMessageBroker implements MessageBroker {
@@ -24,7 +25,7 @@ public class KafkaMessageBroker implements MessageBroker {
     EventEnvelope<<%= eventClassName %>> envelope = EventEnvelope.of(
       <%= topicNameKebab.replace(/-/g, '') %>Topic,
       event,
-      "" // TODO: Add correlation ID if needed
+      MDC.get("correlationId")
     );
     kafkaTemplate.send(<%= topicNameKebab.replace(/-/g, '') %>Topic, envelope);
   }

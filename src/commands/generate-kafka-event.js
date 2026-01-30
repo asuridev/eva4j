@@ -361,7 +361,7 @@ async function createOrUpdateKafkaMessageBroker(projectDir, packagePath, context
         const lastField = valueFields[valueFields.length - 1];
         const insertPos = lastField.index + lastField[0].length;
         content = content.slice(0, insertPos) + 
-                  `\n  @Value("${context.topicSpringProperty}")\n  private String ${valueFieldName};\n` + 
+                  `\n  @Value("${context.topicSpringProperty}")\n  private String ${valueFieldName};\n\n` + 
                   content.slice(insertPos);
       } else {
         // Add after class declaration
