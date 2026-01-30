@@ -90,13 +90,16 @@ program
     }
 
     if (type === 'http-exchange') {
-      if (!name || !module) {
-        console.error(chalk.red('❌ Both port name and module name are required'));
-        console.log(chalk.gray('Usage: eva4j generate http-exchange <port-name> <module>\n'));
+      if (!module) {
+        console.error(chalk.red('❌ Module name is required'));
+        console.log(chalk.gray('Usage: eva4j generate http-exchange <module> [port-name]'));
+        console.log(chalk.gray('Examples:'));
+        console.log(chalk.gray('  eva4j generate http-exchange user product-service'));
+        console.log(chalk.gray('  eva4j generate http-exchange user  # Will prompt for port name\n'));
         process.exit(1);
       }
       try {
-        await generateHttpExchangeCommand(name, module, options);
+        await generateHttpExchangeCommand(module, name, options);
       } catch (error) {
         console.error(chalk.red('Error:'), error.message);
         process.exit(1);

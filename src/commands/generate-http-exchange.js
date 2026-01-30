@@ -9,7 +9,7 @@ const { isEva4jProject, moduleExists } = require('../utils/validator');
 const { toPackagePath, toPascalCase, toKebabCase, toCamelCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 
-async function generateHttpExchangeCommand(portName, moduleName) {
+async function generateHttpExchangeCommand(moduleName, portName) {
   const projectDir = process.cwd();
   
   // Validate we're in an eva4j project
@@ -42,6 +42,24 @@ async function generateHttpExchangeCommand(portName, moduleName) {
   if (!(await moduleExists(projectDir, packagePath, moduleName))) {
     console.error(chalk.red(`❌ Module '${moduleName}' does not exist in filesystem`));
     process.exit(1);
+  }
+
+  // Prompt for port name if not provided
+  if (!portName) {
+    const nameAnswer = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'portName',
+        message: 'Enter port name:',
+        validate: (input) => {
+          if (!input || input.trim() === '') {
+            return 'Port name cannot be empty';
+          }
+          return true;
+        }
+      }
+    ]);
+    portName = nameAnswer.portName;
   }
 
   // Normalize port name to PascalCase
