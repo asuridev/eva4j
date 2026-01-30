@@ -8,7 +8,7 @@ const { isEva4jProject, moduleExists } = require('../utils/validator');
 const { toPackagePath, toPascalCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 
-async function generateUsecaseCommand(usecaseName, moduleName) {
+async function generateUsecaseCommand(moduleName, usecaseName) {
   const projectDir = process.cwd();
   
   // Validate we're in an eva4j project
@@ -41,6 +41,24 @@ async function generateUsecaseCommand(usecaseName, moduleName) {
   if (!(await moduleExists(projectDir, packagePath, moduleName))) {
     console.error(chalk.red(`❌ Module '${moduleName}' does not exist in filesystem`));
     process.exit(1);
+  }
+
+  // Prompt for use case name if not provided
+  if (!usecaseName) {
+    const nameAnswer = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'usecaseName',
+        message: 'Enter use case name:',
+        validate: (input) => {
+          if (!input || input.trim() === '') {
+            return 'Use case name cannot be empty';
+          }
+          return true;
+        }
+      }
+    ]);
+    usecaseName = nameAnswer.usecaseName;
   }
 
   // Normalize usecase name to PascalCase

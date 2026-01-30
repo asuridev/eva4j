@@ -67,18 +67,21 @@ program
 
 // Generate command
 program
-  .command('generate <type> <name> <module>')
+  .command('generate <type> <module> [name]')
   .alias('g')
   .description('Generate components (usecase, http-exchange, kafka-event)')
-  .action(async (type, name, module, options) => {
+  .action(async (type, module, name, options) => {
     if (type === 'usecase') {
-      if (!name || !module) {
-        console.error(chalk.red('❌ Both use case name and module name are required'));
-        console.log(chalk.gray('Usage: eva4j generate usecase <name> <module>\n'));
+      if (!module) {
+        console.error(chalk.red('❌ Module name is required'));
+        console.log(chalk.gray('Usage: eva4j generate usecase <module> [name]'));
+        console.log(chalk.gray('Examples:'));
+        console.log(chalk.gray('  eva4j generate usecase user create-user'));
+        console.log(chalk.gray('  eva4j generate usecase user  # Will prompt for name\n'));
         process.exit(1);
       }
       try {
-        await generateUsecaseCommand(name, module, options);
+        await generateUsecaseCommand(module, name, options);
       } catch (error) {
         console.error(chalk.red('Error:'), error.message);
         process.exit(1);
