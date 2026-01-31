@@ -42,17 +42,18 @@ async function generateResourceCommand(moduleName) {
     {
       type: 'input',
       name: 'resourceName',
-      message: 'Enter the resource name (PascalCase, e.g., User, Product):',
+      message: 'Enter the resource name (e.g., user, product, order-item):',
+      default: moduleName,
       validate: (input) => {
         if (!input || input.trim().length === 0) {
           return 'Resource name is required';
         }
-        if (!/^[A-Z][a-zA-Z0-9]*$/.test(input.trim())) {
-          return 'Resource name must be in PascalCase (e.g., User, Product, OrderItem)';
+        if (!/^[a-zA-Z][a-zA-Z0-9-_]*$/.test(input.trim())) {
+          return 'Resource name must contain only letters, numbers, hyphens, and underscores';
         }
         return true;
       },
-      filter: (input) => input.trim()
+      filter: (input) => toPascalCase(input.trim())
     }
   ]);
 
@@ -80,6 +81,7 @@ async function generateResourceCommand(moduleName) {
 
   try {
     const resourceNameKebab = toKebabCase(resourceName);
+    const resourceNameCamel = resourceName.charAt(0).toLowerCase() + resourceName.slice(1);
     const resourceNamePlural = pluralizeWord(resourceName);
 
     // Check if controller already exists
@@ -93,7 +95,7 @@ async function generateResourceCommand(moduleName) {
       'infrastructure',
       'rest',
       'controllers',
-      resourceNameKebab,
+      resourceNameCamel,
       apiVersion,
       `${resourceName}Controller.java`
     );
@@ -101,7 +103,7 @@ async function generateResourceCommand(moduleName) {
     if (await fs.pathExists(controllerPath)) {
       spinner.fail(chalk.red('Resource already exists'));
       console.error(chalk.red(`\n❌ Resource already exists at:`));
-      console.error(chalk.gray(`   ${moduleName}/infrastructure/rest/controllers/${resourceNameKebab}/${apiVersion}/${resourceName}Controller.java`));
+      console.error(chalk.gray(`   ${moduleName}/infrastructure/rest/controllers/${resourceNameCamel}/${apiVersion}/${resourceName}Controller.java`));
       process.exit(1);
     }
 
@@ -199,7 +201,8 @@ async function generateResourceCommand(moduleName) {
       resourceName,
       resourceNamePlural,
       resourceNameKebab,
-      apiVersion
+      apiVersion,
+      resourceNameCamel
     };
 
     const controllerTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'Controller.java.ejs');
@@ -231,7 +234,7 @@ async function generateResourceCommand(moduleName) {
     console.log(chalk.gray('      └── infrastructure/'));
     console.log(chalk.gray('          └── rest/'));
     console.log(chalk.gray('              └── controllers/'));
-    console.log(chalk.gray(`                  └── ${resourceNameKebab}/`));
+    console.log(chalk.gray(`                  └── ${resourceName}/`));
     console.log(chalk.gray(`                      └── ${apiVersion}/`));
     console.log(chalk.gray(`                          └── ${resourceName}Controller.java`));
 
