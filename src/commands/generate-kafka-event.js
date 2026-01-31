@@ -9,7 +9,7 @@ const { isEva4jProject, moduleExists } = require('../utils/validator');
 const { toPackagePath, toPascalCase, toSnakeCase, toKebabCase } = require('../utils/naming');
 const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
 
-async function generateKafkaEventCommand(eventName, moduleName) {
+async function generateKafkaEventCommand(moduleName, eventName) {
   const projectDir = process.cwd();
   
   // Validate we're in an eva4j project
@@ -49,6 +49,24 @@ async function generateKafkaEventCommand(eventName, moduleName) {
   if (!(await moduleExists(projectDir, packagePath, moduleName))) {
     console.error(chalk.red(`❌ Module '${moduleName}' does not exist in filesystem`));
     process.exit(1);
+  }
+
+  // Prompt for event name if not provided
+  if (!eventName) {
+    const nameAnswer = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'eventName',
+        message: 'Enter event name:',
+        validate: (input) => {
+          if (!input || input.trim() === '') {
+            return 'Event name cannot be empty';
+          }
+          return true;
+        }
+      }
+    ]);
+    eventName = nameAnswer.eventName;
   }
 
   // Normalize event name to PascalCase

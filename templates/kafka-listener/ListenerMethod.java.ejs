@@ -1,0 +1,9 @@
+
+   
+    @KafkaListener(topics = "<%= topicSpringProperty %>")
+    void <%= methodName %>(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+        // TODO: Implement event processing logic
+        // Example: useCaseMediator.dispatch(new YourCommand(event.data()));
+        
+        ack.acknowledge(); // Confirmar procesamiento exitoso
+    }
