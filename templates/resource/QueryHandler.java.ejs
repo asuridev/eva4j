@@ -1,6 +1,6 @@
 package <%= packageName %>.<%= moduleName %>.application.usecases;
 
-import <%= packageName %>.<%= moduleName %>.application.dtos.<%= usecaseName %>ResponseDto;
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= resourceName %>ResponseDto;
 import <%= packageName %>.<%= moduleName %>.application.queries.<%= usecaseName %>Query;
 import <%= packageName %>.shared.annotations.ApplicationComponent;
 import <%= packageName %>.shared.interfaces.QueryHandler;
@@ -11,7 +11,7 @@ import java.util.List;
 
 @ApplicationComponent
 @Slf4j
-public class <%= usecaseName %>QueryHandler implements QueryHandler<<%= usecaseName %>Query, <% if (isFindAll) { %>List<<%= usecaseName %>ResponseDto><% } else { %><%= usecaseName %>ResponseDto<% } %>> {
+public class <%= usecaseName %>QueryHandler implements QueryHandler<<%= usecaseName %>Query, <% if (isFindAll) { %>List<<%= resourceName %>ResponseDto><% } else { %><%= resourceName %>ResponseDto<% } %>> {
 
     // TODO: Inject dependencies (repositories, services, etc.)
 
@@ -19,7 +19,7 @@ public class <%= usecaseName %>QueryHandler implements QueryHandler<<%= usecaseN
     }
 
     @Override
-    public <% if (isFindAll) { %>List<<%= usecaseName %>ResponseDto><% } else { %><%= usecaseName %>ResponseDto<% } %> handle(<%= usecaseName %>Query query) {
+    public <% if (isFindAll) { %>List<<%= resourceName %>ResponseDto><% } else { %><%= resourceName %>ResponseDto<% } %> handle(<%= usecaseName %>Query query) {
         log.info("Handling <%= usecaseName %>Query: {}", query);
         // TODO: Implement query logic
         return null;

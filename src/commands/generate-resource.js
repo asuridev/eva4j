@@ -141,6 +141,19 @@ async function generateResourceCommand(moduleName) {
 
     const moduleBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName);
 
+    // Generate single ResponseDto for the resource
+    spinner.text = 'Generating Response DTO...';
+    const dtoPath = path.join(moduleBasePath, 'application', 'dtos', `${resourceName}ResponseDto.java`);
+    if (!fs.existsSync(dtoPath)) {
+      const dtoContext = {
+        packageName,
+        moduleName,
+        resourceName
+      };
+      const dtoTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'ResponseDto.java.ejs');
+      await renderAndWrite(dtoTemplatePath, dtoPath, dtoContext);
+    }
+
     // Generate use cases
     for (const useCase of useCases) {
       spinner.text = `Generating ${useCase.name}...`;
@@ -148,6 +161,7 @@ async function generateResourceCommand(moduleName) {
       const context = {
         packageName,
         moduleName,
+        resourceName,
         usecaseName: useCase.name,
         hasId: useCase.hasId || false,
         isFindAll: require('../utils/naming').isAllTypeQuery(useCase.name)
@@ -174,11 +188,6 @@ async function generateResourceCommand(moduleName) {
         const handlerPath = path.join(moduleBasePath, 'application', 'usecases', `${useCase.name}QueryHandler.java`);
         const handlerTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'QueryHandler.java.ejs');
         await renderAndWrite(handlerTemplatePath, handlerPath, context);
-
-        // Generate ResponseDto
-        const dtoPath = path.join(moduleBasePath, 'application', 'dtos', `${useCase.name}ResponseDto.java`);
-        const dtoTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'ResponseDto.java.ejs');
-        await renderAndWrite(dtoTemplatePath, dtoPath, context);
       }
     }
 

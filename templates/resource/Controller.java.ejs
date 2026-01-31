@@ -5,8 +5,7 @@ import <%= packageName %>.<%= moduleName %>.application.commands.Update<%= resou
 import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= resourceName %>Command;
 import <%= packageName %>.<%= moduleName %>.application.queries.Find<%= resourceName %>ByIdQuery;
 import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= resourceNamePlural %>Query;
-import <%= packageName %>.<%= moduleName %>.application.dtos.Find<%= resourceName %>ByIdResponseDto;
-import <%= packageName %>.<%= moduleName %>.application.dtos.FindAll<%= resourceNamePlural %>ResponseDto;
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= resourceName %>ResponseDto;
 import <%= packageName %>.shared.configurations.useCaseConfig.UseCaseMediator;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -41,7 +40,7 @@ public class <%= resourceName %>Controller {
     @GetMapping("/{id}")
     @ResponseStatus(HttpStatus.OK)
     @Operation(summary = "Get <%= resourceName %> by ID")
-    public Find<%= resourceName %>ByIdResponseDto findById(@PathVariable String id) {
+    public <%= resourceName %>ResponseDto findById(@PathVariable String id) {
         log.info("Finding <%= resourceName %>: {}", id);
         return useCaseMediator.dispatch(new Find<%= resourceName %>ByIdQuery(id));
     }
@@ -49,7 +48,7 @@ public class <%= resourceName %>Controller {
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
     @Operation(summary = "Get all <%= resourceNamePlural %>")
-    public List<FindAll<%= resourceNamePlural %>ResponseDto> findAll() {
+    public List<<%= resourceName %>ResponseDto> findAll() {
         log.info("Finding all <%= resourceNamePlural %>");
         return useCaseMediator.dispatch(new FindAll<%= resourceNamePlural %>Query());
     }
