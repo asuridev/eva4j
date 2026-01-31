@@ -22,6 +22,10 @@ public class <%= usecaseName %>QueryHandler implements QueryHandler<<%= usecaseN
     public <% if (isFindAll) { %>List<<%= resourceName %>ResponseDto><% } else { %><%= resourceName %>ResponseDto<% } %> handle(<%= usecaseName %>Query query) {
         log.info("Handling <%= usecaseName %>Query: {}", query);
         // TODO: Implement query logic
-        return null;
+        <% if (isFindAll) { %> 
+         return List.of(new <%= resourceName %>ResponseDto()); // Placeholder return
+        <% } else { %>
+         return new <%= resourceName %>ResponseDto(); // Placeholder return
+        <% } %>
     }
 }
