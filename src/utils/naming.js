@@ -112,6 +112,16 @@ function getFullPackageName(groupId, artifactId) {
   return `${groupId}.${packagePart}`;
 }
 
+/**
+ * Check if a use case name represents an "all" type query that returns a list
+ * @param {string} usecaseName - Use case name (e.g., FindAllUsers, GetAllProducts)
+ * @returns {boolean} True if the use case returns a list
+ */
+function isAllTypeQuery(usecaseName) {
+  const allPatterns = ['FindAll', 'GetAll', 'ListAll', 'SearchAll', 'RetrieveAll'];
+  return allPatterns.some(pattern => usecaseName.startsWith(pattern));
+}
+
 module.exports = {
   toPascalCase,
   toCamelCase,
@@ -122,5 +132,6 @@ module.exports = {
   getBaseEntity,
   artifactIdToPackageName,
   getApplicationClassName,
-  getFullPackageName
+  getFullPackageName,
+  isAllTypeQuery
 };

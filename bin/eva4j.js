@@ -10,6 +10,7 @@ const generateUsecaseCommand = require('../src/commands/generate-usecase');
 const generateHttpExchangeCommand = require('../src/commands/generate-http-exchange');
 const generateKafkaEventCommand = require('../src/commands/generate-kafka-event');
 const generateKafkaListenerCommand = require('../src/commands/generate-kafka-listener');
+const generateResourceCommand = require('../src/commands/generate-resource');
 const infoCommand = require('../src/commands/info');
 
 const program = new Command();
@@ -70,7 +71,7 @@ program
 program
   .command('generate <type> <module> [name]')
   .alias('g')
-  .description('Generate components (usecase, http-exchange, kafka-event, kafka-listener)')
+  .description('Generate components (usecase, http-exchange, kafka-event, kafka-listener, resource)')
   .action(async (type, module, name, options) => {
     if (type === 'usecase') {
       if (!module) {
@@ -144,17 +145,37 @@ program
       return;
     }
 
+    if (type === 'resource') {
+      if (!module) {
+        console.error(chalk.red('❌ Module name is required'));
+        console.log(chalk.gray('Usage: eva4j generate resource <module>'));
+        console.log(chalk.gray('Examples:'));
+        console.log(chalk.gray('  eva4j generate resource user'));
+        console.log(chalk.gray('  eva4j g resource product\n'));
+        process.exit(1);
+      }
+      try {
+        await generateResourceCommand(module, options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
     console.error(chalk.red(`❌ Unknown type: ${type}`));
     console.log(chalk.yellow('\nUsage:'));
     console.log(chalk.gray('  eva4j generate usecase <name> <module>'));
     console.log(chalk.gray('  eva4j generate http-exchange <port-name> <module>'));
     console.log(chalk.gray('  eva4j generate kafka-event <event-name> <module>'));
     console.log(chalk.gray('  eva4j generate kafka-listener <module>'));
+    console.log(chalk.gray('  eva4j generate resource <module>'));
     console.log(chalk.gray('\nExamples:'));
     console.log(chalk.gray('  eva4j generate usecase create-provider provider'));
     console.log(chalk.gray('  eva4j g http-exchange user-service-port user'));
     console.log(chalk.gray('  eva4j g kafka-event user-created user'));
-    console.log(chalk.gray('  eva4j g kafka-listener user\n'));
+    console.log(chalk.gray('  eva4j g kafka-listener user'));
+    console.log(chalk.gray('  eva4j g resource product\n'));
     process.exit(1);
   });
 

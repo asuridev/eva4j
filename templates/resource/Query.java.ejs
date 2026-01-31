@@ -5,6 +5,8 @@ import java.util.List;
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= usecaseName %>ResponseDto;
 import <%= packageName %>.shared.interfaces.Query;
 
-public record <%= usecaseName %>Query(
-
-) implements Query<<% if (isFindAll) { %>List<<%= usecaseName %>ResponseDto><% } else { %><%= usecaseName %>ResponseDto<% } %>> { }
+public record <%= usecaseName %>Query(<% if (hasId) { %>
+    String id<% } %>
+    // TODO: Add additional query parameters here
+) implements Query<<% if (isFindAll) { %>List<<%= usecaseName %>ResponseDto><% } else { %><%= usecaseName %>ResponseDto<% } %>> {
+}

@@ -1,0 +1,27 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= usecaseName %>ResponseDto;
+import <%= packageName %>.<%= moduleName %>.application.queries.<%= usecaseName %>Query;
+import <%= packageName %>.shared.annotations.ApplicationComponent;
+import <%= packageName %>.shared.interfaces.QueryHandler;
+import lombok.extern.slf4j.Slf4j;
+<% if (isFindAll) { %>
+import java.util.List;
+<% } %>
+
+@ApplicationComponent
+@Slf4j
+public class <%= usecaseName %>QueryHandler implements QueryHandler<<%= usecaseName %>Query, <% if (isFindAll) { %>List<<%= usecaseName %>ResponseDto><% } else { %><%= usecaseName %>ResponseDto<% } %>> {
+
+    // TODO: Inject dependencies (repositories, services, etc.)
+
+    public <%= usecaseName %>QueryHandler() {
+    }
+
+    @Override
+    public <% if (isFindAll) { %>List<<%= usecaseName %>ResponseDto><% } else { %><%= usecaseName %>ResponseDto<% } %> handle(<%= usecaseName %>Query query) {
+        log.info("Handling <%= usecaseName %>Query: {}", query);
+        // TODO: Implement query logic
+        return null;
+    }
+}

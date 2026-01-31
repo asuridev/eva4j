@@ -1,0 +1,74 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.rest.controllers.<%= resourceNameKebab %>.<%= apiVersion %>;
+
+import <%= packageName %>.<%= moduleName %>.application.commands.Create<%= resourceName %>Command;
+import <%= packageName %>.<%= moduleName %>.application.commands.Update<%= resourceName %>Command;
+import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= resourceName %>Command;
+import <%= packageName %>.<%= moduleName %>.application.queries.Find<%= resourceName %>ByIdQuery;
+import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= resourceNamePlural %>Query;
+import <%= packageName %>.<%= moduleName %>.application.dtos.Find<%= resourceName %>ByIdResponseDto;
+import <%= packageName %>.<%= moduleName %>.application.dtos.FindAll<%= resourceNamePlural %>ResponseDto;
+import <%= packageName %>.shared.configurations.useCaseConfig.UseCaseMediator;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/<%= apiVersion %>/<%= resourceNameKebab %>")
+@Slf4j
+@Tag(name = "<%= resourceName %>", description = "<%= resourceName %> Management API")
+public class <%= resourceName %>Controller {
+
+    private final UseCaseMediator useCaseMediator;
+
+    public <%= resourceName %>Controller(UseCaseMediator useCaseMediator) {
+        this.useCaseMediator = useCaseMediator;
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Create <%= resourceName %>")
+    public void create(@Valid @RequestBody Create<%= resourceName %>Command command) {
+        log.info("Creating <%= resourceName %>: {}", command);
+        useCaseMediator.dispatch(command);
+    }
+
+    @GetMapping("/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "Get <%= resourceName %> by ID")
+    public Find<%= resourceName %>ByIdResponseDto findById(@PathVariable String id) {
+        log.info("Finding <%= resourceName %>: {}", id);
+        return useCaseMediator.dispatch(new Find<%= resourceName %>ByIdQuery(id));
+    }
+
+    @GetMapping
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "Get all <%= resourceNamePlural %>")
+    public List<FindAll<%= resourceNamePlural %>ResponseDto> findAll() {
+        log.info("Finding all <%= resourceNamePlural %>");
+        return useCaseMediator.dispatch(new FindAll<%= resourceNamePlural %>Query());
+    }
+
+    @PutMapping("/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "Update <%= resourceName %>")
+    public void update(
+            @PathVariable String id,
+            @Valid @RequestBody Update<%= resourceName %>Command command) {
+        log.info("Updating <%= resourceName %> {}: {}", id, command);
+        useCaseMediator.dispatch(command);
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "Delete <%= resourceName %>")
+    public void delete(@PathVariable String id) {
+        log.info("Deleting <%= resourceName %>: {}", id);
+        useCaseMediator.dispatch(new Delete<%= resourceName %>Command(id));
+    }
+}

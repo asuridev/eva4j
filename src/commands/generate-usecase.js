@@ -117,7 +117,8 @@ async function generateUsecaseCommand(moduleName, usecaseName) {
     const context = {
       packageName,
       moduleName,
-      usecaseName: normalizedUsecaseName
+      usecaseName: normalizedUsecaseName,
+      isFindAll: require('../utils/naming').isAllTypeQuery(normalizedUsecaseName)
     };
 
     if (usecaseType === 'command') {
