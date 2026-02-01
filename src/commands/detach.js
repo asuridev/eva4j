@@ -217,7 +217,8 @@ async function detachCommand(moduleName, options) {
         includeLombok: true,
         includeDevtools: true,
         includeActuator: true,
-        includeAudit: projectConfig.dependencies?.includes('data-jpa')
+        includeAudit: projectConfig.dependencies?.includes('data-jpa'),
+        hasKafka: projectConfig.features?.includes('kafka') || false
       },
       testing: defaults.testing
     };
@@ -276,6 +277,11 @@ async function detachCommand(moduleName, options) {
         createdAt: new Date().toISOString()
       }]
     });
+    
+    spinner.text = 'Copying environment configurations...';
+    
+    // Step 10: Copy environment profile files from parent resources
+    await copyEnvironmentProfiles(projectDir, newProjectDir, packageName, moduleName);
     
     spinner.succeed(chalk.green('✅ Module detached successfully! ✨'));
     
@@ -431,6 +437,59 @@ async function findPackageInfoFiles(dir) {
   
   await walk(dir);
   return files;
+}
+
+/**
+ * Copy environment profile files from parent to detached project
+ */
+async function copyEnvironmentProfiles(parentDir, newProjectDir, packageName, moduleName) {
+  const parentResourcesDir = path.join(parentDir, 'src', 'main', 'resources');
+  const newResourcesDir = path.join(newProjectDir, 'src', 'main', 'resources');
+  
+  // Copy environment profile files
+  const profileFiles = [
+    'application-develop.yml',
+    'application-local.yml',
+    'application-production.yml',
+    'application-test.yml'
+  ];
+  
+  for (const file of profileFiles) {
+    const sourcePath = path.join(parentResourcesDir, file);
+    if (await fs.pathExists(sourcePath)) {
+      await fs.copy(sourcePath, path.join(newResourcesDir, file));
+    }
+  }
+  
+  // Copy parameters folder if it exists
+  const parametersDir = path.join(parentResourcesDir, 'parameters');
+  if (await fs.pathExists(parametersDir)) {
+    await fs.copy(parametersDir, path.join(newResourcesDir, 'parameters'));
+    
+    // Update package references in kafka.yml files
+    await updateKafkaConfigReferences(newResourcesDir, packageName, moduleName);
+  }
+}
+
+/**
+ * Update package references in kafka.yml files
+ */
+async function updateKafkaConfigReferences(resourcesDir, packageName, moduleName) {
+  const environments = ['local', 'develop', 'test', 'production'];
+  
+  for (const env of environments) {
+    const kafkaYmlPath = path.join(resourcesDir, 'parameters', env, 'kafka.yml');
+    
+    if (await fs.pathExists(kafkaYmlPath)) {
+      let content = await fs.readFile(kafkaYmlPath, 'utf-8');
+      
+      // Replace .shared.infrastructure. with .{moduleName}.infrastructure.
+      const pattern = new RegExp(`${packageName}\\.shared\\.infrastructure\\.`, 'g');
+      content = content.replace(pattern, `${packageName}.${moduleName}.infrastructure.`);
+      
+      await fs.writeFile(kafkaYmlPath, content, 'utf-8');
+    }
+  }
 }
 
 module.exports = detachCommand;
