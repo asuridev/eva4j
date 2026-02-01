@@ -2,7 +2,7 @@ package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.kafkaMessag
 
 import <%= packageName %>.<%= moduleName %>.application.events.<%= eventClassName %>;
 import <%= packageName %>.<%= moduleName %>.application.ports.MessageBroker;
-import <%= packageName %>.shared.eventEnvelope.EventEnvelope;
+import <%= packageName %>.shared.infrastructure.eventEnvelope.EventEnvelope;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;

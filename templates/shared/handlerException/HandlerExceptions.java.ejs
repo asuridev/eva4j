@@ -1,10 +1,10 @@
-package <%= packageName %>.shared.handlerException;
+package <%= packageName %>.shared.infrastructure.handlerException;
 
 
-import <%= packageName %>.shared.customExceptions.*;
-import <%= packageName %>.shared.errorMessage.ErrorMessage;
-import <%= packageName %>.shared.errorMessage.FullErrorMessage;
-import <%= packageName %>.shared.errorMessage.ShortErrorMessage;
+import <%= packageName %>.shared.domain.customExceptions.*;
+import <%= packageName %>.shared.domain.errorMessage.ErrorMessage;
+import <%= packageName %>.shared.domain.errorMessage.FullErrorMessage;
+import <%= packageName %>.shared.domain.errorMessage.ShortErrorMessage;
 import feign.RetryableException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;

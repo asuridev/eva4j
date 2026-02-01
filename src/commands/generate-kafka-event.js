@@ -338,7 +338,7 @@ async function createOrUpdateKafkaMessageBroker(projectDir, packagePath, context
     }
 
     // Check if EventEnvelope import exists
-    const envelopeImport = `import ${context.packageName}.shared.eventEnvelope.EventEnvelope;`;
+    const envelopeImport = `import ${context.packageName}.shared.infrastructure.eventEnvelope.EventEnvelope;`;
     if (!content.includes(envelopeImport)) {
       const packageMatch = content.match(/(package\s+[\w.]+;\s*\n)/);
       if (packageMatch) {
@@ -419,7 +419,7 @@ async function createOrUpdateKafkaMessageBroker(projectDir, packagePath, context
 async function updateKafkaConfig(projectDir, packagePath, context) {
   const configPath = path.join(
     projectDir, 'src', 'main', 'java', packagePath,
-    'shared', 'configurations', 'kafkaConfig', 'KafkaConfig.java'
+    'shared', 'infrastructure', 'configurations', 'kafkaConfig', 'KafkaConfig.java'
   );
 
   if (!(await fs.pathExists(configPath))) {

@@ -55,7 +55,7 @@ class SharedGenerator {
   }
 
   async generateAnnotations(basePath) {
-    const annotationsPath = path.join(basePath, 'annotations');
+    const annotationsPath = path.join(basePath, 'domain', 'annotations');
     const files = ['ApplicationComponent', 'DomainComponent', 'LogAfter', 'LogBefore', 'LogExceptions', 'LogTimer'];
     
     for (const file of files) {
@@ -65,7 +65,7 @@ class SharedGenerator {
   }
 
   async generateInterfaces(basePath) {
-    const interfacesPath = path.join(basePath, 'interfaces');
+    const interfacesPath = path.join(basePath, 'domain', 'interfaces');
     const files = ['Command', 'CommandHandler', 'Dispatchable', 'Handler', 'Query', 'QueryHandler'];
     
     for (const file of files) {
@@ -75,7 +75,7 @@ class SharedGenerator {
   }
 
   async generateCustomExceptions(basePath) {
-    const exceptionsPath = path.join(basePath, 'customExceptions');
+    const exceptionsPath = path.join(basePath, 'domain', 'customExceptions');
     const files = ['BadRequestException', 'ConflictException', 'ForbiddenException', 
                    'ImportFileException', 'NotFoundException', 'UnauthorizedException', 'ValidationException'];
     
@@ -86,7 +86,7 @@ class SharedGenerator {
   }
 
   async generateErrorMessages(basePath) {
-    const errorMessagePath = path.join(basePath, 'errorMessage');
+    const errorMessagePath = path.join(basePath, 'domain', 'errorMessage');
     const files = ['ErrorMessage', 'FullErrorMessage', 'ShortErrorMessage'];
     
     for (const file of files) {
@@ -96,7 +96,7 @@ class SharedGenerator {
   }
 
   async generateEventEnvelope(basePath) {
-    const eventEnvelopePath = path.join(basePath, 'eventEnvelope');
+    const eventEnvelopePath = path.join(basePath, 'infrastructure', 'eventEnvelope');
     
     await this.generateFile('eventEnvelope/EventEnvelope.java.ejs', 
       path.join(eventEnvelopePath, 'EventEnvelope.java'));
@@ -105,14 +105,14 @@ class SharedGenerator {
   }
 
   async generateHandlerException(basePath) {
-    const handlerExceptionPath = path.join(basePath, 'handlerException');
+    const handlerExceptionPath = path.join(basePath, 'infrastructure', 'handlerException');
     
     await this.generateFile('handlerException/HandlerExceptions.java.ejs', 
       path.join(handlerExceptionPath, 'HandlerExceptions.java'));
   }
 
   async generateConfigurations(basePath) {
-    const configurationsPath = path.join(basePath, 'configurations');
+    const configurationsPath = path.join(basePath, 'infrastructure', 'configurations');
     
     // Logger config
     await this.generateFile('configurations/loggerConfig/HandlerLogs.java.ejs', 
@@ -138,7 +138,7 @@ class SharedGenerator {
   }
 
   async generateFilters(basePath) {
-    const filtersPath = path.join(basePath, 'filters');
+    const filtersPath = path.join(basePath, 'infrastructure', 'filters');
     
     await this.generateFile('filters/CorrelationIdFilter.java.ejs', 
       path.join(filtersPath, 'CorrelationIdFilter.java'));

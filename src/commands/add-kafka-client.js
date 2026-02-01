@@ -185,7 +185,7 @@ async function addKafkaImports(projectDir) {
  */
 async function generateKafkaConfigClass(projectDir, context) {
   const templatePath = path.join(__dirname, '..', '..', 'templates', 'shared', 'configurations', 'kafkaConfig', 'KafkaConfig.java.ejs');
-  const outputPath = path.join(projectDir, 'src', 'main', 'java', context.packagePath, 'shared', 'configurations', 'kafkaConfig', 'KafkaConfig.java');
+  const outputPath = path.join(projectDir, 'src', 'main', 'java', context.packagePath, 'shared', 'infrastructure', 'configurations', 'kafkaConfig', 'KafkaConfig.java');
   
   await renderAndWrite(templatePath, outputPath, context);
 }

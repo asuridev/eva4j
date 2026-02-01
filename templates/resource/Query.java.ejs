@@ -3,7 +3,7 @@ package <%= packageName %>.<%= moduleName %>.application.queries;
 import java.util.List;
 <% } %>
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= resourceName %>ResponseDto;
-import <%= packageName %>.shared.interfaces.Query;
+import <%= packageName %>.shared.domain.interfaces.Query;
 
 public record <%= usecaseName %>Query(<% if (hasId) { %>
     String id<% } %>
