@@ -1,16 +1,22 @@
 package <%= packageName %>;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.modulith.core.ApplicationModules;
+<% if (typeof isDetached !== 'undefined' && isDetached) { %>import org.springframework.boot.test.context.SpringBootTest;
+
+
+@SpringBootTest<% } else { %>import org.springframework.modulith.core.ApplicationModules;
 import org.springframework.modulith.docs.Documenter;
 
-
+<% } %>	
 class <%= applicationClassName %>Tests {
 
     @Test
 	void contextLoads() {
+<% if (typeof isDetached !== 'undefined' && isDetached) { %>
+
+	}<% } else { %>
 		ApplicationModules modules = ApplicationModules.of(<%= applicationClassName %>.class)
 			.verify();
 		new Documenter(modules).writeDocumentation();
-	}
+	}<% } %>
 }

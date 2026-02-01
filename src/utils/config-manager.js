@@ -30,6 +30,7 @@ class ConfigManager {
       springBootVersion: config.springBootVersion,
       springModulithVersion: config.springModulithVersion,
       dependencies: config.dependencies || [],
+      databaseType: config.databaseType,
       modules: [],
       createdAt: config.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()

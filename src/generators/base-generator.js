@@ -47,6 +47,7 @@ class BaseGenerator {
       springBootVersion: this.context.springBootVersion,
       springModulithVersion: this.context.springModulithVersion,
       dependencies: this.context.dependencies,
+      databaseType: this.context.databaseType,
       createdAt: new Date().toISOString()
     });
   }

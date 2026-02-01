@@ -12,6 +12,7 @@ const generateKafkaEventCommand = require('../src/commands/generate-kafka-event'
 const generateKafkaListenerCommand = require('../src/commands/generate-kafka-listener');
 const generateResourceCommand = require('../src/commands/generate-resource');
 const infoCommand = require('../src/commands/info');
+const detachCommand = require('../src/commands/detach');
 
 const program = new Command();
 
@@ -192,6 +193,19 @@ program
     }
   });
 
+// Detach command
+program
+  .command('detach [module-name]')
+  .description('Extract a module into a standalone microservice')
+  .action(async (moduleName, options) => {
+    try {
+      await detachCommand(moduleName, options);
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
 // Help command
 program.on('--help', () => {
   console.log('');
@@ -204,6 +218,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j g usecase get-all-products product'));
   console.log(chalk.gray('  $ eva4j g http-exchange user-service-port user'));
   console.log(chalk.gray('  $ eva4j g kafka-event user-created user'));
+  console.log(chalk.gray('  $ eva4j detach user'));
   console.log(chalk.gray('  $ eva4j info'));
   console.log('');
   console.log(chalk.blue('For more information, visit:'));
