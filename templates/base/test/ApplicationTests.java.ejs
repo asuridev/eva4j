@@ -1,12 +1,16 @@
 package <%= packageName %>;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.modulith.core.ApplicationModules;
+import org.springframework.modulith.docs.Documenter;
 
-@SpringBootTest
+
 class <%= applicationClassName %>Tests {
 
     @Test
-    void contextLoads() {
-    }
+	void contextLoads() {
+		ApplicationModules modules = ApplicationModules.of(<%= applicationClassName %>.class)
+			.verify();
+		new Documenter(modules).writeDocumentation();
+	}
 }
