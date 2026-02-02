@@ -11,6 +11,7 @@ const generateHttpExchangeCommand = require('../src/commands/generate-http-excha
 const generateKafkaEventCommand = require('../src/commands/generate-kafka-event');
 const generateKafkaListenerCommand = require('../src/commands/generate-kafka-listener');
 const generateResourceCommand = require('../src/commands/generate-resource');
+const generateRecordCommand = require('../src/commands/generate-record');
 const infoCommand = require('../src/commands/info');
 const detachCommand = require('../src/commands/detach');
 
@@ -70,9 +71,9 @@ program
 
 // Generate command
 program
-  .command('generate <type> <module> [name]')
+  .command('generate <type> [module] [name]')
   .alias('g')
-  .description('Generate components (usecase, http-exchange, kafka-event, kafka-listener, resource)')
+  .description('Generate components (usecase, http-exchange, kafka-event, kafka-listener, resource, record)')
   .action(async (type, module, name, options) => {
     if (type === 'usecase') {
       if (!module) {
@@ -146,6 +147,24 @@ program
       return;
     }
 
+    if (type === 'record') {
+      // Record command doesn't require module/name as parameters
+      // They will be prompted interactively
+      try {
+        const recordOptions = {};
+        // If module is provided (user used it as --json flag value by mistake)
+        // try to use it as json option
+        if (module && module.startsWith('{')) {
+          recordOptions.json = module;
+        }
+        await generateRecordCommand(recordOptions);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
     if (type === 'resource') {
       if (!module) {
         console.error(chalk.red('❌ Module name is required'));
@@ -171,12 +190,14 @@ program
     console.log(chalk.gray('  eva4j generate kafka-event <event-name> <module>'));
     console.log(chalk.gray('  eva4j generate kafka-listener <module>'));
     console.log(chalk.gray('  eva4j generate resource <module>'));
+    console.log(chalk.gray('  eva4j generate record'));
     console.log(chalk.gray('\nExamples:'));
     console.log(chalk.gray('  eva4j generate usecase create-provider provider'));
     console.log(chalk.gray('  eva4j g http-exchange user-service-port user'));
     console.log(chalk.gray('  eva4j g kafka-event user-created user'));
     console.log(chalk.gray('  eva4j g kafka-listener user'));
-    console.log(chalk.gray('  eva4j g resource product\n'));
+    console.log(chalk.gray('  eva4j g resource product'));
+    console.log(chalk.gray('  eva4j g record  # Reads JSON from clipboard\n'));
     process.exit(1);
   });
 
@@ -218,6 +239,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j g usecase get-all-products product'));
   console.log(chalk.gray('  $ eva4j g http-exchange user-service-port user'));
   console.log(chalk.gray('  $ eva4j g kafka-event user-created user'));
+  console.log(chalk.gray('  $ eva4j g record'));
   console.log(chalk.gray('  $ eva4j detach user'));
   console.log(chalk.gray('  $ eva4j info'));
   console.log('');
