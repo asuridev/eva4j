@@ -2,10 +2,11 @@ const ora = require('ora');
 const chalk = require('chalk');
 const path = require('path');
 const fs = require('fs-extra');
+const yaml = require('js-yaml');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath } = require('../utils/naming');
-const { renderAndWrite } = require('../utils/template-engine');
+const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
 
 async function addKafkaClientCommand() {
   const projectDir = process.cwd();
@@ -33,7 +34,7 @@ async function addKafkaClientCommand() {
     process.exit(1);
   }
 
-  const { packageName, projectName, groupId } = projectConfig;
+  const { packageName, projectName, groupId, artifactId } = projectConfig;
   const packagePath = toPackagePath(packageName);
 
   // Check if shared module exists
@@ -51,7 +52,8 @@ async function addKafkaClientCommand() {
       packageName,
       packagePath,
       projectName,
-      groupId
+      groupId,
+      artifactId
     };
 
     // 1. Add dependencies to build.gradle
@@ -70,13 +72,18 @@ async function addKafkaClientCommand() {
     spinner.text = 'Generating KafkaConfig class...';
     await generateKafkaConfigClass(projectDir, context);
 
-    // 5. Save feature to configuration
+    // 5. Update docker-compose.yml if it exists
+    spinner.text = 'Updating docker-compose.yml...';
+    await updateDockerCompose(projectDir, context);
+
+    // 6. Save feature to configuration
     await configManager.addFeature('kafka');
 
     spinner.succeed(chalk.green('Kafka client support added successfully! ✨'));
 
     console.log(chalk.blue('\n📦 Added components:'));
     console.log(chalk.gray('  ├── build.gradle (Kafka dependencies)'));
+    console.log(chalk.gray('  ├── docker-compose.yml (Kafka cluster)'));
     console.log(chalk.gray('  ├── src/main/resources/parameters/'));
     console.log(chalk.gray('  │   ├── local/kafka.yml'));
     console.log(chalk.gray('  │   ├── develop/kafka.yml'));
@@ -87,7 +94,9 @@ async function addKafkaClientCommand() {
     console.log(chalk.blue('\n✅ Kafka client configured successfully!'));
     console.log(chalk.white('\n   Bootstrap Servers: localhost:9092'));
     console.log(chalk.white(`   Consumer Group: ${projectName}-api-group`));
-    console.log(chalk.gray('\n   Update kafka.yml files to customize broker URLs per environment'));
+    console.log(chalk.white('   Kafka UI: http://localhost:8080'));
+    console.log(chalk.gray('\n   Run "docker-compose up -d" to start the Kafka cluster'));
+    console.log(chalk.gray('   Update kafka.yml files to customize broker URLs per environment'));
     console.log();
 
   } catch (error) {
@@ -188,6 +197,54 @@ async function generateKafkaConfigClass(projectDir, context) {
   const outputPath = path.join(projectDir, 'src', 'main', 'java', context.packagePath, 'shared', 'infrastructure', 'configurations', 'kafkaConfig', 'KafkaConfig.java');
   
   await renderAndWrite(templatePath, outputPath, context);
+}
+
+/**
+ * Update docker-compose.yml to add Kafka services
+ */
+async function updateDockerCompose(projectDir, context) {
+  const dockerComposePath = path.join(projectDir, 'docker-compose.yml');
+  
+  // Check if docker-compose.yml exists
+  if (!(await fs.pathExists(dockerComposePath))) {
+    return; // No docker-compose to update
+  }
+
+  let dockerComposeContent = await fs.readFile(dockerComposePath, 'utf-8');
+  
+  // Check if Kafka services already exist
+  if (dockerComposeContent.includes('kafka:') || dockerComposeContent.includes('zookeeper:')) {
+    return; // Kafka already configured
+  }
+
+  // Parse existing docker-compose.yml
+  const dockerComposeObj = yaml.load(dockerComposeContent);
+  
+  // Ensure services section exists
+  if (!dockerComposeObj.services) {
+    dockerComposeObj.services = {};
+  }
+
+  // Read and render Kafka services template
+  const kafkaTemplateContent = await renderTemplate(
+    path.join(__dirname, '..', '..', 'templates', 'base', 'docker', 'kafka-services.yml.ejs'),
+    context
+  );
+  
+  // Parse the rendered Kafka services
+  const kafkaServices = yaml.load(kafkaTemplateContent);
+  
+  // Merge Kafka services into existing docker-compose
+  Object.assign(dockerComposeObj.services, kafkaServices);
+  
+  // Write updated docker-compose.yml
+  const updatedYaml = yaml.dump(dockerComposeObj, {
+    indent: 2,
+    lineWidth: -1,
+    noRefs: true
+  });
+  
+  await fs.writeFile(dockerComposePath, updatedYaml, 'utf-8');
 }
 
 module.exports = addKafkaClientCommand;

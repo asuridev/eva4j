@@ -1,4 +1,4 @@
-<% if (features.includeDocker && dependencies.includes('data-jpa') && databaseType !== 'h2') { %>version: '3.8'
+<% if (features.includeDocker && dependencies.includes('data-jpa') && databaseType !== 'h2') { %>name: <%= artifactId %>-cluster
 
 services:
 <% if (databaseType === 'postgresql') { %>  postgres:
