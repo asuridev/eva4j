@@ -1,0 +1,10 @@
+package <%= packageName %>.<%= moduleName %>.domain.models.enums;
+
+/**
+ * <%= name %> enum
+ */
+public enum <%= name %> {
+<% values.forEach((value, index) => { %>
+    <%= value %><%= index < values.length - 1 ? ',' : '' %>
+<% }); %>
+}

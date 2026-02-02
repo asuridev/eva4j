@@ -1,0 +1,66 @@
+package <%= packageName %>.<%= moduleName %>.domain.models.entities;
+
+<% imports.forEach(imp => { %>
+<%- imp %>
+<% }); %>
+<% if (valueObjects && valueObjects.length > 0) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
+<% } %>
+
+/**
+ * <%= name %> - Domain Entity
+ * Secondary entity in aggregate (pure Java class without Lombok)
+ */
+public class <%= name %> {
+    
+<% fields.forEach(field => { %>
+  <% if (field.isCollection) { %>
+    private <%- field.javaType %> <%= field.name %> = new ArrayList<>();
+  <% } else { %>
+    private <%- field.javaType %> <%= field.name %>;
+  <% } %>
+<% }); %>
+
+<% relationships.forEach(rel => { %>
+    private <%- rel.javaType %> <%= rel.fieldName %>;
+<% }); %>
+
+    // Constructors
+    public <%= name %>() {
+    }
+
+    public <%= name %>(<% let paramIdx = 0; %><% fields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %><% relationships.forEach(rel => { %><% if (paramIdx > 0) { %>, <% } %><%- rel.javaType %> <%= rel.fieldName %><% paramIdx++; %><% }); %>) {
+<% fields.forEach(field => { %>
+        this.<%= field.name %> = <%= field.name %>;
+<% }); %>
+<% relationships.forEach(rel => { %>
+        this.<%= rel.fieldName %> = <%= rel.fieldName %>;
+<% }); %>
+    }
+
+    // Getters
+<% fields.forEach(field => { %>
+    public <%- field.javaType %> get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() {
+        return <%= field.name %>;
+    }
+<% }); %>
+
+<% relationships.forEach(rel => { %>
+    public <%- rel.javaType %> get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>() {
+        return <%= rel.fieldName %>;
+    }
+<% }); %>
+
+    // Setters
+<% fields.forEach(field => { %>
+    public void set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(<%- field.javaType %> <%= field.name %>) {
+        this.<%= field.name %> = <%= field.name %>;
+    }
+<% }); %>
+
+<% relationships.forEach(rel => { %>
+    public void set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
+        this.<%= rel.fieldName %> = <%= rel.fieldName %>;
+    }
+<% }); %>
+}

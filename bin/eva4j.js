@@ -12,6 +12,7 @@ const generateKafkaEventCommand = require('../src/commands/generate-kafka-event'
 const generateKafkaListenerCommand = require('../src/commands/generate-kafka-listener');
 const generateResourceCommand = require('../src/commands/generate-resource');
 const generateRecordCommand = require('../src/commands/generate-record');
+const generateEntitiesCommand = require('../src/commands/generate-entities');
 const infoCommand = require('../src/commands/info');
 const detachCommand = require('../src/commands/detach');
 
@@ -165,6 +166,25 @@ program
       return;
     }
 
+    if (type === 'entities') {
+      if (!module) {
+        console.error(chalk.red('❌ Module name is required'));
+        console.log(chalk.gray('Usage: eva4j generate entities <module>'));
+        console.log(chalk.gray('Examples:'));
+        console.log(chalk.gray('  eva4j generate entities order'));
+        console.log(chalk.gray('  eva4j g entities user\n'));
+        console.log(chalk.yellow('Note: This command looks for a domain.yaml file in the module root'));
+        process.exit(1);
+      }
+      try {
+        await generateEntitiesCommand(module, options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
     if (type === 'resource') {
       if (!module) {
         console.error(chalk.red('❌ Module name is required'));
@@ -191,13 +211,15 @@ program
     console.log(chalk.gray('  eva4j generate kafka-listener <module>'));
     console.log(chalk.gray('  eva4j generate resource <module>'));
     console.log(chalk.gray('  eva4j generate record'));
+    console.log(chalk.gray('  eva4j generate entities <module>'));
     console.log(chalk.gray('\nExamples:'));
     console.log(chalk.gray('  eva4j generate usecase create-provider provider'));
     console.log(chalk.gray('  eva4j g http-exchange user-service-port user'));
     console.log(chalk.gray('  eva4j g kafka-event user-created user'));
     console.log(chalk.gray('  eva4j g kafka-listener user'));
     console.log(chalk.gray('  eva4j g resource product'));
-    console.log(chalk.gray('  eva4j g record  # Reads JSON from clipboard\n'));
+    console.log(chalk.gray('  eva4j g record  # Reads JSON from clipboard'));
+    console.log(chalk.gray('  eva4j g entities order  # Generates from domain.yaml\n'));
     process.exit(1);
   });
 
@@ -238,6 +260,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j generate usecase create-provider provider'));
   console.log(chalk.gray('  $ eva4j g usecase get-all-products product'));
   console.log(chalk.gray('  $ eva4j g http-exchange user-service-port user'));
+  console.log(chalk.gray('  $ eva4j g entities order'));
   console.log(chalk.gray('  $ eva4j g kafka-event user-created user'));
   console.log(chalk.gray('  $ eva4j g record'));
   console.log(chalk.gray('  $ eva4j detach user'));

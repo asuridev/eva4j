@@ -1,0 +1,22 @@
+package <%= packageName %>.<%= moduleName %>.domain.repositories;
+
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= rootEntity.name %>;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * <%= rootEntity.name %>Repository
+ * Repository interface for <%= rootEntity.name %> aggregate
+ */
+public interface <%= rootEntity.name %>Repository {
+    
+    <%= rootEntity.name %> save(<%= rootEntity.name %> <%= rootEntity.fieldName %>);
+    
+    Optional<<%= rootEntity.name %>> findById(<%= rootEntity.fields[0].javaType %> id);
+    
+    List<<%= rootEntity.name %>> findAll();
+    
+    void deleteById(<%= rootEntity.fields[0].javaType %> id);
+    
+    boolean existsById(<%= rootEntity.fields[0].javaType %> id);
+}

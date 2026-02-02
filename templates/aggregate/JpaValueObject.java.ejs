@@ -1,0 +1,30 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.database.valueObjects;
+
+<% imports.forEach(imp => { %>
+<%= imp %>
+<% }); %>
+import jakarta.persistence.*;
+import lombok.*;
+
+/**
+ * <%= name %>Jpa - Embeddable Value Object
+ * JPA embeddable for persistence
+ */
+@Embeddable
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode
+public class <%= name %>Jpa {
+    
+<% fields.forEach(field => { %>
+  <% if (field.annotations.length > 0) { %>
+    <% field.annotations.forEach(annotation => { %>
+    <%= annotation %>
+    <% }); %>
+  <% } %>
+    private <%= field.javaType %> <%= field.name %>;
+    
+<% }); %>
+}

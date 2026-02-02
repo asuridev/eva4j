@@ -1,0 +1,134 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.database.mappers;
+
+import org.springframework.stereotype.Component;
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.*;
+import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
+import <%= packageName %>.<%= moduleName %>.infrastructure.database.entities.*;
+import <%= packageName %>.<%= moduleName %>.infrastructure.database.valueObjects.*;
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * <%= aggregateName %>Mapper
+ * Maps between domain and JPA entities
+ */
+@Component
+public class <%= aggregateName %>Mapper {
+    
+    // ========== Aggregate Root Mapping ==========
+    
+    /**
+     * Convert JPA entity to domain entity
+     */
+    public <%= rootEntity.name %> toDomain(<%= rootEntity.name %>Jpa jpa) {
+        if (jpa == null) return null;
+        
+        return new <%= rootEntity.name %>(
+<% rootEntity.fields.forEach((field, idx) => { %>
+  <% if (field.isValueObject) { %>            toDomain<%= field.javaType %>(jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())<% } else { %>            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% } %><%= idx < rootEntity.fields.length - 1 || rootEntity.relationships.filter(r => !r.isCollection).length > 0 ? ',' : '' %>
+<% }); %>
+<% rootEntity.relationships.filter(r => !r.isCollection).forEach((rel, idx) => { %>            toDomain<%= rel.target %>(jpa.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>())<%= idx < rootEntity.relationships.filter(r => !r.isCollection).length - 1 ? ',' : '' %>
+<% }); %>
+        );
+    }
+    
+    /**
+     * Convert domain entity to JPA entity
+     */
+    public <%= rootEntity.name %>Jpa toJpa(<%= rootEntity.name %> domain) {
+        if (domain == null) return null;
+        
+        <%= rootEntity.name %>Jpa jpa = <%= rootEntity.name %>Jpa.builder()
+<% rootEntity.fields.forEach(field => { %>
+  <% if (field.isValueObject) { %>                .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
+  <% } else { %>                .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
+  <% } %>
+<% }); %>
+                .build();
+        
+<% rootEntity.relationships.forEach(rel => { %>
+  <% if (rel.isCollection && rel.type === 'OneToMany') { %>
+        // Map <%= rel.fieldName %> with bidirectional reference
+        List<<%= rel.target %>Jpa> <%= rel.fieldName %>Jpa = domain.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>().stream()
+            .map(item -> toJpa<%= rel.target %>(item, jpa))
+            .collect(Collectors.toList());
+        jpa.set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%= rel.fieldName %>Jpa);
+  <% } else if (!rel.isCollection) { %>
+        jpa.set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(toJpa<%= rel.target %>(domain.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>()));
+  <% } %>
+<% }); %>
+        
+        return jpa;
+    }
+    
+<% if (secondaryEntities.length > 0) { %>
+    // ========== Secondary Entities Mapping ==========
+<% secondaryEntities.forEach(entity => { %>
+    
+    /**
+     * Convert <%= entity.name %>Jpa to <%= entity.name %>
+     */
+    private <%= entity.name %> toDomain<%= entity.name %>(<%= entity.name %>Jpa jpa) {
+        if (jpa == null) return null;
+        
+        return new <%= entity.name %>(
+<% entity.fields.forEach((field, idx) => { %>
+  <% if (field.isValueObject) { %>            toDomain<%= field.javaType %>(jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())<% } else { %>            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% } %><%= idx < entity.fields.length - 1 ? ',' : '' %>
+<% }); %>
+        );
+    }
+    
+    /**
+     * Convert <%= entity.name %> to <%= entity.name %>Jpa
+     */
+    private <%= entity.name %>Jpa toJpa<%= entity.name %>(<%= entity.name %> domain, <%= rootEntity.name %>Jpa rootJpa) {
+        if (domain == null) return null;
+        
+        return <%= entity.name %>Jpa.builder()
+<% entity.fields.forEach(field => { %>
+  <% if (field.isValueObject) { %>                .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
+  <% } else { %>                .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
+  <% } %>
+<% }); %>
+<% entity.relationships.forEach(rel => { %>
+  <% if (rel.type === 'ManyToOne' && rel.target === rootEntity.name) { %>
+                .<%= rel.fieldName %>(rootJpa)
+  <% } %>
+<% }); %>
+                .build();
+    }
+<% }); %>
+<% } %>
+    
+<% if (valueObjects.length > 0) { %>
+    // ========== Value Objects Mapping ==========
+<% valueObjects.forEach(vo => { %>
+    
+    /**
+     * Convert <%= vo.name %>Jpa to <%= vo.name %>
+     */
+    private <%= vo.name %> toDomain<%= vo.name %>(<%= vo.name %>Jpa jpa) {
+        if (jpa == null) return null;
+        
+        return new <%= vo.name %>(
+<% vo.fields.forEach((field, idx) => { %>
+            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<%= idx < vo.fields.length - 1 ? ',' : '' %>
+<% }); %>
+        );
+    }
+    
+    /**
+     * Convert <%= vo.name %> to <%= vo.name %>Jpa
+     */
+    private <%= vo.name %>Jpa toJpa<%= vo.name %>(<%= vo.name %> domain) {
+        if (domain == null) return null;
+        
+        return new <%= vo.name %>Jpa(
+<% vo.fields.forEach((field, idx) => { %>
+            domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<%= idx < vo.fields.length - 1 ? ',' : '' %>
+<% }); %>
+        );
+    }
+<% }); %>
+<% } %>
+}

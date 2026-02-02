@@ -1,0 +1,64 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.database.entities;
+
+<% imports.forEach(imp => { %>
+<%= imp %>
+<% }); %>
+<% if (valueObjects.length > 0) { %>
+import <%= packageName %>.<%= moduleName %>.infrastructure.database.valueObjects.*;
+<% } %>
+<% if (enums.length > 0) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
+<% } %>
+
+/**
+ * <%= name %>Jpa - JPA Entity
+ * Persistence entity with JPA annotations
+ */
+@Entity
+@Table(name = "<%= tableName %>")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class <%= name %>Jpa {
+    
+<% fields.forEach((field, index) => { %>
+  <% if (field.isCollection) { %>
+    @ElementCollection
+    @CollectionTable(name = "<%= tableName %>_<%= field.name %>", joinColumns = @JoinColumn(name = "<%= name.toLowerCase() %>_id"))
+    <% if (field.collectionElementType === 'String' || field.collectionElementType === 'Integer' || field.collectionElementType === 'Long' || field.collectionElementType === 'Double' || field.collectionElementType === 'BigDecimal') { %>
+    @Column(name = "<%= field.name.replace(/([A-Z])/g, '_$1').toLowerCase() %>")
+    <% } %>
+    @Builder.Default
+    private <%- field.javaType %> <%= field.name %> = new ArrayList<>();
+  <% } else { %>
+    <% if (index === 0) { %>@Id
+    <% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)
+    <% } else if (field.javaType === 'Long' || field.javaType === 'Integer') { %>@GeneratedValue(strategy = GenerationType.IDENTITY)
+    <% } %><% } %><% if (field.annotations.length > 0) { %><% field.annotations.forEach(annotation => { %><%= annotation %>
+    <% }); %><% } %><% if (field.isEmbedded) { %>@Embedded
+    <% } %><% if (field.isEnum) { %>@Enumerated(EnumType.STRING)
+    <% } %>private <%- field.isValueObject ? field.javaTypeJpa : field.javaType %> <%= field.name %>;
+  <% } %>
+<% }); %>
+<% relationships.forEach(rel => { %>
+  <% if (rel.type === 'OneToMany') { %>
+    @OneToMany(mappedBy = "<%= rel.mappedBy %>", cascade = {<% rel.cascade.forEach((c, idx) => { %>CascadeType.<%= c %><%= idx < rel.cascade.length - 1 ? ', ' : '' %><% }); %>}, fetch = FetchType.<%= rel.fetch %>)
+    @Builder.Default
+    private <%- rel.javaTypeJpa %> <%= rel.fieldName %> = new ArrayList<>();
+  <% } else if (rel.type === 'ManyToOne') { %>
+    @ManyToOne(fetch = FetchType.<%= rel.fetch %>)
+    @JoinColumn(name = "<%= rel.joinColumn %>")
+    private <%- rel.javaTypeJpa %> <%= rel.fieldName %>;
+  <% } else if (rel.type === 'OneToOne') { %>
+    <% if (rel.mappedBy) { %>
+    @OneToOne(mappedBy = "<%= rel.mappedBy %>", cascade = {<% rel.cascade.forEach((c, idx) => { %>CascadeType.<%= c %><%= idx < rel.cascade.length - 1 ? ', ' : '' %><% }); %>}, fetch = FetchType.<%= rel.fetch %>)
+    <% } else { %>
+    @OneToOne(cascade = {<% rel.cascade.forEach((c, idx) => { %>CascadeType.<%= c %><%= idx < rel.cascade.length - 1 ? ', ' : '' %><% }); %>}, fetch = FetchType.<%= rel.fetch %>)
+    @JoinColumn(name = "<%= rel.joinColumn %>")
+    <% } %>
+    private <%- rel.javaTypeJpa %> <%= rel.fieldName %>;
+  <% } %>
+<% }); %>
+}

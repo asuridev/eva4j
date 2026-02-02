@@ -1,0 +1,66 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.database.entities;
+
+import jakarta.persistence.*;
+import lombok.*;
+<% imports.forEach(imp => { %>
+<%- imp %>
+<% }); %>
+<% if (valueObjects && valueObjects.length > 0) { %>
+import <%= packageName %>.<%= moduleName %>.infrastructure.database.valueObjects.*;
+<% } %>
+
+/**
+ * <%= name %>Jpa - JPA Entity
+ * Secondary entity in aggregate (with Lombok)
+ */
+@Entity
+@Table(name = "<%= tableName %>")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class <%= name %>Jpa {
+    
+<% fields.forEach((field, index) => { %>
+  <% if (field.isCollection) { %>
+    @ElementCollection
+    @CollectionTable(name = "<%= tableName %>_<%= field.name %>", joinColumns = @JoinColumn(name = "<%= name.toLowerCase() %>_id"))
+    <% if (field.collectionElementType === 'String' || field.collectionElementType === 'Integer' || field.collectionElementType === 'Long' || field.collectionElementType === 'Double' || field.collectionElementType === 'BigDecimal') { %>
+    @Column(name = "<%= field.name.replace(/([A-Z])/g, '_$1').toLowerCase() %>")
+    <% } %>
+    @Builder.Default
+    private <%- field.javaType %> <%= field.name %> = new ArrayList<>();
+  <% } else if (field.isValueObject) { %>
+    <% if (index === 0) { %>@Id
+    <% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)
+    <% } else if (field.javaType === 'Long' || field.javaType === 'Integer') { %>@GeneratedValue(strategy = GenerationType.IDENTITY)
+    <% } %><% } %>@Embedded
+    private <%- field.javaTypeJpa %> <%= field.name %>;
+  <% } else if (enums && enums.find(e => e.name === field.javaType)) { %>
+    <% if (index === 0) { %>@Id
+    <% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)
+    <% } else if (field.javaType === 'Long' || field.javaType === 'Integer') { %>@GeneratedValue(strategy = GenerationType.IDENTITY)
+    <% } %><% } %>@Enumerated(EnumType.STRING)
+    @Column(name = "<%= field.name.replace(/([A-Z])/g, '_$1').toLowerCase() %>")
+    private <%- field.javaType %> <%= field.name %>;
+  <% } else { %>
+    <% if (index === 0) { %>@Id
+    <% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)
+    <% } else if (field.javaType === 'Long' || field.javaType === 'Integer') { %>@GeneratedValue(strategy = GenerationType.IDENTITY)
+    <% } %><% } %>@Column(name = "<%= field.name.replace(/([A-Z])/g, '_$1').toLowerCase() %>")
+    private <%- field.javaType %> <%= field.name %>;
+  <% } %>
+<% }); %>
+<% relationships.forEach(rel => { %>
+  <% if (rel.type === 'ManyToOne') { %>
+    @ManyToOne(fetch = FetchType.<%= rel.fetch %>)
+    @JoinColumn(name = "<%= rel.joinColumn || rel.fieldName + '_id' %>")
+    private <%- rel.javaTypeJpa %> <%= rel.fieldName %>;
+  <% } else if (rel.type === 'OneToOne') { %>
+    @OneToOne(fetch = FetchType.<%= rel.fetch %>)
+    @JoinColumn(name = "<%= rel.joinColumn || rel.fieldName + '_id' %>")
+    private <%- rel.javaTypeJpa %> <%= rel.fieldName %>;
+  <% } %>
+<% }); %>
+}

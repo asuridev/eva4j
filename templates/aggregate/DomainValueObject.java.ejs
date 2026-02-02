@@ -1,0 +1,54 @@
+package <%= packageName %>.<%= moduleName %>.domain.models.valueObjects;
+
+<% imports.forEach(imp => { %>
+<%- imp %>
+<% }); %>
+import java.util.Objects;
+
+/**
+ * <%= name %> - Value Object
+ * Immutable domain value object (no Lombok)
+ */
+public class <%= name %> {
+    
+<% fields.forEach(field => { %>
+    private final <%- field.javaType %> <%= field.name %>;
+<% }); %>
+
+    // Constructor
+    public <%= name %>(<% fields.forEach((field, idx) => { %><%- field.javaType %> <%= field.name %><%= idx < fields.length - 1 ? ', ' : '' %><% }); %>) {
+<% fields.forEach(field => { %>
+        this.<%= field.name %> = <%= field.name %>;
+<% }); %>
+    }
+
+    // Getters
+<% fields.forEach(field => { %>
+    public <%- field.javaType %> get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() {
+        return <%= field.name %>;
+    }
+<% }); %>
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        <%= name %> that = (<%= name %>) o;
+        return <% fields.forEach((field, idx) => { %>Objects.equals(<%= field.name %>, that.<%= field.name %>)<%- idx < fields.length - 1 ? ' &&\n               ' : ';' %><% }); %>
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(<% fields.forEach((field, idx) => { %><%= field.name %><%- idx < fields.length - 1 ? ', ' : '' %><% }); %>);
+    }
+
+<% if (methods.length > 0) { %>
+    // Business methods
+<% methods.forEach(method => { %>
+    
+    public <%- method.returnType %> <%= method.name %>(<% method.parameters.forEach((param, idx) => { %><%- param.type %> <%= param.name %><%= idx < method.parameters.length - 1 ? ', ' : '' %><% }); %>) {
+        <%- method.body %>
+    }
+<% }); %>
+<% } %>
+}
