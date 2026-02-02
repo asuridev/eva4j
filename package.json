@@ -1,8 +1,8 @@
 {
   "name": "eva4j",
   "version": "1.0.0",
-  "description": "A Node.js CLI for generating Spring Boot projects with Gradle and Java 21+ using modular architecture",
-  "main": "src/index.js",
+  "description": "A powerful Node.js CLI for generating Spring Boot projects with modular architecture that enables efficient monolith-first development with seamless transition to microservices",
+  "main": "bin/eva4j.js",
   "bin": {
     "eva4j": "./bin/eva4j.js"
   },
@@ -16,10 +16,30 @@
     "java",
     "gradle",
     "scaffolding",
-    "generator"
+    "generator",
+    "microservices",
+    "hexagonal-architecture",
+    "clean-architecture",
+    "cqrs",
+    "spring-modulith",
+    "modular-monolith",
+    "kafka",
+    "rest-api",
+    "boilerplate",
+    "code-generator",
+    "openfeign",
+    "event-driven"
   ],
-  "author": "",
+  "author": "asuridev",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/asuridev/eva4j.git"
+  },
+  "bugs": {
+    "url": "https://github.com/asuridev/eva4j/issues"
+  },
+  "homepage": "https://github.com/asuridev/eva4j#readme",
   "dependencies": {
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
