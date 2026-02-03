@@ -43,9 +43,45 @@ public class UseCaseAutoRegister implements CommandLineRunner {
 
   @SuppressWarnings("unchecked")
   private Class<Dispatchable> getGenericType(Class<?> handlerClass) {
-    // Aquí analizas el tipo genérico real usando reflection
-    ParameterizedType type = (ParameterizedType) handlerClass.getGenericInterfaces()[0];
-    return (Class<Dispatchable>) type.getActualTypeArguments()[0];
+    // Traverse class hierarchy to find ParameterizedType (handles Spring proxies)
+    Class<?> currentClass = handlerClass;
+    
+    while (currentClass != null) {
+      // Check generic interfaces
+      for (java.lang.reflect.Type genericInterface : currentClass.getGenericInterfaces()) {
+        if (genericInterface instanceof ParameterizedType) {
+          ParameterizedType parameterizedType = (ParameterizedType) genericInterface;
+          java.lang.reflect.Type rawType = parameterizedType.getRawType();
+          
+          // Check if it's CommandHandler or QueryHandler interface
+          if (rawType instanceof Class<?>) {
+            Class<?> interfaceClass = (Class<?>) rawType;
+            if (CommandHandler.class.isAssignableFrom(interfaceClass) || 
+                QueryHandler.class.isAssignableFrom(interfaceClass)) {
+              return (Class<Dispatchable>) parameterizedType.getActualTypeArguments()[0];
+            }
+          }
+        }
+      }
+      
+      // Check generic superclass
+      java.lang.reflect.Type genericSuperclass = currentClass.getGenericSuperclass();
+      if (genericSuperclass instanceof ParameterizedType) {
+        ParameterizedType parameterizedType = (ParameterizedType) genericSuperclass;
+        java.lang.reflect.Type[] typeArgs = parameterizedType.getActualTypeArguments();
+        if (typeArgs.length > 0 && typeArgs[0] instanceof Class) {
+          Class<?> potentialType = (Class<?>) typeArgs[0];
+          if (Dispatchable.class.isAssignableFrom(potentialType)) {
+            return (Class<Dispatchable>) potentialType;
+          }
+        }
+      }
+      
+      // Move to superclass
+      currentClass = currentClass.getSuperclass();
+    }
+    
+    throw new IllegalArgumentException("Cannot determine generic type for handler: " + handlerClass.getName());
   }
 
 }
