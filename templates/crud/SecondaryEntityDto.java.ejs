@@ -6,13 +6,21 @@ import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
 <% if (hasEnums) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
 <% } %>
+<% if (hasNestedRelationships) { %>
+import java.util.List;
+<% } %>
 <% imports.forEach(imp => { %>
 <%- imp %>
 <% }); %>
 
 public record <%= entityName %>Dto(
 <% fields.forEach((field, idx) => { %>
-    <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1) { %>,<% } %>
+    <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1 || hasNestedRelationships) { %>,<% } %>
 <% }); %>
+<% if (hasNestedRelationships) { %>
+<% nestedRelationships.forEach((rel, idx) => { %>
+    List<<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < nestedRelationships.length - 1) { %>,<% } %>
+<% }); %>
+<% } %>
 ) {
 }

@@ -10,6 +10,98 @@ const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports } = require('../utils/yaml-to-entity');
 const SharedGenerator = require('../generators/shared-generator');
 
+// Maximum depth for recursive relationship traversal
+const MAX_DEPTH = 5;
+
+/**
+ * Build a relationship graph for secondary entities
+ * @param {Array} secondaryEntities - Array of secondary entities
+ * @returns {Map} Map of entity name to its relationships info
+ */
+function buildRelationshipGraph(secondaryEntities) {
+  const graph = new Map();
+  
+  secondaryEntities.forEach(entity => {
+    const oneToManyRels = entity.relationships?.filter(r => 
+      r.type === 'OneToMany' && !r.isInverse
+    ) || [];
+    
+    graph.set(entity.name, {
+      entity,
+      children: oneToManyRels.map(r => r.target),
+      relationships: oneToManyRels
+    });
+  });
+  
+  return graph;
+}
+
+/**
+ * Enrich relationships recursively with nested relationship information
+ * @param {Object} entity - The entity to enrich
+ * @param {Array} secondaryEntities - All secondary entities
+ * @param {number} depth - Current depth level
+ * @param {Set} visited - Set of visited entity names to prevent cycles
+ * @returns {Array} Enriched relationships with nested data
+ */
+function enrichRelationshipsRecursively(entity, secondaryEntities, depth = 0, visited = new Set()) {
+  // Stop if max depth reached or entity already visited (cycle detection)
+  if (depth >= MAX_DEPTH || visited.has(entity.name)) {
+    if (depth >= MAX_DEPTH) {
+      console.log(`[WARNING] Max depth ${MAX_DEPTH} reached for entity: ${entity.name}`);
+    }
+    if (visited.has(entity.name)) {
+      console.log(`[WARNING] Cycle detected at entity: ${entity.name}, stopping recursion`);
+    }
+    return [];
+  }
+  
+  // Mark entity as visited
+  const newVisited = new Set(visited);
+  newVisited.add(entity.name);
+  
+  const oneToManyRels = entity.relationships?.filter(r => 
+    r.type === 'OneToMany' && !r.isInverse
+  ) || [];
+  
+  return oneToManyRels.map(rel => {
+    const targetEntity = secondaryEntities.find(e => e.name === rel.target);
+    
+    if (!targetEntity) {
+      return {
+        ...rel,
+        depth,
+        hasNestedRelationships: false,
+        nestedRelationships: [],
+        fields: []
+      };
+    }
+    
+    const targetFields = targetEntity.fields.filter(f => 
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+    );
+    
+    // Recursively enrich nested relationships
+    const nestedRels = enrichRelationshipsRecursively(
+      targetEntity, 
+      secondaryEntities, 
+      depth + 1, 
+      newVisited
+    );
+    
+    return {
+      targetEntityName: rel.target,
+      fieldName: rel.fieldName,
+      type: rel.type,
+      depth,
+      fields: targetFields,
+      entity: targetEntity,
+      hasNestedRelationships: nestedRels.length > 0,
+      nestedRelationships: nestedRels
+    };
+  });
+}
+
 async function generateEntitiesCommand(moduleName) {
   const projectDir = process.cwd();
   
@@ -406,14 +498,18 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
   );
   
-  // Check if has OneToMany relationships (items)
-  const oneToManyRels = rootEntity.relationships.filter(r => r.type === 'OneToMany' && !r.isInverse);
-  const hasItems = oneToManyRels.length > 0;
-  const itemEntityName = hasItems ? oneToManyRels[0].target : null;
-  const itemEntity = hasItems ? secondaryEntities.find(e => e.name === itemEntityName) : null;
-  const itemFields = itemEntity ? itemEntity.fields.filter(f => 
-    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
-  ) : [];
+  // Build enriched OneToMany relationships with recursive nested data
+  const oneToManyRelationships = enrichRelationshipsRecursively(
+    rootEntity, 
+    secondaryEntities, 
+    0, 
+    new Set()
+  );
+  
+  console.log(`[DEBUG] Found ${oneToManyRelationships.length} OneToMany relationships for ${aggregateName}`);
+  oneToManyRelationships.forEach(rel => {
+    console.log(`[DEBUG]   - ${rel.fieldName}: ${rel.targetEntityName} (nested: ${rel.hasNestedRelationships})`);
+  });
   
   // Detect if has value objects or enums
   const hasValueObjects = rootEntity.fields.some(f => f.isValueObject);
@@ -432,9 +528,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     secondaryEntities,
     idType,
     commandFields,
-    hasItems,
-    itemEntityName,
-    itemFields,
+    oneToManyRelationships,
     hasValueObjects,
     hasEnums,
     imports: rootEntity.imports,
@@ -514,7 +608,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const responseDtoContext = {
     ...baseContext,
     allFields: rootEntity.fields,
-    relationships: oneToManyRels
+    relationships: rootEntity.relationships.filter(r => r.type === 'OneToMany' && !r.isInverse)
   };
   
   await renderAndWrite(
@@ -524,13 +618,23 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   );
   generatedFiles.push({ type: 'DTO', name: `${aggregateName}ResponseDto`, path: `${moduleName}/application/dtos/${aggregateName}ResponseDto.java` });
   
-  // Generate secondary entity DTOs
+  // Generate secondary entity DTOs with nested relationships
   for (const entity of secondaryEntities) {
+    // Get nested relationships for this entity
+    const nestedRelationships = enrichRelationshipsRecursively(
+      entity,
+      secondaryEntities,
+      0,
+      new Set()
+    );
+    
     const entityDtoContext = {
       packageName,
       moduleName,
       entityName: entity.name,
       fields: entity.fields,
+      nestedRelationships,
+      hasNestedRelationships: nestedRelationships.length > 0,
       hasValueObjects: entity.fields.some(f => f.isValueObject),
       hasEnums: entity.enums && entity.enums.length > 0,
       imports: entity.imports
@@ -544,7 +648,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     generatedFiles.push({ type: 'DTO', name: `${entity.name}Dto`, path: `${moduleName}/application/dtos/${entity.name}Dto.java` });
   }
   
-  // Generate CreateItemDto for ALL secondary entities (not just first OneToMany)
+  // Generate CreateItemDto for ALL secondary entities with nested relationships
   console.log(`[DEBUG] Generating Create DTOs for ${secondaryEntities.length} secondary entities`);
   for (const entity of secondaryEntities) {
     console.log(`[DEBUG] Generating CreateItemDto for entity: ${entity.name}`);
@@ -552,11 +656,21 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
     );
     
+    // Get nested relationships for this entity
+    const nestedRelationships = enrichRelationshipsRecursively(
+      entity,
+      secondaryEntities,
+      0,
+      new Set()
+    );
+    
     const createItemDtoContext = {
       packageName,
       moduleName,
       entityName: entity.name,
       fields: createFields,
+      nestedRelationships,
+      hasNestedRelationships: nestedRelationships.length > 0,
       hasValueObjects: entity.fields.some(f => f.isValueObject),
       hasEnums: entity.enums && entity.enums.length > 0,
       imports: entity.imports

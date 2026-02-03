@@ -7,9 +7,11 @@ import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
 <% if (hasEnums) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
 <% } %>
-<% if (hasItems) { %>
+<% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
 import java.util.List;
-import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= itemEntityName %>Dto;
+<% oneToManyRelationships.forEach(rel => { %>
+import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= rel.targetEntityName %>Dto;
+<% }); %>
 <% } %>
 <% imports.forEach(imp => { %>
 <%- imp %>
@@ -17,10 +19,12 @@ import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= itemEntit
 
 public record Create<%= aggregateName %>Command(
 <% commandFields.forEach((field, idx) => { %>
-    <%- field.javaType %> <%= field.name %><% if (idx < commandFields.length - 1 || hasItems) { %>,<% } %>
+    <%- field.javaType %> <%= field.name %><% if (idx < commandFields.length - 1 || (oneToManyRelationships && oneToManyRelationships.length > 0)) { %>,<% } %>
 <% }); %>
-<% if (hasItems) { %>
-    List<Create<%= itemEntityName %>Dto> items
+<% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
+<% oneToManyRelationships.forEach((rel, idx) => { %>
+    List<Create<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < oneToManyRelationships.length - 1) { %>,<% } %>
+<% }); %>
 <% } %>
 ) implements Command {
 }
