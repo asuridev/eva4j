@@ -7,7 +7,7 @@ const SharedGenerator = require('../generators/shared-generator');
 const ModuleGenerator = require('../generators/module-generator');
 const { buildModuleContext } = require('../utils/context-builder');
 const { validateModuleName, isEva4jProject, moduleExists } = require('../utils/validator');
-const { toPackagePath } = require('../utils/naming');
+const { toPackagePath, toCamelCase } = require('../utils/naming');
 const ConfigManager = require('../utils/config-manager');
 
 async function addModuleCommand(moduleName, options) {
@@ -26,11 +26,11 @@ async function addModuleCommand(moduleName, options) {
       {
         type: 'input',
         name: 'moduleName',
-        message: 'Enter module name (camelCase):',
+        message: 'Enter module name (lowercase, kebab-case allowed):',
         validate: (input) => {
           const validation = validateModuleName(input);
           if (validation !== true) {
-            return `${validation}. Examples: user, product, orderItem`;
+            return `${validation}. Examples: user, product, order-item, user-profile`;
           }
           return true;
         }
@@ -79,8 +79,11 @@ async function addModuleCommand(moduleName, options) {
     process.exit(1);
   }
   
+  // Convert kebab-case to camelCase for Java package name
+  const modulePackageName = toCamelCase(moduleName);
+  
   // Check if module already exists (filesystem check)
-  if (await moduleExists(projectDir, packagePath, moduleName)) {
+  if (await moduleExists(projectDir, packagePath, modulePackageName)) {
     console.error(chalk.red(`❌ Module '${moduleName}' already exists`));
     process.exit(1);
   }
@@ -90,7 +93,7 @@ async function addModuleCommand(moduleName, options) {
   let projectName = 'Project';
   
   if (await configManager.exists()) {
-    if (await configManager.moduleExists(moduleName)) {
+    if (await configManager.moduleExists(modulePackageName)) {
       console.error(chalk.red(`❌ Module '${moduleName}' is already registered`));
       process.exit(1);
     }
@@ -114,7 +117,7 @@ async function addModuleCommand(moduleName, options) {
     groupId: groupMatch[1]
   };
   
-  const moduleContext = buildModuleContext(baseContext, moduleName, answers);
+  const moduleContext = buildModuleContext(baseContext, modulePackageName, answers);
   
   try {
     // Check if shared module needs to be generated
@@ -146,7 +149,7 @@ async function addModuleCommand(moduleName, options) {
     moduleSpinner.succeed(chalk.green(`Module '${moduleName}' created successfully! ✨`));
     
     console.log(chalk.blue(`\n📦 Module structure:`));
-    console.log(chalk.gray(`  └── ${moduleName}/`));
+    console.log(chalk.gray(`  └── ${modulePackageName}/`));
     console.log(chalk.gray(`      ├── package-info.java (@ApplicationModule)`));
     console.log(chalk.gray(`      ├── application/`));
     console.log(chalk.gray(`      │   ├── commands/ (write operations)`));
@@ -171,11 +174,12 @@ async function addModuleCommand(moduleName, options) {
     
     console.log(chalk.blue('\n✅ Module created successfully!'));
     console.log(chalk.white(`\n   Module: ${moduleName}`));
-    console.log(chalk.gray(`   Package: ${moduleContext.packageName}.${moduleName}`));
+    console.log(chalk.gray(`   Package: ${moduleContext.packageName}.${modulePackageName}`));
     
     // Save module to configuration
     if (await configManager.exists()) {
-      await configManager.addModule(moduleName, {
+      await configManager.addModule(modulePackageName, {
+        displayName: moduleName,
         hasSoftDelete: answers.hasSoftDelete,
         hasAudit: answers.hasAudit
       });

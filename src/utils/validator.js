@@ -61,8 +61,12 @@ function validateModuleName(name) {
     return 'Module name cannot be empty';
   }
   
-  if (!/^[a-z][a-z0-9]*$/.test(name)) {
-    return 'Module name must start with a lowercase letter and contain only lowercase letters and numbers';
+  if (!/^[a-z][a-z0-9-]*$/.test(name)) {
+    return 'Module name must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens';
+  }
+  
+  if (name.endsWith('-') || name.includes('--')) {
+    return 'Module name cannot end with a hyphen or contain consecutive hyphens';
   }
   
   if (name.length < 2) {
