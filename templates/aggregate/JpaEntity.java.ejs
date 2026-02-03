@@ -55,11 +55,11 @@ public class <%= name %>Jpa {
 <% relationships.forEach(rel => { %>
   <% if (rel.type === 'ManyToOne') { %>
     @ManyToOne(fetch = FetchType.<%= rel.fetch %>)
-    @JoinColumn(name = "<%= rel.joinColumn || rel.fieldName + '_id' %>")
+    @JoinColumn(name = "<%= rel.joinColumn %>")
     private <%- rel.javaTypeJpa %> <%= rel.fieldName %>;
   <% } else if (rel.type === 'OneToOne') { %>
     @OneToOne(fetch = FetchType.<%= rel.fetch %>)
-    @JoinColumn(name = "<%= rel.joinColumn || rel.fieldName + '_id' %>")
+    @JoinColumn(name = "<%= rel.joinColumn %>")
     private <%- rel.javaTypeJpa %> <%= rel.fieldName %>;
   <% } %>
 <% }); %>

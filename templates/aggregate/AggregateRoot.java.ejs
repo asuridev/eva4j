@@ -23,7 +23,8 @@ public class <%= name %> {
     private <%- field.javaType %> <%= field.name %>;
   <% } %>
 <% }); %>
-<% relationships.forEach(rel => { %>
+<% const domainRelationships = relationships.filter(rel => !rel.isInverse); %>
+<% domainRelationships.forEach(rel => { %>
   <% if (rel.isCollection) { %>
     private <%- rel.javaType %> <%= rel.fieldName %> = new ArrayList<>();
   <% } else { %>
@@ -35,11 +36,11 @@ public class <%= name %> {
     public <%= name %>() {
     }
 
-    public <%= name %>(<% let paramIdx = 0; %><% fields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %><% relationships.forEach(rel => { %><% if (!rel.isCollection) { %><% if (paramIdx > 0) { %>, <% } %><%- rel.javaType %> <%= rel.fieldName %><% paramIdx++; %><% } %><% }); %>) {
+    public <%= name %>(<% let paramIdx = 0; %><% fields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %><% domainRelationships.forEach(rel => { %><% if (!rel.isCollection) { %><% if (paramIdx > 0) { %>, <% } %><%- rel.javaType %> <%= rel.fieldName %><% paramIdx++; %><% } %><% }); %>) {
 <% fields.forEach(field => { %>
         this.<%= field.name %> = <%= field.name %>;
 <% }); %>
-<% relationships.forEach(rel => { %>
+<% domainRelationships.forEach(rel => { %>
   <% if (!rel.isCollection) { %>
         this.<%= rel.fieldName %> = <%= rel.fieldName %>;
   <% } %>
@@ -53,7 +54,7 @@ public class <%= name %> {
     }
 <% }); %>
 
-<% relationships.forEach(rel => { %>
+<% domainRelationships.forEach(rel => { %>
   <% if (!rel.isCollection) { %>
     public <%- rel.javaType %> get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>() {
         return <%= rel.fieldName %>;
@@ -68,7 +69,7 @@ public class <%= name %> {
     }
 <% }); %>
 
-<% relationships.forEach(rel => { %>
+<% domainRelationships.forEach(rel => { %>
   <% if (!rel.isCollection) { %>
     public void set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
         this.<%= rel.fieldName %> = <%= rel.fieldName %>;

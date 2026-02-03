@@ -54,8 +54,11 @@ function parseAggregate(aggregateData) {
   const parsedValueObjects = valueObjects.map(vo => parseValueObject(vo));
   const valueObjectNames = parsedValueObjects.map(vo => vo.name);
   
-  // Parse entities with value object detection
-  const parsedEntities = entities.map(entity => parseEntity(entity, name, packageName, moduleName, aggregateEnums, valueObjectNames));
+  // Generate inverse relationships from mappedBy
+  const inverseRelationships = generateInverseRelationships(entities);
+  
+  // Parse entities with value object detection and inverse relationships
+  const parsedEntities = entities.map(entity => parseEntity(entity, name, packageName, moduleName, aggregateEnums, valueObjectNames, inverseRelationships));
   const parsedRoot = parsedEntities.find(e => e.isRoot);
   const secondaryEntities = parsedEntities.filter(e => !e.isRoot);
   
@@ -81,9 +84,10 @@ function parseAggregate(aggregateData) {
  * @param {string} moduleName - Module name
  * @param {Array} aggregateEnums - All enums from the aggregate
  * @param {Array} valueObjectNames - Names of value objects in aggregate
+ * @param {Object} inverseRelationships - Map of auto-generated inverse relationships
  * @returns {Object} Parsed entity
  */
-function parseEntity(entityData, aggregateName, packageName = '', moduleName = '', aggregateEnums = [], valueObjectNames = []) {
+function parseEntity(entityData, aggregateName, packageName = '', moduleName = '', aggregateEnums = [], valueObjectNames = [], inverseRelationships = {}) {
   const { name, isRoot = false, tableName, properties, fields: fieldsYaml, relationships = [] } = entityData;
   
   // Accept both 'properties' and 'fields' field names
@@ -96,8 +100,16 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
   // Parse properties/fields with value object detection
   const fields = entityFields.map(prop => parseProperty(prop, valueObjectNames));
   
-  // Parse relationships
-  const relations = relationships.map(rel => parseRelationship(rel, className));
+  // Parse relationships from YAML
+  const yamlRelations = relationships.map(rel => parseRelationship(rel, className));
+  
+  // Get auto-generated inverse relationships for this entity
+  const inverseRels = inverseRelationships[className] || [];
+  
+  // Combine YAML and inverse relationships (YAML takes priority on conflicts)
+  const relations = [...yamlRelations, ...inverseRels.filter(inv => 
+    !yamlRelations.some(yaml => yaml.fieldName === inv.fieldName)
+  )];
   
   // Detect enums in properties/fields
   const enums = entityFields
@@ -162,6 +174,51 @@ function parseProperty(propData, valueObjectNames = []) {
     collectionElementType,
     columnAnnotations: extractColumnAnnotations(annotations)
   };
+}
+
+/**
+ * Generate inverse relationships from entities with mappedBy
+ * @param {Array} entities - Raw entities from YAML
+ * @returns {Object} Map of entityName to array of inverse relationships
+ */
+function generateInverseRelationships(entities) {
+  const inverseMap = {}; // { OrderItem: [{ type: 'ManyToOne', target: 'Order', ... }] }
+  
+  entities.forEach(entity => {
+    const entityName = toPascalCase(entity.name);
+    const relationships = entity.relationships || [];
+    
+    relationships.forEach(rel => {
+      if (rel.mappedBy) {
+        const targetName = rel.target || rel.targetEntity;
+        if (!targetName) return;
+        
+        const targetEntity = toPascalCase(targetName);
+        const inverseType = rel.type === 'OneToMany' ? 'ManyToOne' : 'OneToOne';
+        const joinColumn = rel.joinColumn || `${rel.mappedBy}_id`;
+        
+        if (!inverseMap[targetEntity]) {
+          inverseMap[targetEntity] = [];
+        }
+        
+        inverseMap[targetEntity].push({
+          type: inverseType,
+          target: entityName,
+          targetEntity: entityName,
+          fieldName: rel.mappedBy,
+          joinColumn: joinColumn,
+          fetch: rel.fetch || 'LAZY',
+          cascade: [],
+          isCollection: false,
+          javaType: entityName,
+          javaTypeJpa: `${entityName}Jpa`,
+          isInverse: true // Flag to identify auto-generated relationships
+        });
+      }
+    });
+  });
+  
+  return inverseMap;
 }
 
 /**

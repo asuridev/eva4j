@@ -23,13 +23,26 @@ public class <%= aggregateName %>Mapper {
     public <%= rootEntity.name %> toDomain(<%= rootEntity.name %>Jpa jpa) {
         if (jpa == null) return null;
         
-        return new <%= rootEntity.name %>(
+        <%= rootEntity.name %> domain = new <%= rootEntity.name %>(
 <% rootEntity.fields.forEach((field, idx) => { %>
   <% if (field.isValueObject) { %>            toDomain<%= field.javaType %>(jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())<% } else { %>            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% } %><%= idx < rootEntity.fields.length - 1 || rootEntity.relationships.filter(r => !r.isCollection).length > 0 ? ',' : '' %>
 <% }); %>
 <% rootEntity.relationships.filter(r => !r.isCollection).forEach((rel, idx) => { %>            toDomain<%= rel.target %>(jpa.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>())<%= idx < rootEntity.relationships.filter(r => !r.isCollection).length - 1 ? ',' : '' %>
 <% }); %>
         );
+        
+<% rootEntity.relationships.forEach(rel => { %>
+  <% if (rel.isCollection && rel.type === 'OneToMany') { %>
+        // Map <%= rel.fieldName %> collection
+        if (jpa.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>() != null) {
+            jpa.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>().forEach(itemJpa -> {
+                domain.add<%= rel.target %>(toDomain<%= rel.target %>(itemJpa));
+            });
+        }
+  <% } %>
+<% }); %>
+        
+        return domain;
     }
     
     /**
@@ -39,11 +52,13 @@ public class <%= aggregateName %>Mapper {
         if (domain == null) return null;
         
         <%= rootEntity.name %>Jpa jpa = <%= rootEntity.name %>Jpa.builder()
-<% rootEntity.fields.forEach(field => { %>
-  <% if (field.isValueObject) { %>                .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
-  <% } else { %>                .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
-  <% } %>
-<% }); %>
+<% rootEntity.fields.forEach(field => { -%>
+<% if (field.isValueObject) { -%>
+                .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
+<% } else { -%>
+                .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
+<% } -%>
+<% }); -%>
                 .build();
         
 <% rootEntity.relationships.forEach(rel => { %>
@@ -85,16 +100,24 @@ public class <%= aggregateName %>Mapper {
         if (domain == null) return null;
         
         return <%= entity.name %>Jpa.builder()
-<% entity.fields.forEach(field => { %>
-  <% if (field.isValueObject) { %>                .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
-  <% } else { %>                .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
-  <% } %>
-<% }); %>
-<% entity.relationships.forEach(rel => { %>
-  <% if (rel.type === 'ManyToOne' && rel.target === rootEntity.name) { %>
+<% entity.fields.forEach(field => { -%>
+<% if (field.isValueObject) { -%>
+                .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
+<% } else { -%>
+                .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
+<% } -%>
+<% }); -%>
+<% entity.relationships.forEach(rel => { -%>
+<% if (rel.type === 'ManyToOne') { -%>
+<% if (rel.target === rootEntity.name) { -%>
                 .<%= rel.fieldName %>(rootJpa)
-  <% } %>
-<% }); %>
+<% } else if (rel.isInverse) { -%>
+                // <%= rel.fieldName %> - inverse relationship, set by owning side
+<% } else { -%>
+                .<%= rel.fieldName %>(toJpa<%= rel.target %>(domain.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>()))
+<% } -%>
+<% } -%>
+<% }); -%>
                 .build();
     }
 <% }); %>
