@@ -431,6 +431,7 @@ async function generateEntitiesCommand(moduleName) {
       spinner.start('Generating CRUD resources...');
 
       // Generate CRUD for each aggregate root
+      const postmanCollections = [];
       for (const aggregate of aggregates) {
         await generateCrudResources(
           aggregate,
@@ -440,6 +441,21 @@ async function generateEntitiesCommand(moduleName) {
           apiVersion,
           generatedFiles
         );
+        
+        // Generate Postman Collection for this aggregate
+        const collectionPath = await generatePostmanCollection(
+          aggregate,
+          moduleName,
+          moduleBasePath,
+          projectDir,
+          packageName,
+          apiVersion,
+          projectConfig
+        );
+        postmanCollections.push({
+          name: aggregate.name,
+          path: path.relative(projectDir, collectionPath)
+        });
       }
 
       spinner.succeed(chalk.green('CRUD resources generated! ✨'));
@@ -468,6 +484,15 @@ async function generateEntitiesCommand(moduleName) {
       });
 
       console.log(chalk.blue(`\n✅ Total CRUD files: ${crudFiles.length}`));
+      
+      // Display generated Postman collections
+      if (postmanCollections.length > 0) {
+        console.log(chalk.blue('\n📬 Generated Postman Collections:'));
+        postmanCollections.forEach(collection => {
+          console.log(chalk.gray(`   • ${collection.name}: ${collection.path}`));
+        });
+        console.log(chalk.cyan('\n💡 Import these collections into Postman to test your API endpoints!'));
+      }
     }
 
     console.log();
@@ -691,6 +716,68 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     baseContext
   );
   generatedFiles.push({ type: 'Controller', name: `${aggregateName}Controller`, path: `${moduleName}/infrastructure/rest/controllers/${resourceNameCamel}/${apiVersion}/${aggregateName}Controller.java` });
+}
+
+/**
+ * Generate Postman Collection for CRUD testing
+ */
+async function generatePostmanCollection(
+  aggregate, 
+  moduleName, 
+  moduleBasePath,
+  projectDir,
+  packageName, 
+  apiVersion, 
+  projectConfig
+) {
+  const { name: aggregateName, rootEntity, secondaryEntities } = aggregate;
+  const templatesDir = path.join(__dirname, '..', '..', 'templates', 'postman');
+  
+  const idField = rootEntity.fields[0];
+  const idType = idField.javaType;
+  
+  const commandFields = rootEntity.fields.filter(f => 
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+  );
+  
+  const oneToManyRelationships = enrichRelationshipsRecursively(
+    rootEntity, 
+    secondaryEntities, 
+    0, 
+    new Set()
+  );
+  
+  const resourceNameKebab = toKebabCase(aggregateName);
+  const port = projectConfig.server?.port || 8040;
+  
+  // Generate unique collection ID
+  const crypto = require('crypto');
+  const collectionId = crypto.randomUUID();
+  
+  const context = {
+    aggregateName,
+    moduleName,
+    resourceNameKebab,
+    apiVersion,
+    port,
+    idType,
+    commandFields,
+    oneToManyRelationships,
+    secondaryEntities,
+    rootEntity,
+    collectionId
+  };
+  
+  // Output to module root
+  const outputPath = path.join(moduleBasePath, `${aggregateName}-Postman-Collection.json`);
+  
+  await renderAndWrite(
+    path.join(templatesDir, 'Collection.json.ejs'),
+    outputPath,
+    context
+  );
+  
+  return outputPath;
 }
 
 module.exports = generateEntitiesCommand;

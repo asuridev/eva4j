@@ -707,6 +707,218 @@ entities:
 
 ---
 
+### 🔥 Opciones Cascade (Operaciones en Cascada)
+
+Las opciones de `cascade` determinan qué operaciones del padre se propagan automáticamente a las entidades relacionadas.
+
+#### **⚠️ IMPORTANTE: Cascade y Persistencia**
+
+Si NO defines `cascade`, las entidades relacionadas **NO se persistirán automáticamente**. Esto es el error más común:
+
+```yaml
+# ❌ MAL - Los OrderItem NO se guardarán en la BD
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: []        # ← Array vacío = sin cascada
+    fetch: LAZY
+
+# ✅ BIEN - Los OrderItem se guardan automáticamente con Order
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE, REMOVE]  # ← Necesario para persistir
+    fetch: LAZY
+```
+
+#### **Opciones de Cascade:**
+
+| Opción | Descripción | ¿Cuándo usar? |
+|--------|-------------|---------------|
+| `PERSIST` | Al guardar el padre, guarda los hijos nuevos | ✅ **Siempre en OneToMany** para crear items |
+| `MERGE` | Al actualizar el padre, actualiza los hijos | ✅ **Siempre en OneToMany** para editar items |
+| `REMOVE` | Al eliminar el padre, elimina los hijos | ✅ Si los hijos no tienen sentido sin el padre |
+| `REFRESH` | Al refrescar el padre, refresca los hijos | ⚠️ Rara vez necesario |
+| `DETACH` | Al separar el padre, separa los hijos | ⚠️ Rara vez necesario |
+| `ALL` | Todas las operaciones anteriores | ⚠️ Solo si estás seguro |
+
+#### **Configuraciones Recomendadas:**
+
+```yaml
+# 🎯 RECOMENDADO para OneToMany (Order → OrderItem)
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE, REMOVE]  # ← Crea, actualiza y elimina items
+    fetch: LAZY
+
+# 🎯 RECOMENDADO para entidades con ciclo de vida independiente
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE]  # ← Sin REMOVE, items persisten
+    fetch: LAZY
+
+# ⚠️ CUIDADO con ALL - incluye REMOVE
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [ALL]  # ← Eliminar Order borra todos los OrderItem
+    fetch: LAZY
+
+# ❌ EVITAR array vacío si quieres persistir hijos
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: []  # ← Requiere guardar OrderItem manualmente
+    fetch: LAZY
+```
+
+#### **¿Qué pasa sin Cascade?**
+
+```yaml
+# Sin cascade: [PERSIST]
+cascade: []
+
+# Comportamiento:
+order.addOrderItem(item);
+repository.save(order);  // ❌ Order se guarda, OrderItem NO
+```
+
+```yaml
+# Con cascade: [PERSIST, MERGE]
+cascade: [PERSIST, MERGE]
+
+# Comportamiento:
+order.addOrderItem(item);
+repository.save(order);  // ✅ Order y OrderItem se guardan automáticamente
+```
+
+---
+
+### 🚀 Opciones Fetch (Estrategia de Carga)
+
+Las opciones de `fetch` determinan CUÁNDO se cargan las entidades relacionadas desde la base de datos.
+
+#### **Opciones de Fetch:**
+
+| Opción | Descripción | Comportamiento | ¿Cuándo usar? |
+|--------|-------------|----------------|---------------|
+| `LAZY` | Carga bajo demanda (cuando accedes) | Solo trae el padre inicialmente | ✅ **Recomendado por defecto** |
+| `EAGER` | Carga inmediata (siempre) | Trae padre + hijos en el mismo query | ⚠️ Solo si SIEMPRE necesitas los hijos |
+
+#### **Ejemplo LAZY (Recomendado):**
+
+```yaml
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE]
+    fetch: LAZY  # ← Carga items solo cuando los accedes
+```
+
+**SQL generado:**
+```sql
+-- Primera consulta: Solo trae Order
+SELECT * FROM orders WHERE id = ?
+
+-- Segunda consulta: Solo si accedes a order.getOrderItems()
+SELECT * FROM order_items WHERE order_id = ?
+```
+
+**✅ Ventajas:**
+- Mejor rendimiento inicial
+- Solo carga lo que necesitas
+- Evita cargar datos innecesarios
+
+**⚠️ Desventaja:**
+- Puede causar N+1 queries si no usas `JOIN FETCH`
+
+#### **Ejemplo EAGER (Usar con cuidado):**
+
+```yaml
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE]
+    fetch: EAGER  # ← Siempre carga items con Order
+```
+
+**SQL generado:**
+```sql
+-- Una sola consulta: Trae Order + OrderItems
+SELECT o.*, i.* 
+FROM orders o 
+LEFT JOIN order_items i ON i.order_id = o.id
+WHERE o.id = ?
+```
+
+**✅ Ventaja:**
+- Una sola consulta SQL
+- Datos disponibles inmediatamente
+
+**❌ Desventajas:**
+- Carga datos aunque no los uses
+- Queries más pesados
+- Puede causar problemas de rendimiento
+
+#### **Configuraciones Recomendadas por Tipo:**
+
+```yaml
+# OneToMany: SIEMPRE LAZY
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE]
+    fetch: LAZY  # ← Evita cargar todos los items siempre
+
+# ManyToOne: LAZY por defecto, EAGER solo si siempre lo necesitas
+relationships:
+  - type: ManyToOne
+    target: Customer
+    joinColumn: customer_id
+    fetch: LAZY  # ← LAZY por defecto
+
+# OneToOne: LAZY si es opcional, EAGER si siempre existe
+relationships:
+  - type: OneToOne
+    target: OrderSummary
+    mappedBy: order
+    cascade: [PERSIST, MERGE]
+    fetch: LAZY  # ← LAZY si no siempre lo usas
+```
+
+#### **Problema N+1 y cómo resolverlo:**
+
+**Problema:**
+```java
+// Con LAZY fetch
+List<Order> orders = orderRepository.findAll();  // 1 query
+orders.forEach(order -> {
+    order.getOrderItems().forEach(item -> {      // N queries (uno por Order)
+        System.out.println(item.getProductName());
+    });
+});
+// Total: 1 + N queries = N+1 problema
+```
+
+**Solución - Usar JOIN FETCH en queries:**
+```java
+@Query("SELECT o FROM OrderJpa o LEFT JOIN FETCH o.orderItems WHERE o.id = :id")
+OrderJpa findByIdWithItems(@Param("id") String id);
+```
+
+---
+
 ### ¿Cuándo definir manualmente las relaciones inversas?
 
 #### ❌ NO necesitas definir ManyToOne si:
