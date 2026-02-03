@@ -1,0 +1,9 @@
+package <%= packageName %>.<%= moduleName %>.application.queries;
+
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+import <%= packageName %>.shared.domain.interfaces.Query;
+
+public record Get<%= aggregateName %>Query(
+    <%- idType %> id
+) implements Query<<%= aggregateName %>ResponseDto> {
+}

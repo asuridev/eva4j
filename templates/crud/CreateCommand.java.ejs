@@ -1,0 +1,26 @@
+package <%= packageName %>.<%= moduleName %>.application.commands;
+
+import <%= packageName %>.shared.domain.interfaces.Command;
+<% if (hasValueObjects) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
+<% } %>
+<% if (hasEnums) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
+<% } %>
+<% if (hasItems) { %>
+import java.util.List;
+import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= itemEntityName %>Dto;
+<% } %>
+<% imports.forEach(imp => { %>
+<%- imp %>
+<% }); %>
+
+public record Create<%= aggregateName %>Command(
+<% commandFields.forEach((field, idx) => { %>
+    <%- field.javaType %> <%= field.name %><% if (idx < commandFields.length - 1 || hasItems) { %>,<% } %>
+<% }); %>
+<% if (hasItems) { %>
+    List<Create<%= itemEntityName %>Dto> items
+<% } %>
+) implements Command {
+}

@@ -1,0 +1,42 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ResponseMapper;
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.interfaces.QueryHandler;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
+/**
+ * FindAll<%= aggregateName %>sQueryHandler
+ * Handles retrieval of all <%= aggregateName %>s
+ */
+@Slf4j
+@ApplicationComponent
+public class FindAll<%= aggregateName %>sQueryHandler implements QueryHandler<FindAll<%= aggregateName %>sQuery, List<<%= aggregateName %>ResponseDto>> {
+
+    private final <%= aggregateName %>Repository repository;
+    private final <%= aggregateName %>ResponseMapper mapper;
+
+    public FindAll<%= aggregateName %>sQueryHandler(<%= aggregateName %>Repository repository, 
+                                                     <%= aggregateName %>ResponseMapper mapper) {
+        this.repository = repository;
+        this.mapper = mapper;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<<%= aggregateName %>ResponseDto> handle(FindAll<%= aggregateName %>sQuery query) {
+        log.info("Handling FindAll<%= aggregateName %>sQuery");
+        
+        List<<%= aggregateName %>> entities = repository.findAll();
+        
+        log.info("FindAll<%= aggregateName %>s retrieved - total elements: {}", entities.size());
+        return mapper.toDto(entities);
+    }
+}

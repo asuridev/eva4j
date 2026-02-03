@@ -1,0 +1,37 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggregateName %>Command;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
+import <%= packageName %>.shared.domain.interfaces.CommandHandler;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Delete<%= aggregateName %>CommandHandler
+ * Handles deletion of a <%= aggregateName %> aggregate
+ */
+@Slf4j
+@ApplicationComponent
+public class Delete<%= aggregateName %>CommandHandler implements CommandHandler<Delete<%= aggregateName %>Command> {
+
+    private final <%= aggregateName %>Repository repository;
+
+    public Delete<%= aggregateName %>CommandHandler(<%= aggregateName %>Repository repository) {
+        this.repository = repository;
+    }
+
+    @Override
+    @Transactional
+    public void handle(Delete<%= aggregateName %>Command command) {
+        log.info("Handling Delete<%= aggregateName %>Command for id: {}", command.id());
+        
+        if (!repository.existsById(command.id())) {
+            throw new NotFoundException("<%= aggregateName %> not found with id: " + command.id());
+        }
+        
+        repository.deleteById(command.id());
+        log.info("<%= aggregateName %> deleted successfully with id: {}", command.id());
+    }
+}

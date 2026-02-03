@@ -1,0 +1,42 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.queries.Get<%= aggregateName %>Query;
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ResponseMapper;
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
+import <%= packageName %>.shared.domain.interfaces.QueryHandler;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Get<%= aggregateName %>QueryHandler
+ * Handles retrieval of a single <%= aggregateName %> by ID
+ */
+@Slf4j
+@ApplicationComponent
+public class Get<%= aggregateName %>QueryHandler implements QueryHandler<Get<%= aggregateName %>Query, <%= aggregateName %>ResponseDto> {
+
+    private final <%= aggregateName %>Repository repository;
+    private final <%= aggregateName %>ResponseMapper mapper;
+
+    public Get<%= aggregateName %>QueryHandler(<%= aggregateName %>Repository repository, 
+                                                <%= aggregateName %>ResponseMapper mapper) {
+        this.repository = repository;
+        this.mapper = mapper;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public <%= aggregateName %>ResponseDto handle(Get<%= aggregateName %>Query query) {
+        log.info("Handling Get<%= aggregateName %>Query for id: {}", query.id());
+        
+        <%= aggregateName %> entity = repository.findById(query.id())
+            .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + query.id()));
+        
+        log.info("<%= aggregateName %> retrieved successfully with id: {}", query.id());
+        return mapper.toDto(entity);
+    }
+}

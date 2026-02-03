@@ -1,0 +1,8 @@
+package <%= packageName %>.<%= moduleName %>.application.commands;
+
+import <%= packageName %>.shared.domain.interfaces.Command;
+
+public record Delete<%= aggregateName %>Command(
+    <%- idType %> id
+) implements Command {
+}

@@ -2,9 +2,10 @@ const ora = require('ora');
 const chalk = require('chalk');
 const path = require('path');
 const fs = require('fs-extra');
+const inquirer = require('inquirer');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toPackagePath } = require('../utils/naming');
+const { toPackagePath, toCamelCase, toKebabCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports } = require('../utils/yaml-to-entity');
 const SharedGenerator = require('../generators/shared-generator');
@@ -308,6 +309,77 @@ async function generateEntitiesCommand(moduleName) {
     console.log(chalk.white(`   Total files: ${generatedFiles.length}`));
     console.log();
 
+    // Ask user if they want to generate CRUD resources
+    const { generateCrud } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'generateCrud',
+        message: 'Do you want to generate CRUD resources for aggregate roots?',
+        default: true
+      }
+    ]);
+
+    if (generateCrud) {
+      // Ask for API version
+      const { apiVersion } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'apiVersion',
+          message: 'Enter API version for REST endpoints:',
+          default: 'v1',
+          validate: (input) => {
+            if (!input || input.trim() === '') {
+              return 'API version cannot be empty';
+            }
+            return true;
+          }
+        }
+      ]);
+
+      spinner.start('Generating CRUD resources...');
+
+      // Generate CRUD for each aggregate root
+      for (const aggregate of aggregates) {
+        await generateCrudResources(
+          aggregate,
+          moduleName,
+          moduleBasePath,
+          packageName,
+          apiVersion,
+          generatedFiles
+        );
+      }
+
+      spinner.succeed(chalk.green('CRUD resources generated! ✨'));
+      
+      console.log(chalk.blue('\n📄 Generated CRUD files:'));
+      const crudFiles = generatedFiles.filter(f => 
+        f.type.includes('Command') || 
+        f.type.includes('Query') || 
+        f.type.includes('Handler') || 
+        f.type.includes('DTO') || 
+        f.type.includes('Controller') ||
+        f.type.includes('Mapper')
+      );
+      
+      const groupedCrudFiles = crudFiles.reduce((acc, file) => {
+        if (!acc[file.type]) acc[file.type] = [];
+        acc[file.type].push(file);
+        return acc;
+      }, {});
+
+      Object.keys(groupedCrudFiles).forEach(type => {
+        console.log(chalk.gray(`\n  ${type}:`));
+        groupedCrudFiles[type].forEach(file => {
+          console.log(chalk.gray(`    ├── ${file.name}`));
+        });
+      });
+
+      console.log(chalk.blue(`\n✅ Total CRUD files: ${crudFiles.length}`));
+    }
+
+    console.log();
+
   } catch (error) {
     spinner.fail(chalk.red('Failed to generate entities'));
     console.error(chalk.red('\n❌ Error:'), error.message);
@@ -316,6 +388,195 @@ async function generateEntitiesCommand(moduleName) {
     }
     process.exit(1);
   }
+}
+
+/**
+ * Generate CRUD resources for an aggregate root
+ */
+async function generateCrudResources(aggregate, moduleName, moduleBasePath, packageName, apiVersion, generatedFiles) {
+  const { name: aggregateName, rootEntity, secondaryEntities } = aggregate;
+  const templatesDir = path.join(__dirname, '..', '..', 'templates', 'crud');
+  
+  // Get ID field and type
+  const idField = rootEntity.fields[0];
+  const idType = idField.javaType;
+  
+  // Filter command fields (exclude id, createdAt, updatedAt)
+  const commandFields = rootEntity.fields.filter(f => 
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+  );
+  
+  // Check if has OneToMany relationships (items)
+  const oneToManyRels = rootEntity.relationships.filter(r => r.type === 'OneToMany' && !r.isInverse);
+  const hasItems = oneToManyRels.length > 0;
+  const itemEntityName = hasItems ? oneToManyRels[0].target : null;
+  const itemEntity = hasItems ? secondaryEntities.find(e => e.name === itemEntityName) : null;
+  const itemFields = itemEntity ? itemEntity.fields.filter(f => 
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+  ) : [];
+  
+  // Detect if has value objects or enums
+  const hasValueObjects = rootEntity.fields.some(f => f.isValueObject);
+  const hasEnums = rootEntity.enums && rootEntity.enums.length > 0;
+  
+  // Resource naming
+  const resourceNameCamel = toCamelCase(aggregateName);
+  const resourceNameKebab = toKebabCase(aggregateName);
+  
+  // Base context for all templates
+  const baseContext = {
+    packageName,
+    moduleName,
+    aggregateName,
+    rootEntity,
+    secondaryEntities,
+    idType,
+    commandFields,
+    hasItems,
+    itemEntityName,
+    itemFields,
+    hasValueObjects,
+    hasEnums,
+    imports: rootEntity.imports,
+    apiVersion,
+    resourceNameCamel,
+    resourceNameKebab
+  };
+  
+  // 1. Generate ResponseMapper
+  await renderAndWrite(
+    path.join(templatesDir, 'ResponseMapper.java.ejs'),
+    path.join(moduleBasePath, 'application', 'mappers', `${aggregateName}ResponseMapper.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Application Mapper', name: `${aggregateName}ResponseMapper`, path: `${moduleName}/application/mappers/${aggregateName}ResponseMapper.java` });
+  
+  // 2. Generate Commands
+  await renderAndWrite(
+    path.join(templatesDir, 'CreateCommand.java.ejs'),
+    path.join(moduleBasePath, 'application', 'commands', `Create${aggregateName}Command.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Command', name: `Create${aggregateName}Command`, path: `${moduleName}/application/commands/Create${aggregateName}Command.java` });
+  
+  await renderAndWrite(
+    path.join(templatesDir, 'DeleteCommand.java.ejs'),
+    path.join(moduleBasePath, 'application', 'commands', `Delete${aggregateName}Command.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Command', name: `Delete${aggregateName}Command`, path: `${moduleName}/application/commands/Delete${aggregateName}Command.java` });
+  
+  // 3. Generate Queries
+  await renderAndWrite(
+    path.join(templatesDir, 'GetQuery.java.ejs'),
+    path.join(moduleBasePath, 'application', 'queries', `Get${aggregateName}Query.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Query', name: `Get${aggregateName}Query`, path: `${moduleName}/application/queries/Get${aggregateName}Query.java` });
+  
+  await renderAndWrite(
+    path.join(templatesDir, 'ListQuery.java.ejs'),
+    path.join(moduleBasePath, 'application', 'queries', `FindAll${aggregateName}sQuery.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Query', name: `FindAll${aggregateName}sQuery`, path: `${moduleName}/application/queries/FindAll${aggregateName}sQuery.java` });
+  
+  // 4. Generate Handlers
+  await renderAndWrite(
+    path.join(templatesDir, 'CreateCommandHandler.java.ejs'),
+    path.join(moduleBasePath, 'application', 'usecases', `Create${aggregateName}CommandHandler.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Handler', name: `Create${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Create${aggregateName}CommandHandler.java` });
+  
+  await renderAndWrite(
+    path.join(templatesDir, 'GetQueryHandler.java.ejs'),
+    path.join(moduleBasePath, 'application', 'usecases', `Get${aggregateName}QueryHandler.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Handler', name: `Get${aggregateName}QueryHandler`, path: `${moduleName}/application/usecases/Get${aggregateName}QueryHandler.java` });
+  
+  await renderAndWrite(
+    path.join(templatesDir, 'ListQueryHandler.java.ejs'),
+    path.join(moduleBasePath, 'application', 'usecases', `FindAll${aggregateName}sQueryHandler.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Handler', name: `FindAll${aggregateName}sQueryHandler`, path: `${moduleName}/application/usecases/FindAll${aggregateName}sQueryHandler.java` });
+  
+  await renderAndWrite(
+    path.join(templatesDir, 'DeleteCommandHandler.java.ejs'),
+    path.join(moduleBasePath, 'application', 'usecases', `Delete${aggregateName}CommandHandler.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Handler', name: `Delete${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Delete${aggregateName}CommandHandler.java` });
+  
+  // 5. Generate DTOs
+  const responseDtoContext = {
+    ...baseContext,
+    allFields: rootEntity.fields,
+    relationships: oneToManyRels
+  };
+  
+  await renderAndWrite(
+    path.join(templatesDir, 'ResponseDto.java.ejs'),
+    path.join(moduleBasePath, 'application', 'dtos', `${aggregateName}ResponseDto.java`),
+    responseDtoContext
+  );
+  generatedFiles.push({ type: 'DTO', name: `${aggregateName}ResponseDto`, path: `${moduleName}/application/dtos/${aggregateName}ResponseDto.java` });
+  
+  // Generate secondary entity DTOs
+  for (const entity of secondaryEntities) {
+    const entityDtoContext = {
+      packageName,
+      moduleName,
+      entityName: entity.name,
+      fields: entity.fields,
+      hasValueObjects: entity.fields.some(f => f.isValueObject),
+      hasEnums: entity.enums && entity.enums.length > 0,
+      imports: entity.imports
+    };
+    
+    await renderAndWrite(
+      path.join(templatesDir, 'SecondaryEntityDto.java.ejs'),
+      path.join(moduleBasePath, 'application', 'dtos', `${entity.name}Dto.java`),
+      entityDtoContext
+    );
+    generatedFiles.push({ type: 'DTO', name: `${entity.name}Dto`, path: `${moduleName}/application/dtos/${entity.name}Dto.java` });
+  }
+  
+  // Generate CreateItemDto for ALL secondary entities (not just first OneToMany)
+  console.log(`[DEBUG] Generating Create DTOs for ${secondaryEntities.length} secondary entities`);
+  for (const entity of secondaryEntities) {
+    console.log(`[DEBUG] Generating CreateItemDto for entity: ${entity.name}`);
+    const createFields = entity.fields.filter(f => 
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+    );
+    
+    const createItemDtoContext = {
+      packageName,
+      moduleName,
+      entityName: entity.name,
+      fields: createFields,
+      hasValueObjects: entity.fields.some(f => f.isValueObject),
+      hasEnums: entity.enums && entity.enums.length > 0,
+      imports: entity.imports
+    };
+    
+    await renderAndWrite(
+      path.join(templatesDir, 'CreateItemDto.java.ejs'),
+      path.join(moduleBasePath, 'application', 'dtos', `Create${entity.name}Dto.java`),
+      createItemDtoContext
+    );
+    generatedFiles.push({ type: 'DTO', name: `Create${entity.name}Dto`, path: `${moduleName}/application/dtos/Create${entity.name}Dto.java` });
+  }
+  
+  // 6. Generate Controller
+  await renderAndWrite(
+    path.join(templatesDir, 'Controller.java.ejs'),
+    path.join(moduleBasePath, 'infrastructure', 'rest', 'controllers', resourceNameCamel, apiVersion, `${aggregateName}Controller.java`),
+    baseContext
+  );
+  generatedFiles.push({ type: 'Controller', name: `${aggregateName}Controller`, path: `${moduleName}/infrastructure/rest/controllers/${resourceNameCamel}/${apiVersion}/${aggregateName}Controller.java` });
 }
 
 module.exports = generateEntitiesCommand;

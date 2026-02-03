@@ -1,0 +1,24 @@
+package <%= packageName %>.<%= moduleName %>.application.dtos;
+
+<% if (hasValueObjects) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
+<% } %>
+<% if (hasEnums) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
+<% } %>
+<% if (hasItems) { %>
+import java.util.List;
+<% } %>
+<% imports.forEach(imp => { %>
+<%- imp %>
+<% }); %>
+
+public record <%= aggregateName %>ResponseDto(
+<% allFields.forEach((field, idx) => { %>
+    <%- field.javaType %> <%= field.name %><% if (idx < allFields.length - 1 || relationships.length > 0) { %>,<% } %>
+<% }); %>
+<% relationships.forEach((rel, idx) => { %>
+    List<<%= rel.target %>Dto> <%= rel.fieldName %><% if (idx < relationships.length - 1) { %>,<% } %>
+<% }); %>
+) {
+}

@@ -1,0 +1,65 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.rest.controllers.<%= resourceNameCamel %>.<%= apiVersion %>;
+
+import <%= packageName %>.<%= moduleName %>.application.commands.Create<%= aggregateName %>Command;
+import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggregateName %>Command;
+import <%= packageName %>.<%= moduleName %>.application.queries.Get<%= aggregateName %>Query;
+import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+import <%= packageName %>.shared.infrastructure.configurations.useCaseConfig.UseCaseMediator;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/<%= apiVersion %>/<%= resourceNameKebab %>")
+@Slf4j
+@Tag(name = "<%= aggregateName %>", description = "<%= aggregateName %> Management API")
+public class <%= aggregateName %>Controller {
+
+    private final UseCaseMediator useCaseMediator;
+
+    public <%= aggregateName %>Controller(UseCaseMediator useCaseMediator) {
+        this.useCaseMediator = useCaseMediator;
+    }
+
+    /**
+     * Create a new <%= aggregateName %>
+     */
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Create <%= aggregateName %>")
+    public void create(@Valid @RequestBody Create<%= aggregateName %>Command command) {
+        log.info("Creating <%= aggregateName %>: {}", command);
+        useCaseMediator.dispatch(command);
+    }
+
+    @GetMapping("/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "Get <%= aggregateName %> by ID")
+    public <%= aggregateName %>ResponseDto findById(@PathVariable <%- idType %> id) {
+        log.info("Finding <%= aggregateName %>: {}", id);
+        return useCaseMediator.dispatch(new Get<%= aggregateName %>Query(id));
+    }
+
+    @GetMapping
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "Get all <%= aggregateName %>s")
+    public List<<%= aggregateName %>ResponseDto> findAll() {
+        log.info("Finding all <%= aggregateName %>s");
+        return useCaseMediator.dispatch(new FindAll<%= aggregateName %>sQuery());
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    @Operation(summary = "Delete <%= aggregateName %>")
+    public void delete(@PathVariable <%- idType %> id) {
+        log.info("Deleting <%= aggregateName %>: {}", id);
+        useCaseMediator.dispatch(new Delete<%= aggregateName %>Command(id));
+    }
+}
