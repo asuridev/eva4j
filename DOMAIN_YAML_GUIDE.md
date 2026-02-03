@@ -43,17 +43,29 @@ Para cada agregado definido, eva4j genera:
 ```yaml
 aggregates:
   - name: NombreAgregado
-    rootEntity:
-      # Definición de la entidad raíz
-    
-    secondaryEntities:
-      # Entidades dentro del agregado
+    entities:
+      # Array de entidades (una DEBE tener isRoot: true)
+      - name: entityName
+        isRoot: true          # Marca la entidad raíz del agregado
+        tableName: table_name
+        fields: []
+        relationships: []
+      
+      - name: secondaryEntityName
+        # Sin isRoot = entidad secundaria
+        tableName: secondary_table
+        fields: []
+        relationships: []
     
     valueObjects:
       # Value Objects del agregado
+      - name: ValueObjectName
+        fields: []
     
     enums:
       # Enumeraciones del dominio
+      - name: EnumName
+        values: []
 ```
 
 ### Ubicación del archivo
@@ -76,9 +88,10 @@ Un agregado es un conjunto de entidades y value objects que forman una unidad de
 ```yaml
 aggregates:
   - name: Order  # Nombre del agregado (PascalCase)
-    rootEntity:
-      name: order
-      # ... configuración
+    entities:
+      - name: order
+        isRoot: true  # Marca la entidad raíz
+        # ... configuración
 ```
 
 ### Nombre del agregado
@@ -97,85 +110,162 @@ aggregates:
 
 La entidad raíz es el punto de entrada al agregado. Todas las operaciones deben pasar por ella.
 
+**⚠️ Importante**: La entidad raíz se define dentro del array `entities` con `isRoot: true`.
+
 ```yaml
-rootEntity:
-  name: order              # Nombre de la entidad (camelCase o snake_case)
-  tableName: orders        # Nombre de la tabla en BD (opcional)
-  isRoot: true             # Siempre true para rootEntity
-  
-  fields:
-    - name: id
-      type: String         # String generará UUID, Long generará IDENTITY
-      
-    - name: orderNumber
-      type: String
-      
-    - name: status
-      type: OrderStatus    # Referencia a un enum
-      
-    - name: totalAmount
-      type: Money          # Referencia a un value object
-      
-    - name: createdAt
-      type: LocalDateTime
-  
-  relationships:
-    - type: OneToMany
-      target: OrderItem
-      mappedBy: order
-      cascade: [PERSIST, MERGE, REMOVE]
-      fetch: LAZY
+aggregates:
+  - name: Order
+    entities:
+      - name: order              # Nombre de la entidad (camelCase o snake_case)
+        isRoot: true             # ← OBLIGATORIO para marcar la raíz
+        tableName: orders        # Nombre de la tabla en BD (opcional)
+        
+        fields:
+          - name: id
+            type: String         # String generará UUID, Long generará IDENTITY
+            
+          - name: orderNumber
+            type: String
+            
+          - name: status
+            type: OrderStatus    # Referencia a un enum
+            
+          - name: totalAmount
+            type: Money          # Referencia a un value object
+            
+          - name: createdAt
+            type: LocalDateTime
+        
+        relationships:
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
 ```
 
 ### Entidades Secundarias
 
-Entidades que pertenecen al agregado pero no son la raíz.
+Entidades que pertenecen al agregado pero no son la raíz. Se definen en el mismo array `entities` **sin** `isRoot` (o con `isRoot: false`).
 
 ```yaml
-secondaryEntities:
-  - name: orderItem
-    tableName: order_items
-    
-    fields:
-      - name: id
-        type: Long
+aggregates:
+  - name: Order
+    entities:
+      # ... entidad raíz order con isRoot: true ...
+      
+      - name: orderItem          # ← Entidad secundaria
+        tableName: order_items
+        # Sin isRoot o isRoot: false = secundaria
         
-      - name: productId
-        type: String
+        fields:
+          - name: id
+            type: Long
+            
+          - name: productId
+            type: String
+            
+          - name: quantity
+            type: Integer
+            
+          - name: unitPrice
+            type: Money
         
-      - name: quantity
-        type: Integer
-        
-      - name: unitPrice
-        type: Money
-    
-    relationships:
-      - type: ManyToOne
-        target: Order
-        joinColumn: order_id
-        fetch: LAZY
+        relationships:
+          - type: ManyToOne
+            target: Order
+            joinColumn: order_id
+            fetch: LAZY
 ```
 
 ### Campos (Fields)
 
-#### Sintaxis completa
+#### Sintaxis
 
 ```yaml
 fields:
-  - name: fieldName          # Nombre del campo (camelCase)
-    type: String             # Tipo de dato Java
-    isValueObject: true      # (Opcional) Si es un VO
-    isEmbedded: true         # (Opcional) Para JPA @Embedded
-    annotations:             # (Opcional) Anotaciones personalizadas
-      - "@Column(length = 500)"
+  - name: fieldName          # Nombre del campo (camelCase) - OBLIGATORIO
+    type: String             # Tipo de dato Java - OBLIGATORIO
 ```
 
-#### Detección automática
+**Propiedades soportadas:**
+- `name`: Nombre del campo (obligatorio)
+- `type`: Tipo de dato Java (obligatorio)
 
-eva4j detecta automáticamente:
-- ✅ **Value Objects**: Si el tipo coincide con un VO definido
-- ✅ **Enums**: Si el tipo coincide con un enum definido
-- ✅ **Tipos primitivos**: String, Integer, Long, etc.
+#### Detección automática de tipos
+
+eva4j detecta automáticamente el tipo de campo basándose **únicamente** en `type`:
+
+**✅ Value Objects** - Detectados automáticamente
+```yaml
+fields:
+  - name: totalAmount
+    type: Money        # Si Money está en valueObjects → @Embedded automático
+```
+
+**✅ Enums** - Detectados automáticamente
+```yaml
+fields:
+  - name: status
+    type: OrderStatus  # Si OrderStatus está en enums → @Enumerated(STRING)
+```
+
+**✅ Tipos primitivos**
+```yaml
+fields:
+  - name: name
+    type: String       # → VARCHAR
+  - name: age
+    type: Integer      # → INTEGER
+  - name: price
+    type: BigDecimal   # → DECIMAL
+```
+
+**✅ Tipos de fecha** - Importados automáticamente
+```yaml
+fields:
+  - name: createdAt
+    type: LocalDateTime  # → timestamp + import java.time.LocalDateTime
+```
+
+**✅ Colecciones** - @ElementCollection automático
+```yaml
+fields:
+  - name: tags
+    type: List<String>   # → @ElementCollection con tabla secundaria
+```
+
+#### ❌ NO necesitas especificar
+
+eva4j genera automáticamente las anotaciones JPA correctas:
+- `@Embedded` para Value Objects
+- `@Enumerated(EnumType.STRING)` para Enums
+- `@ElementCollection` para listas
+- Imports necesarios
+
+#### Ejemplos correctos
+
+```yaml
+# Value Object
+fields:
+  - name: totalAmount
+    type: Money              # ✅ Suficiente - eva4j detecta automáticamente
+
+# Enum
+fields:
+  - name: status
+    type: OrderStatus        # ✅ Suficiente - eva4j detecta automáticamente
+
+# Tipo primitivo
+fields:
+  - name: description
+    type: String             # ✅ Tipo básico
+
+# Colección
+fields:
+  - name: tags
+    type: List<String>       # ✅ @ElementCollection automático
+```
 
 ---
 
@@ -336,14 +426,15 @@ eva4j soporta relaciones JPA bidireccionales completas con generación automáti
 **Solo necesitas definir UN lado:**
 
 ```yaml
-rootEntity:
-  name: order
-  relationships:
-    - type: OneToMany
-      target: OrderItem
-      mappedBy: order          # ← eva4j crea automáticamente ManyToOne en OrderItem
-      cascade: [PERSIST, MERGE]
-      fetch: LAZY
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        mappedBy: order          # ← eva4j crea automáticamente ManyToOne en OrderItem
+        cascade: [PERSIST, MERGE]
+        fetch: LAZY
 ```
 
 **eva4j genera automáticamente en OrderItem:**
@@ -370,14 +461,15 @@ private OrderJpa order;
 **Definición en la entidad que tiene la colección:**
 
 ```yaml
-rootEntity:
-  name: order
-  relationships:
-    - type: OneToMany
-      target: OrderItem        # Entidad relacionada
-      mappedBy: order          # Campo en OrderItem que apunta a Order
-      cascade: [PERSIST, MERGE, REMOVE]
-      fetch: LAZY
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem        # Entidad relacionada
+        mappedBy: order          # Campo en OrderItem que apunta a Order
+        cascade: [PERSIST, MERGE, REMOVE]
+        fetch: LAZY
 ```
 
 **Genera en dominio:**
@@ -412,8 +504,9 @@ private OrderJpa order;
 **Definición manual (opcional si ya usaste mappedBy en OneToMany):**
 
 ```yaml
-secondaryEntities:
+entities:
   - name: orderItem
+    # Sin isRoot = entidad secundaria
     relationships:
       - type: ManyToOne
         target: Order
@@ -435,24 +528,27 @@ private OrderJpa order;
 **Bidireccional con mappedBy:**
 
 ```yaml
-# En Order
-relationships:
-  - type: OneToOne
-    target: OrderSummary
-    mappedBy: order
-    cascade: [PERSIST, MERGE]
-    fetch: LAZY
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToOne
+        target: OrderSummary
+        mappedBy: order
+        cascade: [PERSIST, MERGE]
+        fetch: LAZY
 ```
 
 **Sin mappedBy (owner):**
 
 ```yaml
-# En OrderSummary
-relationships:
-  - type: OneToOne
-    target: Order
-    joinColumn: order_id
-    fetch: LAZY
+entities:
+  - name: orderSummary
+    relationships:
+      - type: OneToOne
+        target: Order
+        joinColumn: order_id
+        fetch: LAZY
 ```
 
 ### Opciones de relaciones
@@ -465,6 +561,241 @@ relationships:
 | `joinColumn` | nombre_columna | Nombre de la columna FK |
 | `cascade` | [PERSIST, MERGE, REMOVE, REFRESH, DETACH, ALL] | Operaciones en cascada |
 | `fetch` | LAZY, EAGER | Estrategia de carga |
+
+---
+
+### ¿Cuándo definir manualmente las relaciones inversas?
+
+#### ❌ NO necesitas definir ManyToOne si:
+
+Ya definiste `OneToMany` con `mappedBy` en el lado "padre". eva4j genera automáticamente la relación inversa.
+
+**Ejemplo - Solo defines OneToMany:**
+
+```yaml
+# ✅ SUFICIENTE: Solo defines esto en Order
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        mappedBy: order          # ← eva4j genera ManyToOne automáticamente
+        cascade: [PERSIST, MERGE, REMOVE]
+        fetch: LAZY
+
+# ❌ NO NECESITAS esto en OrderItem (se genera automáticamente)
+#   - name: orderItem
+#     relationships:
+#       - type: ManyToOne
+#         target: Order
+#         joinColumn: order_id
+#         fetch: LAZY
+```
+
+**Resultado:** Relación bidireccional completa con FK `order_id` generada automáticamente.
+
+**✅ Ventajas:**
+- Menos código YAML (solo defines un lado)
+- Sin duplicación ni inconsistencias
+- Funciona igual que definir ambos lados
+- FK inferida automáticamente: `{mappedBy}_id`
+
+---
+
+#### ✅ SÍ debes definir ManyToOne manualmente si:
+
+##### 1. **Necesitas un nombre específico de columna FK**
+
+```yaml
+# Define ambos lados para controlar el nombre de FK
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        mappedBy: order
+        cascade: [PERSIST, MERGE]
+        fetch: LAZY
+  
+  - name: orderItem
+    relationships:
+      - type: ManyToOne
+        target: Order
+        joinColumn: fk_pedido_uuid    # ← Nombre personalizado
+        fetch: LAZY
+```
+
+**Cuándo usar:**
+- Tu BD tiene convenciones específicas (`fk_*`, prefijos, etc.)
+- Necesitas mantener compatibilidad con esquema existente
+- Migración desde otra herramienta/framework
+
+---
+
+##### 2. **Múltiples FKs a la misma entidad**
+
+```yaml
+# Transaction tiene 'from' y 'to' Account
+entities:
+  - name: transaction
+    tableName: transactions
+    
+    fields:
+      - name: id
+        type: String
+      - name: amount
+        type: BigDecimal
+    
+    relationships:
+      # Primera relación
+      - type: ManyToOne
+        target: Account
+        joinColumn: from_account_id    # ← Nombre explícito necesario
+        fetch: LAZY
+      
+      # Segunda relación a la misma entidad
+      - type: ManyToOne
+        target: Account
+        joinColumn: to_account_id      # ← Diferente nombre de FK
+        fetch: LAZY
+```
+
+**Cuándo usar:**
+- Auto-relaciones (árbol de categorías, org chart)
+- Relaciones múltiples al mismo tipo (from/to, parent/child)
+- No puedes usar `mappedBy` (¿cuál de las dos sería?)
+
+---
+
+##### 3. **Relación unidireccional (sin lado inverso)**
+
+```yaml
+# OrderItem necesita Product, pero Product NO necesita OrderItems
+entities:
+  - name: orderItem
+    relationships:
+      - type: ManyToOne
+        target: Product         # Product NO tiene List<OrderItem>
+        joinColumn: product_id
+        fetch: LAZY
+  
+  # En Product NO defines OneToMany
+  - name: product
+    isRoot: true
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+    # Sin relationships hacia OrderItem
+```
+
+**Cuándo usar:**
+- Performance: evitas cargar colecciones innecesarias
+- Product no forma parte del agregado Order
+- Solo necesitas navegación en una dirección
+
+---
+
+#### 📊 Comparación Rápida
+
+| Escenario | ¿Definir ManyToOne? | ¿Por qué? |
+|-----------|---------------------|-----------|
+| Relación estándar con `mappedBy` | ❌ No | eva4j lo genera automáticamente |
+| FK con nombre personalizado | ✅ Sí | Para controlar `joinColumn` |
+| Múltiples FKs a misma entidad | ✅ Sí | Necesitas nombres explícitos |
+| Relación unidireccional | ✅ Sí | No hay lado inverso (`mappedBy`) |
+| Convenciones BD específicas | ✅ Sí | Para cumplir estándares |
+| Caso estándar simple | ❌ No | Deja que eva4j lo genere |
+
+---
+
+#### ⚠️ Error Común
+
+**NO hagas esto:**
+
+```yaml
+# ❌ INCORRECTO: Inconsistencia entre ambos lados
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        mappedBy: order         # ← Espera campo "order" en OrderItem
+        fetch: LAZY
+  
+  - name: orderItem
+    relationships:
+      - type: ManyToOne
+        target: Order
+        joinColumn: pedido_id  # ← Pero la FK se llama diferente
+        fetch: LAZY
+```
+
+**Problema:** `mappedBy: order` busca un campo llamado `order`, pero `pedido_id` no coincide con la convención de nombres.
+
+**✅ Soluciones:**
+
+**Opción A - Deja que eva4j genere automáticamente:**
+```yaml
+# Solo define OneToMany, eva4j genera ManyToOne correctamente
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        mappedBy: order
+        fetch: LAZY
+```
+
+**Opción B - Define ambos lados consistentemente:**
+```yaml
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        mappedBy: pedido        # ← Coincide con el nombre del campo
+        fetch: LAZY
+  
+  - name: orderItem
+    relationships:
+      - type: ManyToOne
+        target: Order
+        joinColumn: pedido_id
+        fetch: LAZY
+```
+
+---
+
+#### 💡 Recomendación General
+
+**Para el 90% de los casos:**
+
+```yaml
+# ✅ MEJOR PRÁCTICA: Solo define OneToMany
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        mappedBy: order
+        cascade: [PERSIST, MERGE, REMOVE]
+        fetch: LAZY
+
+# NO definas ManyToOne en OrderItem
+# eva4j lo genera automáticamente con:
+# - @JoinColumn(name = "order_id")
+# - @ManyToOne(fetch = FetchType.LAZY)
+```
+
+**Solo define ambos lados cuando necesites control específico.**
 
 ---
 
@@ -542,44 +873,43 @@ private List<AddressJpa> addresses = new ArrayList<>();
 ```yaml
 aggregates:
   - name: Order
-    rootEntity:
-      name: order
-      tableName: orders
-      isRoot: true
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        
+        fields:
+          - name: id
+            type: String
+          
+          - name: orderNumber
+            type: String
+          
+          - name: customerId
+            type: String
+          
+          - name: status
+            type: OrderStatus
+          
+          - name: totalAmount
+            type: Money
+          
+          - name: shippingAddress
+            type: Address
+          
+          - name: createdAt
+            type: LocalDateTime
+          
+          - name: updatedAt
+            type: LocalDateTime
+        
+        relationships:
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
       
-      fields:
-        - name: id
-          type: String
-        
-        - name: orderNumber
-          type: String
-        
-        - name: customerId
-          type: String
-        
-        - name: status
-          type: OrderStatus
-        
-        - name: totalAmount
-          type: Money
-        
-        - name: shippingAddress
-          type: Address
-        
-        - name: createdAt
-          type: LocalDateTime
-        
-        - name: updatedAt
-          type: LocalDateTime
-      
-      relationships:
-        - type: OneToMany
-          target: OrderItem
-          mappedBy: order
-          cascade: [PERSIST, MERGE, REMOVE]
-          fetch: LAZY
-    
-    secondaryEntities:
       - name: orderItem
         tableName: order_items
         
@@ -646,47 +976,46 @@ aggregates:
 ```yaml
 aggregates:
   - name: Post
-    rootEntity:
-      name: post
-      tableName: posts
-      isRoot: true
+    entities:
+      - name: post
+        isRoot: true
+        tableName: posts
+        
+        fields:
+          - name: id
+            type: Long
+          
+          - name: title
+            type: String
+          
+          - name: slug
+            type: String
+          
+          - name: content
+            type: String
+          
+          - name: authorId
+            type: String
+          
+          - name: status
+            type: PostStatus
+          
+          - name: publishedAt
+            type: LocalDateTime
+          
+          - name: tags
+            type: List<String>
+          
+          - name: metadata
+            type: PostMetadata
+        
+        relationships:
+          - type: OneToMany
+            target: Comment
+            mappedBy: post
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
       
-      fields:
-        - name: id
-          type: Long
-        
-        - name: title
-          type: String
-        
-        - name: slug
-          type: String
-        
-        - name: content
-          type: String
-        
-        - name: authorId
-          type: String
-        
-        - name: status
-          type: PostStatus
-        
-        - name: publishedAt
-          type: LocalDateTime
-        
-        - name: tags
-          type: List<String>
-        
-        - name: metadata
-          type: PostMetadata
-      
-      relationships:
-        - type: OneToMany
-          target: Comment
-          mappedBy: post
-          cascade: [PERSIST, MERGE, REMOVE]
-          fetch: LAZY
-    
-    secondaryEntities:
       - name: comment
         tableName: comments
         
@@ -735,41 +1064,40 @@ aggregates:
 ```yaml
 aggregates:
   - name: Account
-    rootEntity:
-      name: account
-      tableName: accounts
-      isRoot: true
+    entities:
+      - name: account
+        isRoot: true
+        tableName: accounts
+        
+        fields:
+          - name: id
+            type: String
+          
+          - name: accountNumber
+            type: String
+          
+          - name: customerId
+            type: String
+          
+          - name: accountType
+            type: AccountType
+          
+          - name: balance
+            type: Money
+          
+          - name: status
+            type: AccountStatus
+          
+          - name: openedAt
+            type: LocalDate
+        
+        relationships:
+          - type: OneToMany
+            target: Transaction
+            mappedBy: account
+            cascade: [PERSIST, MERGE]
+            fetch: LAZY
       
-      fields:
-        - name: id
-          type: String
-        
-        - name: accountNumber
-          type: String
-        
-        - name: customerId
-          type: String
-        
-        - name: accountType
-          type: AccountType
-        
-        - name: balance
-          type: Money
-        
-        - name: status
-          type: AccountStatus
-        
-        - name: openedAt
-          type: LocalDate
-      
-      relationships:
-        - type: OneToMany
-          target: Transaction
-          mappedBy: account
-          cascade: [PERSIST, MERGE]
-          fetch: LAZY
-    
-    secondaryEntities:
       - name: transaction
         tableName: transactions
         
@@ -825,19 +1153,20 @@ aggregates:
 ```yaml
 aggregates:
   - name: Customer
-    rootEntity:
-      name: customer
-      fields:
-        - name: id
-          type: String
-        - name: name
-          type: String
-        - name: email
-          type: String
-        - name: phone
-          type: String
-        - name: registeredAt
-          type: LocalDateTime
+    entities:
+      - name: customer
+        isRoot: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+          - name: email
+            type: String
+          - name: phone
+            type: String
+          - name: registeredAt
+            type: LocalDateTime
     
     valueObjects:
       - name: ContactInfo
@@ -848,21 +1177,22 @@ aggregates:
             type: String
   
   - name: Product
-    rootEntity:
-      name: product
-      fields:
-        - name: id
-          type: String
-        - name: name
-          type: String
-        - name: description
-          type: String
-        - name: price
-          type: Money
-        - name: stock
-          type: Integer
-        - name: category
-          type: ProductCategory
+    entities:
+      - name: product
+        isRoot: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+          - name: description
+            type: String
+          - name: price
+            type: Money
+          - name: stock
+            type: Integer
+          - name: category
+            type: ProductCategory
     
     valueObjects:
       - name: Money
