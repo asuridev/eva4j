@@ -7,6 +7,7 @@ const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports } = require('../utils/yaml-to-entity');
+const SharedGenerator = require('../generators/shared-generator');
 
 async function generateEntitiesCommand(moduleName) {
   const projectDir = process.cwd();
@@ -58,6 +59,18 @@ async function generateEntitiesCommand(moduleName) {
     
     spinner.succeed(chalk.green(`Found ${aggregates.length} aggregate(s) and ${allEnums.length} enum(s)`));
     
+    // Check if any entity has auditable: true
+    const hasAuditableEntities = aggregates.some(agg => 
+      agg.rootEntity.auditable || agg.secondaryEntities.some(e => e.auditable)
+    );
+    
+    // Generate AuditableEntity if needed
+    if (hasAuditableEntities) {
+      const sharedBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, 'shared');
+      const sharedGenerator = new SharedGenerator({ packageName, packagePath });
+      await sharedGenerator.generateAuditableEntity(sharedBasePath);
+    }
+    
     console.log(chalk.blue('\n📦 Aggregates to generate:'));
     aggregates.forEach(agg => {
       console.log(chalk.gray(`  ├── ${agg.name} (Root: ${agg.rootEntity.name})`));
@@ -107,7 +120,8 @@ async function generateEntitiesCommand(moduleName) {
         relationships: rootEntity.relationships,
         imports: rootEntity.imports,
         valueObjects,
-        aggregateMethods: aggregate.aggregateMethods
+        aggregateMethods: aggregate.aggregateMethods,
+        auditable: rootEntity.auditable
       };
 
       await renderAndWrite(
@@ -127,7 +141,8 @@ async function generateEntitiesCommand(moduleName) {
         relationships: rootEntity.relationships,
         imports: generateEntityImports(rootEntity.fields, rootEntity.relationships, rootEntity.enums, allEnums, packageName, moduleName, false),
         valueObjects,
-        enums: rootEntity.enums
+        enums: rootEntity.enums,
+        auditable: rootEntity.auditable
       };
 
       await renderAndWrite(
@@ -147,7 +162,8 @@ async function generateEntitiesCommand(moduleName) {
           fields: entity.fields,
           relationships: entity.relationships,
           imports: entity.imports,
-          valueObjects
+          valueObjects,
+          auditable: entity.auditable
         };
 
         await renderAndWrite(
@@ -167,7 +183,8 @@ async function generateEntitiesCommand(moduleName) {
           relationships: entity.relationships,
           imports: generateEntityImports(entity.fields, entity.relationships, entity.enums, allEnums, packageName, moduleName, false),
           valueObjects,
-          enums: entity.enums
+          enums: entity.enums,
+          auditable: entity.auditable
         };
 
         await renderAndWrite(

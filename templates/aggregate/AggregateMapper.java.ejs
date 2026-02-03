@@ -52,7 +52,7 @@ public class <%= aggregateName %>Mapper {
         if (domain == null) return null;
         
         <%= rootEntity.name %>Jpa jpa = <%= rootEntity.name %>Jpa.builder()
-<% rootEntity.fields.forEach(field => { -%>
+<% rootEntity.fields.filter(f => !(f.name === 'createdAt' || f.name === 'updatedAt')).forEach(field => { -%>
 <% if (field.isValueObject) { -%>
                 .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
 <% } else { -%>
@@ -100,7 +100,7 @@ public class <%= aggregateName %>Mapper {
         if (domain == null) return null;
         
         return <%= entity.name %>Jpa.builder()
-<% entity.fields.forEach(field => { -%>
+<% entity.fields.filter(f => !(f.name === 'createdAt' || f.name === 'updatedAt')).forEach(field => { -%>
 <% if (field.isValueObject) { -%>
                 .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
 <% } else { -%>

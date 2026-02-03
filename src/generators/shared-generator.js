@@ -24,6 +24,9 @@ class SharedGenerator {
     // Generate package-info
     await this.generatePackageInfo(sharedBasePath);
     
+    // Generate AuditableEntity (if needed)
+    await this.generateAuditableEntity(sharedBasePath);
+    
     // Generate annotations
     await this.generateAnnotations(sharedBasePath);
     
@@ -52,6 +55,18 @@ class SharedGenerator {
   async generatePackageInfo(basePath) {
     await this.generateFile('package-info.java.ejs', 
       path.join(basePath, 'package-info.java'));
+  }
+
+  async generateAuditableEntity(basePath) {
+    const domainPath = path.join(basePath, 'domain');
+    const auditableEntityPath = path.join(domainPath, 'AuditableEntity.java');
+    
+    // Only generate if it doesn't exist
+    if (await fs.pathExists(auditableEntityPath)) {
+      return;
+    }
+    
+    await this.generateFile('domain/AuditableEntity.java.ejs', auditableEntityPath);
   }
 
   async generateAnnotations(basePath) {

@@ -269,6 +269,149 @@ fields:
 
 ---
 
+### Auditoría Automática
+
+eva4j soporta auditoría automática de entidades usando la propiedad `auditable`. Cuando se establece en `true`, la entidad incluirá automáticamente campos de fecha de creación y modificación.
+
+#### Sintaxis
+
+```yaml
+entities:
+  - name: order
+    isRoot: true
+    auditable: true  # ← Activa auditoría automática
+    fields:
+      - name: orderNumber
+        type: String
+```
+
+#### Qué genera `auditable: true`
+
+**En la entidad de dominio (`Order.java`):**
+```java
+public class Order {
+    private String orderNumber;
+    private LocalDateTime createdAt;   // ← Agregado automáticamente
+    private LocalDateTime updatedAt;   // ← Agregado automáticamente
+    
+    // getters/setters generados automáticamente
+}
+```
+
+**En la entidad JPA (`OrderJpa.java`):**
+```java
+@Entity
+@Table(name = "orders")
+public class OrderJpa extends AuditableEntity {  // ← Extiende clase base
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private String orderNumber;
+    
+    // Los campos createdAt/updatedAt heredados de AuditableEntity
+}
+```
+
+**Clase base generada (`AuditableEntity.java`):**
+```java
+@MappedSuperclass
+@EntityListeners(AuditingEntityListener.class)
+public abstract class AuditableEntity {
+    
+    @CreatedDate
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+    
+    @LastModifiedDate
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+    
+    // getters/setters
+}
+```
+
+#### Características
+
+✅ **Totalmente automático**: Los timestamps se actualizan sin código adicional  
+✅ **Nivel de entidad**: Se puede habilitar para entidades específicas  
+✅ **Spring Data JPA**: Usa `@CreatedDate` y `@LastModifiedDate`  
+✅ **Mapper incluido**: Los campos de auditoría se mapean automáticamente entre domain y JPA  
+
+#### Configuración requerida
+
+La aplicación Spring Boot ya tiene habilitada la auditoría JPA en la clase principal:
+
+```java
+@SpringBootApplication
+@EnableJpaAuditing  // ← Ya configurado por eva4j
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+```
+
+#### Ejemplo completo
+
+```yaml
+aggregates:
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        auditable: true  # ← Habilita auditoría
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          # createdAt y updatedAt se agregan automáticamente
+      
+      - name: review
+        auditable: true  # ← Las entidades secundarias también pueden tener auditoría
+        fields:
+          - name: reviewId
+            type: Long
+          - name: comment
+            type: String
+        relationships:
+          - type: ManyToOne
+            target: product
+            fetch: LAZY
+            joinColumn: product_id
+```
+
+**Resultado en la tabla:**
+```sql
+CREATE TABLE products (
+    product_id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(255),
+    price DECIMAL(19,2),
+    created_at TIMESTAMP NOT NULL,  -- ← Automático
+    updated_at TIMESTAMP NOT NULL   -- ← Automático
+);
+
+CREATE TABLE reviews (
+    review_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    comment TEXT,
+    product_id VARCHAR(36),
+    created_at TIMESTAMP NOT NULL,  -- ← Automático
+    updated_at TIMESTAMP NOT NULL,  -- ← Automático
+    FOREIGN KEY (product_id) REFERENCES products(product_id)
+);
+```
+
+#### Notas importantes
+
+- ✅ `auditable` es **opcional** - por defecto es `false`
+- ✅ Puede usarse en **entidad raíz** o **entidades secundarias**
+- ✅ Los campos `createdAt` y `updatedAt` **no deben** definirse manualmente en `fields`
+- ✅ El tipo es siempre `LocalDateTime`
+- ❌ **No incluye** auditoría de usuario (createdBy/updatedBy) - ver [FUTURE_FEATURES.md](FUTURE_FEATURES.md) para esa funcionalidad
+
+---
+
 ## Value Objects
 
 Los Value Objects son objetos inmutables que representan conceptos del dominio sin identidad propia.

@@ -8,6 +8,9 @@ import lombok.*;
 <% if (valueObjects && valueObjects.length > 0) { %>
 import <%= packageName %>.<%= moduleName %>.infrastructure.database.valueObjects.*;
 <% } %>
+<% if (auditable) { %>
+import <%= packageName %>.shared.domain.AuditableEntity;
+<% } %>
 
 /**
  * <%= name %>Jpa - JPA Entity
@@ -20,9 +23,9 @@ import <%= packageName %>.<%= moduleName %>.infrastructure.database.valueObjects
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class <%= name %>Jpa {
+public class <%= name %>Jpa<% if (auditable) { %> extends AuditableEntity<% } %> {
     
-<% fields.forEach((field, index) => { %>
+<% fields.filter(f => !(auditable && (f.name === 'createdAt' || f.name === 'updatedAt'))).forEach((field, index) => { %>
   <% if (field.isCollection) { %>
     @ElementCollection
     @CollectionTable(name = "<%= tableName %>_<%= field.name %>", joinColumns = @JoinColumn(name = "<%= name.toLowerCase() %>_id"))

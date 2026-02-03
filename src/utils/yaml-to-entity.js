@@ -88,10 +88,24 @@ function parseAggregate(aggregateData) {
  * @returns {Object} Parsed entity
  */
 function parseEntity(entityData, aggregateName, packageName = '', moduleName = '', aggregateEnums = [], valueObjectNames = [], inverseRelationships = {}) {
-  const { name, isRoot = false, tableName, properties, fields: fieldsYaml, relationships = [] } = entityData;
+  const { name, isRoot = false, tableName, properties, fields: fieldsYaml, relationships = [], auditable = false } = entityData;
   
   // Accept both 'properties' and 'fields' field names
-  const entityFields = properties || fieldsYaml || [];
+  let entityFields = properties || fieldsYaml || [];
+  
+  // Validate auditable property
+  if (auditable !== undefined && typeof auditable !== 'boolean') {
+    throw new Error(`Entity "${name}": auditable property must be a boolean (true/false)`);
+  }
+  
+  // Inject audit fields if auditable is true
+  if (auditable === true) {
+    entityFields = [
+      ...entityFields,
+      { name: 'createdAt', type: 'LocalDateTime' },
+      { name: 'updatedAt', type: 'LocalDateTime' }
+    ];
+  }
   
   const className = toPascalCase(name);
   const fieldName = toCamelCase(name);
@@ -124,6 +138,7 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
     fieldName,
     tableName: table,
     isRoot,
+    auditable: auditable === true,
     fields,
     relationships: relations,
     enums,

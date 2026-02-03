@@ -101,21 +101,11 @@ async function addModuleCommand(moduleName, options) {
     }
   }
   
-  // Prompt for module options
-  const answers = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'hasSoftDelete',
-      message: 'Enable soft delete?',
-      default: true
-    },
-    {
-      type: 'confirm',
-      name: 'hasAudit',
-      message: 'Enable audit fields (createdAt, updatedAt)?',
-      default: true
-    }
-  ]);
+  // Default module options (auditoría y soft delete ahora se definen en domain.yaml)
+  const answers = {
+    hasSoftDelete: false,
+    hasAudit: false
+  };
   
   const baseContext = {
     packageName,
