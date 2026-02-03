@@ -318,19 +318,69 @@ async function generateDetachedProject(projectDir, context) {
 }
 
 /**
+ * Transform shared file content by replacing package declarations and imports
+ */
+function transformSharedFileContent(content, packageName, moduleName) {
+  let transformed = content;
+  
+  // Replace package declaration for domain files
+  // package com.example.shared.domain -> package com.example.{moduleName}.domain
+  const packageDomainPattern = new RegExp(
+    `^package\\s+${packageName.replace(/\./g, '\\.')}\\.shared\\.domain`,
+    'gm'
+  );
+  transformed = transformed.replace(packageDomainPattern, `package ${packageName}.${moduleName}.domain`);
+  
+  // Replace package declaration for infrastructure files
+  // package com.example.shared.infrastructure -> package com.example.{moduleName}.infrastructure
+  const packageInfraPattern = new RegExp(
+    `^package\\s+${packageName.replace(/\./g, '\\.')}\\.shared\\.infrastructure`,
+    'gm'
+  );
+  transformed = transformed.replace(packageInfraPattern, `package ${packageName}.${moduleName}.infrastructure`);
+  
+  // Replace import statements for domain
+  const importDomainPattern = new RegExp(
+    `${packageName.replace(/\./g, '\\.')}\\.shared\\.domain\\.`,
+    'g'
+  );
+  transformed = transformed.replace(importDomainPattern, `${packageName}.${moduleName}.domain.`);
+  
+  // Replace import statements for infrastructure
+  const importInfraPattern = new RegExp(
+    `${packageName.replace(/\./g, '\\.')}\\.shared\\.infrastructure\\.`,
+    'g'
+  );
+  transformed = transformed.replace(importInfraPattern, `${packageName}.${moduleName}.infrastructure.`);
+  
+  return transformed;
+}
+
+/**
  * Merge shared components into module structure
  */
 async function mergeSharedComponents(sharedDir, moduleDir, packageName, moduleName) {
   // Merge shared/domain/* into module/domain/
   const sharedDomainDir = path.join(sharedDir, 'domain');
   if (await fs.pathExists(sharedDomainDir)) {
-    const domainSubDirs = await fs.readdir(sharedDomainDir);
-    for (const subDir of domainSubDirs) {
-      const sourcePath = path.join(sharedDomainDir, subDir);
-      const destPath = path.join(moduleDir, 'domain', subDir);
+    const domainEntries = await fs.readdir(sharedDomainDir);
+    for (const entry of domainEntries) {
+      const sourcePath = path.join(sharedDomainDir, entry);
+      const stat = await fs.stat(sourcePath);
       
-      if ((await fs.stat(sourcePath)).isDirectory()) {
-        await fs.copy(sourcePath, destPath, { overwrite: false });
+      if (stat.isDirectory()) {
+        // Copy and transform subdirectories (annotations, interfaces, customExceptions, etc.)
+        const destPath = path.join(moduleDir, 'domain', entry);
+        await copyAndTransformDirectory(sourcePath, destPath, packageName, moduleName);
+      } else if (stat.isFile() && entry.endsWith('.java')) {
+        // Copy and transform individual .java files (AuditableEntity.java, etc.)
+        const destPath = path.join(moduleDir, 'domain', entry);
+        if (!(await fs.pathExists(destPath))) {
+          const content = await fs.readFile(sourcePath, 'utf-8');
+          const transformed = transformSharedFileContent(content, packageName, moduleName);
+          await fs.ensureDir(path.dirname(destPath));
+          await fs.writeFile(destPath, transformed, 'utf-8');
+        }
       }
     }
   }
@@ -338,13 +388,51 @@ async function mergeSharedComponents(sharedDir, moduleDir, packageName, moduleNa
   // Merge shared/infrastructure/* into module/infrastructure/
   const sharedInfraDir = path.join(sharedDir, 'infrastructure');
   if (await fs.pathExists(sharedInfraDir)) {
-    const infraSubDirs = await fs.readdir(sharedInfraDir);
-    for (const subDir of infraSubDirs) {
-      const sourcePath = path.join(sharedInfraDir, subDir);
-      const destPath = path.join(moduleDir, 'infrastructure', subDir);
+    const infraEntries = await fs.readdir(sharedInfraDir);
+    for (const entry of infraEntries) {
+      const sourcePath = path.join(sharedInfraDir, entry);
+      const stat = await fs.stat(sourcePath);
       
-      if ((await fs.stat(sourcePath)).isDirectory()) {
-        await fs.copy(sourcePath, destPath, { overwrite: false });
+      if (stat.isDirectory()) {
+        // Copy and transform subdirectories
+        const destPath = path.join(moduleDir, 'infrastructure', entry);
+        await copyAndTransformDirectory(sourcePath, destPath, packageName, moduleName);
+      } else if (stat.isFile() && entry.endsWith('.java')) {
+        // Copy and transform individual .java files
+        const destPath = path.join(moduleDir, 'infrastructure', entry);
+        if (!(await fs.pathExists(destPath))) {
+          const content = await fs.readFile(sourcePath, 'utf-8');
+          const transformed = transformSharedFileContent(content, packageName, moduleName);
+          await fs.ensureDir(path.dirname(destPath));
+          await fs.writeFile(destPath, transformed, 'utf-8');
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Copy directory recursively and transform Java files
+ */
+async function copyAndTransformDirectory(sourceDir, destDir, packageName, moduleName) {
+  await fs.ensureDir(destDir);
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    
+    if (entry.isDirectory()) {
+      await copyAndTransformDirectory(sourcePath, destPath, packageName, moduleName);
+    } else if (entry.isFile()) {
+      if (entry.name.endsWith('.java') && !(await fs.pathExists(destPath))) {
+        // Transform .java files
+        const content = await fs.readFile(sourcePath, 'utf-8');
+        const transformed = transformSharedFileContent(content, packageName, moduleName);
+        await fs.writeFile(destPath, transformed, 'utf-8');
+      } else if (!(await fs.pathExists(destPath))) {
+        // Copy other files as-is
+        await fs.copy(sourcePath, destPath);
       }
     }
   }
@@ -360,15 +448,35 @@ async function updatePackageReferences(directory, packageName, moduleName) {
     let content = await fs.readFile(file, 'utf-8');
     let modified = false;
     
+    // Replace package declarations for domain
+    const packageDomainPattern = new RegExp(
+      `^package\\s+${packageName.replace(/\./g, '\\.')}\\.shared\\.domain`,
+      'gm'
+    );
+    if (packageDomainPattern.test(content)) {
+      content = content.replace(packageDomainPattern, `package ${packageName}.${moduleName}.domain`);
+      modified = true;
+    }
+    
+    // Replace package declarations for infrastructure
+    const packageInfraPattern = new RegExp(
+      `^package\\s+${packageName.replace(/\./g, '\\.')}\\.shared\\.infrastructure`,
+      'gm'
+    );
+    if (packageInfraPattern.test(content)) {
+      content = content.replace(packageInfraPattern, `package ${packageName}.${moduleName}.infrastructure`);
+      modified = true;
+    }
+    
     // Replace shared.domain.* imports with moduleName.domain.*
-    const domainPattern = new RegExp(`${packageName}\\.shared\\.domain\\.`, 'g');
+    const domainPattern = new RegExp(`${packageName.replace(/\./g, '\\.')}\\.shared\\.domain\\.`, 'g');
     if (domainPattern.test(content)) {
       content = content.replace(domainPattern, `${packageName}.${moduleName}.domain.`);
       modified = true;
     }
     
     // Replace shared.infrastructure.* imports with moduleName.infrastructure.*
-    const infraPattern = new RegExp(`${packageName}\\.shared\\.infrastructure\\.`, 'g');
+    const infraPattern = new RegExp(`${packageName.replace(/\./g, '\\.')}\\.shared\\.infrastructure\\.`, 'g');
     if (infraPattern.test(content)) {
       content = content.replace(infraPattern, `${packageName}.${moduleName}.infrastructure.`);
       modified = true;
