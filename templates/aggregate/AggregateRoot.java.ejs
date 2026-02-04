@@ -70,7 +70,14 @@ public class <%= name %> {
 <% }); %>
 
 <% domainRelationships.forEach(rel => { %>
-  <% if (!rel.isCollection) { %>
+  <% if (!rel.isCollection && rel.type === 'OneToOne' && rel.mappedBy) { %>
+    public void set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
+        this.<%= rel.fieldName %> = <%= rel.fieldName %>;
+        if (<%= rel.fieldName %> != null) {
+            <%= rel.fieldName %>.set<%= name %>(this);
+        }
+    }
+  <% } else if (!rel.isCollection) { %>
     public void set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
         this.<%= rel.fieldName %> = <%= rel.fieldName %>;
     }

@@ -51,6 +51,19 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
         
 <% }); %>
 <% } %>
+<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
+<% oneToOneRelationships.forEach(rel => { %>
+        // Create <%= rel.targetEntityName %> from command
+        if (command.<%= rel.fieldName %>() != null) {
+            <%= rel.targetEntityName %> item = new <%= rel.targetEntityName %>();
+<% rel.fields.forEach(field => { %>
+            item.set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(command.<%= rel.fieldName %>().<%= field.name %>());
+<% }); %>
+            entity.set<%= rel.targetEntityName %>(item);
+        }
+        
+<% }); %>
+<% } %>
         // Save aggregate
         <%= aggregateName %> saved = repository.save(entity);
         log.info("<%= aggregateName %> created successfully with id: {}", saved.getId());

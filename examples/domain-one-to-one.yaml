@@ -1,0 +1,93 @@
+# EJEMPLO 9: DOMINIO CON RELACIÓN ONE-TO-ONE
+# Agregado con relación OneToOne bidireccional
+# Ideal para: Validar relaciones uno a uno entre entidades
+
+aggregates:
+  - name: User
+    entities:
+      - name: user
+        isRoot: true
+        tableName: users
+        auditable: true
+        fields:
+          - name: id
+            type: String
+          - name: username
+            type: String
+          - name: email
+            type: String
+          - name: passwordHash
+            type: String
+          - name: status
+            type: UserStatus
+          - name: registrationDate
+            type: LocalDateTime
+          - name: lastLogin
+            type: LocalDateTime
+        relationships:
+          - type: OneToOne
+            target: UserProfile
+            mappedBy: user
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+      
+      - name: userProfile
+        tableName: user_profiles
+        auditable: true
+        fields:
+          - name: id
+            type: Long
+          - name: firstName
+            type: String
+          - name: lastName
+            type: String
+          - name: dateOfBirth
+            type: LocalDate
+          - name: phoneNumber
+            type: String
+          - name: bio
+            type: String
+          - name: avatarUrl
+            type: String
+          - name: address
+            type: Address
+          - name: preferences
+            type: UserPreferences
+          - name: isPublic
+            type: Boolean
+    
+    valueObjects:
+      - name: Address
+        fields:
+          - name: street
+            type: String
+          - name: city
+            type: String
+          - name: state
+            type: String
+          - name: zipCode
+            type: String
+          - name: country
+            type: String
+      
+      - name: UserPreferences
+        fields:
+          - name: language
+            type: String
+          - name: timezone
+            type: String
+          - name: emailNotifications
+            type: Boolean
+          - name: smsNotifications
+            type: Boolean
+          - name: theme
+            type: String
+    
+    enums:
+      - name: UserStatus
+        values:
+          - ACTIVE
+          - INACTIVE
+          - SUSPENDED
+          - PENDING_VERIFICATION
+          - DELETED

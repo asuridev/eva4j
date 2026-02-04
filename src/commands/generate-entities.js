@@ -536,6 +536,41 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     console.log(`[DEBUG]   - ${rel.fieldName}: ${rel.targetEntityName} (nested: ${rel.hasNestedRelationships})`);
   });
   
+  // Build OneToOne relationships
+  const oneToOneRels = rootEntity.relationships?.filter(r => 
+    r.type === 'OneToOne' && !r.isInverse
+  ) || [];
+  
+  const oneToOneRelationships = oneToOneRels.map(rel => {
+    const targetEntity = secondaryEntities.find(e => e.name === rel.target);
+    
+    if (!targetEntity) {
+      return {
+        targetEntityName: rel.target,
+        fieldName: rel.fieldName,
+        type: rel.type,
+        fields: []
+      };
+    }
+    
+    const targetFields = targetEntity.fields.filter(f => 
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+    );
+    
+    return {
+      targetEntityName: rel.target,
+      fieldName: rel.fieldName,
+      type: rel.type,
+      fields: targetFields,
+      entity: targetEntity
+    };
+  });
+  
+  console.log(`[DEBUG] Found ${oneToOneRelationships.length} OneToOne relationships for ${aggregateName}`);
+  oneToOneRelationships.forEach(rel => {
+    console.log(`[DEBUG]   - ${rel.fieldName}: ${rel.targetEntityName}`);
+  });
+  
   // Detect if has value objects or enums
   const hasValueObjects = rootEntity.fields.some(f => f.isValueObject);
   const hasEnums = rootEntity.enums && rootEntity.enums.length > 0;
@@ -554,6 +589,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     idType,
     commandFields,
     oneToManyRelationships,
+    oneToOneRelationships,
     hasValueObjects,
     hasEnums,
     imports: rootEntity.imports,
@@ -633,7 +669,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const responseDtoContext = {
     ...baseContext,
     allFields: rootEntity.fields,
-    relationships: rootEntity.relationships.filter(r => r.type === 'OneToMany' && !r.isInverse)
+    relationships: rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse)
   };
   
   await renderAndWrite(

@@ -13,17 +13,27 @@ import java.util.List;
 import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= rel.targetEntityName %>Dto;
 <% }); %>
 <% } %>
+<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
+<% oneToOneRelationships.forEach(rel => { %>
+import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= rel.targetEntityName %>Dto;
+<% }); %>
+<% } %>
 <% imports.forEach(imp => { %>
 <%- imp %>
 <% }); %>
 
 public record Create<%= aggregateName %>Command(
 <% commandFields.forEach((field, idx) => { %>
-    <%- field.javaType %> <%= field.name %><% if (idx < commandFields.length - 1 || (oneToManyRelationships && oneToManyRelationships.length > 0)) { %>,<% } %>
+    <%- field.javaType %> <%= field.name %><% if (idx < commandFields.length - 1 || (oneToManyRelationships && oneToManyRelationships.length > 0) || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
 <% }); %>
 <% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
 <% oneToManyRelationships.forEach((rel, idx) => { %>
-    List<Create<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < oneToManyRelationships.length - 1) { %>,<% } %>
+    List<Create<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < oneToManyRelationships.length - 1 || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
+<% }); %>
+<% } %>
+<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
+<% oneToOneRelationships.forEach((rel, idx) => { %>
+    Create<%= rel.targetEntityName %>Dto <%= rel.fieldName %><% if (idx < oneToOneRelationships.length - 1) { %>,<% } %>
 <% }); %>
 <% } %>
 ) implements Command {

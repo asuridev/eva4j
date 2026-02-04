@@ -18,7 +18,11 @@ public record <%= aggregateName %>ResponseDto(
     <%- field.javaType %> <%= field.name %><% if (idx < allFields.length - 1 || relationships.length > 0) { %>,<% } %>
 <% }); %>
 <% relationships.forEach((rel, idx) => { %>
+  <% if (rel.type === 'OneToMany') { %>
     List<<%= rel.target %>Dto> <%= rel.fieldName %><% if (idx < relationships.length - 1) { %>,<% } %>
+  <% } else if (rel.type === 'OneToOne') { %>
+    <%= rel.target %>Dto <%= rel.fieldName %><% if (idx < relationships.length - 1) { %>,<% } %>
+  <% } %>
 <% }); %>
 ) {
 }
