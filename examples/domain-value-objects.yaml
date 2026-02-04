@@ -1,0 +1,54 @@
+# EJEMPLO 2: DOMINIO CON ENUMS Y VALUE OBJECTS
+# Agregado con tipos complejos pero sin relaciones entre entidades
+# Ideal para: Validar generación de Value Objects y Enums
+
+aggregates:
+  - name: User
+    entities:
+      - name: user
+        isRoot: true
+        tableName: users
+        auditable: true
+        fields:
+          - name: userId
+            type: String
+          - name: username
+            type: String
+          - name: email
+            type: Email
+          - name: fullName
+            type: FullName
+          - name: status
+            type: UserStatus
+          - name: role
+            type: UserRole
+          - name: registrationDate
+            type: LocalDateTime
+    
+    valueObjects:
+      - name: Email
+        fields:
+          - name: address
+            type: String
+      
+      - name: FullName
+        fields:
+          - name: firstName
+            type: String
+          - name: lastName
+            type: String
+    
+    enums:
+      - name: UserStatus
+        values:
+          - ACTIVE
+          - INACTIVE
+          - SUSPENDED
+          - DELETED
+      
+      - name: UserRole
+        values:
+          - ADMIN
+          - USER
+          - MODERATOR
+          - GUEST

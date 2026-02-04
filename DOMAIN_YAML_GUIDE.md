@@ -243,6 +243,68 @@ eva4j genera automáticamente las anotaciones JPA correctas:
 - `@ElementCollection` para listas
 - Imports necesarios
 
+#### ⚠️ REGLA OBLIGATORIA: Campo `id`
+
+**Todas las entidades DEBEN tener un campo llamado exactamente `id`.**
+
+```yaml
+# ✅ CORRECTO - Todas las entidades tienen 'id'
+entities:
+  - name: order
+    isRoot: true
+    fields:
+      - name: id          # ← OBLIGATORIO
+        type: String      # String = UUID, Long = IDENTITY
+      - name: orderNumber
+        type: String
+  
+  - name: orderItem
+    fields:
+      - name: id          # ← OBLIGATORIO también en secundarias
+        type: Long
+      - name: productId
+        type: String
+```
+
+**Razones:**
+- ✅ JPA requiere `@Id` en todas las entidades
+- ✅ Eva4j genera automáticamente `@Id` y `@GeneratedValue` para el campo `id`
+- ✅ Convención clara y consistente en todo el dominio
+
+**Tipos soportados para `id`:**
+- `String` → Genera `@GeneratedValue(strategy = GenerationType.UUID)`
+- `Long` → Genera `@GeneratedValue(strategy = GenerationType.IDENTITY)`
+
+**❌ INCORRECTO:**
+```yaml
+# ❌ Sin campo 'id' - La aplicación fallará
+fields:
+  - name: orderNumber
+    type: String
+  # ← Falta el campo 'id'
+
+# ❌ Nombre diferente - No funcionará
+fields:
+  - name: orderId     # ← Debe llamarse exactamente 'id'
+    type: String
+```
+
+**💡 Identificadores de Negocio:**
+
+Si necesitas un identificador de negocio además del ID técnico:
+
+```yaml
+fields:
+  - name: id              # ← ID técnico (obligatorio)
+    type: String
+  - name: orderNumber     # ← ID de negocio (opcional)
+    type: String
+  - name: invoiceNumber   # ← Otro identificador de negocio
+    type: String
+```
+
+---
+
 #### Ejemplos correctos
 
 ```yaml
@@ -665,6 +727,120 @@ private OrderJpa order;
 ```
 
 **💡 Tip**: Si ya definiste `OneToMany` con `mappedBy` en Order, NO necesitas definir manualmente el `ManyToOne` en OrderItem. eva4j lo genera automáticamente.
+
+---
+
+### ⚠️ REGLA CRÍTICA: Relaciones Bidireccionales
+
+**Para relaciones bidireccionales OneToMany/ManyToOne:**
+
+#### ✅ CORRECTO - Solo definir en la entidad raíz
+
+```yaml
+entities:
+  - name: invoice
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: InvoiceItem
+        mappedBy: invoice      # ← Solo esta definición
+        cascade: [PERSIST, MERGE, REMOVE]
+        fetch: LAZY
+  
+  - name: invoiceItem
+    fields:
+      - name: id
+        type: Long
+    # ← SIN relationships definidas
+    # Eva4j genera automáticamente el ManyToOne en InvoiceItemJpa
+```
+
+**Resultado generado:**
+```java
+// InvoiceJpa.java
+@OneToMany(mappedBy = "invoice", cascade = {...})
+private List<InvoiceItemJpa> invoiceItems;
+
+// InvoiceItemJpa.java (generado automáticamente)
+@ManyToOne(fetch = FetchType.LAZY)
+@JoinColumn(name = "invoice_id")
+private InvoiceJpa invoice;
+```
+
+#### ❌ INCORRECTO - Definir en ambos lados
+
+```yaml
+entities:
+  - name: invoice
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: InvoiceItem
+        mappedBy: invoice      # ← Primera definición
+  
+  - name: invoiceItem
+    relationships:
+      - type: ManyToOne        # ← ❌ DUPLICADO - Causará error
+        target: Invoice
+        joinColumn: invoice_id
+```
+
+**Problema:** Genera DOS relaciones `@ManyToOne` en `InvoiceItemJpa`, ambas mapeando a `invoice_id`:
+
+```java
+// InvoiceItemJpa.java (INCORRECTO - Duplicado)
+@ManyToOne
+@JoinColumn(name = "invoice_id")
+private InvoiceJpa invoice;   // ← Del mappedBy
+
+@ManyToOne
+@JoinColumn(name = "invoice_id")
+private InvoiceJpa invoices;  // ← Del ManyToOne explícito
+
+// Error de Hibernate:
+// "Column 'invoice_id' is duplicated in mapping"
+```
+
+#### 📋 Regla de Oro
+
+| Escenario | Definir en Raíz | Definir en Secundaria | Eva4j Genera |
+|-----------|-----------------|----------------------|-------------|
+| **Bidireccional** | `OneToMany` con `mappedBy` | ❌ NADA | `@OneToMany` en raíz + `@ManyToOne` en JPA de secundaria |
+| **Unidireccional** | Opcional | `ManyToOne` con `joinColumn` | Solo lo definido |
+
+#### 💡 Separación Dominio/Persistencia
+
+**Importante:** Eva4j sigue correctamente DDD:
+
+- **Capa de Dominio:** Las entidades secundarias NO tienen referencia a la raíz
+  ```java
+  // InvoiceItem.java (dominio puro)
+  public class InvoiceItem {
+      private Long id;
+      private String description;
+      // ← SIN private Invoice invoice
+  }
+  ```
+
+- **Capa de Persistencia (JPA):** Solo aquí existe la relación
+  ```java
+  // InvoiceItemJpa.java (persistencia)
+  public class InvoiceItemJpa {
+      private Long id;
+      
+      @ManyToOne
+      @JoinColumn(name = "invoice_id")
+      private InvoiceJpa invoice;  // ← Solo en capa JPA
+  }
+  ```
+
+**Ventajas:**
+- ✅ Sin dependencias circulares en dominio
+- ✅ Modelo de dominio más simple
+- ✅ Relación bidireccional solo donde se necesita (persistencia)
+- ✅ Cumple principios de DDD y arquitectura hexagonal
+
+---
 
 ### OneToOne (Uno a Uno)
 

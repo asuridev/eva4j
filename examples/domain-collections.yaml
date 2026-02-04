@@ -1,0 +1,107 @@
+# EJEMPLO 5: DOMINIO CON COLECCIONES Y TIPOS COMPLEJOS
+# Agregado con @ElementCollection, List<String>, y tipos avanzados
+# Ideal para: Validar mapeo de colecciones y tipos especiales
+
+aggregates:
+  - name: BlogPost
+    entities:
+      - name: blogPost
+        isRoot: true
+        tableName: blog_posts
+        auditable: true
+        fields:
+          - name: postId
+            type: String
+          - name: title
+            type: String
+          - name: content
+            type: String
+          - name: excerpt
+            type: String
+          - name: slug
+            type: String
+          - name: authorId
+            type: String
+          - name: category
+            type: PostCategory
+          - name: status
+            type: PostStatus
+          - name: publishedAt
+            type: LocalDateTime
+          - name: tags
+            type: List<String>
+          - name: viewCount
+            type: Long
+          - name: metadata
+            type: PostMetadata
+        relationships:
+          - type: OneToMany
+            target: Comment
+            mappedBy: blogPost
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+      
+      - name: comment
+        tableName: comments
+        auditable: true
+        fields:
+          - name: commentId
+            type: Long
+          - name: authorName
+            type: String
+          - name: authorEmail
+            type: String
+          - name: content
+            type: String
+          - name: status
+            type: CommentStatus
+          - name: likes
+            type: Integer
+          - name: isApproved
+            type: Boolean
+        relationships:
+          - type: ManyToOne
+            target: BlogPost
+            joinColumn: post_id
+            fetch: LAZY
+    
+    valueObjects:
+      - name: PostMetadata
+        fields:
+          - name: seoTitle
+            type: String
+          - name: seoDescription
+            type: String
+          - name: keywords
+            type: String
+          - name: readingTime
+            type: Integer
+          - name: featuredImageUrl
+            type: String
+    
+    enums:
+      - name: PostCategory
+        values:
+          - TECHNOLOGY
+          - BUSINESS
+          - LIFESTYLE
+          - HEALTH
+          - EDUCATION
+          - ENTERTAINMENT
+          - SCIENCE
+          - TRAVEL
+      
+      - name: PostStatus
+        values:
+          - DRAFT
+          - PUBLISHED
+          - SCHEDULED
+          - ARCHIVED
+          - DELETED
+      
+      - name: CommentStatus
+        values:
+          - PENDING
+          - APPROVED
+          - REJECTED
+          - SPAM

@@ -1,0 +1,25 @@
+# EJEMPLO 1: DOMINIO SIMPLE
+# Un solo agregado con la entidad raíz básica
+# Sin relaciones, sin value objects, sin enums
+# Ideal para: Testing básico, CRUD simple
+
+aggregates:
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        tableName: products
+        auditable: true
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: description
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: stock
+            type: Integer
+          - name: active
+            type: Boolean

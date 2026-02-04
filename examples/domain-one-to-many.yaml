@@ -1,0 +1,85 @@
+# EJEMPLO 3: DOMINIO CON RELACIONES ONE-TO-MANY
+# Agregado Order con items (relación bidireccional)
+# Ideal para: Validar relaciones padre-hijo con cascade
+
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        auditable: true
+        fields:
+          - name: orderId
+            type: String
+          - name: orderNumber
+            type: String
+          - name: customerId
+            type: String
+          - name: status
+            type: OrderStatus
+          - name: totalAmount
+            type: Money
+          - name: orderDate
+            type: LocalDateTime
+          - name: deliveryAddress
+            type: Address
+        relationships:
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+      
+      - name: orderItem
+        tableName: order_items
+        fields:
+          - name: itemId
+            type: Long
+          - name: productId
+            type: String
+          - name: productName
+            type: String
+          - name: quantity
+            type: Integer
+          - name: unitPrice
+            type: Money
+          - name: subtotal
+            type: Money
+        relationships:
+          - type: ManyToOne
+            target: Order
+            joinColumn: order_id
+            fetch: LAZY
+    
+    valueObjects:
+      - name: Money
+        fields:
+          - name: amount
+            type: BigDecimal
+          - name: currency
+            type: String
+      
+      - name: Address
+        fields:
+          - name: street
+            type: String
+          - name: city
+            type: String
+          - name: state
+            type: String
+          - name: zipCode
+            type: String
+          - name: country
+            type: String
+    
+    enums:
+      - name: OrderStatus
+        values:
+          - PENDING
+          - CONFIRMED
+          - PROCESSING
+          - SHIPPED
+          - DELIVERED
+          - CANCELLED
+          - REFUNDED

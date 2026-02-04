@@ -1,0 +1,78 @@
+# EJEMPLO 7: DOMINIO E-COMMERCE COMPLETO
+# Sistema completo de e-commerce con todas las características
+# Ideal para: Testing integral y validación de casos reales complejos
+
+aggregates:
+  - name: ShoppingCart
+    entities:
+      - name: shoppingCart
+        isRoot: true
+        tableName: shopping_carts
+        auditable: true
+        fields:
+          - name: cartId
+            type: String
+          - name: customerId
+            type: String
+          - name: sessionId
+            type: String
+          - name: status
+            type: CartStatus
+          - name: subtotal
+            type: BigDecimal
+          - name: taxAmount
+            type: BigDecimal
+          - name: shippingCost
+            type: BigDecimal
+          - name: totalAmount
+            type: BigDecimal
+          - name: discountCode
+            type: String
+          - name: discountAmount
+            type: BigDecimal
+          - name: expiresAt
+            type: LocalDateTime
+        relationships:
+          - type: OneToMany
+            target: CartItem
+            mappedBy: shoppingCart
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+      
+      - name: cartItem
+        tableName: cart_items
+        auditable: true
+        fields:
+          - name: cartItemId
+            type: Long
+          - name: productId
+            type: String
+          - name: productName
+            type: String
+          - name: productSku
+            type: String
+          - name: quantity
+            type: Integer
+          - name: unitPrice
+            type: BigDecimal
+          - name: subtotal
+            type: BigDecimal
+          - name: attributes
+            type: List<String>
+          - name: isGift
+            type: Boolean
+          - name: giftMessage
+            type: String
+        relationships:
+          - type: ManyToOne
+            target: ShoppingCart
+            joinColumn: cart_id
+            fetch: LAZY
+    
+    enums:
+      - name: CartStatus
+        values:
+          - ACTIVE
+          - ABANDONED
+          - CONVERTED
+          - EXPIRED

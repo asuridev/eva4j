@@ -1,0 +1,130 @@
+# EJEMPLO 8: DOMINIO CON SOFT DELETE Y AUDITORÍA AVANZADA
+# Testing de entidades con soft delete y auditoría
+# Ideal para: Validar características de auditoría y borrado lógico
+
+aggregates:
+  - name: Document
+    entities:
+      - name: document
+        isRoot: true
+        tableName: documents
+        auditable: true
+        fields:
+          - name: documentId
+            type: String
+          - name: title
+            type: String
+          - name: content
+            type: String
+          - name: documentType
+            type: DocumentType
+          - name: status
+            type: DocumentStatus
+          - name: version
+            type: Integer
+          - name: authorId
+            type: String
+          - name: lastModifiedBy
+            type: String
+          - name: isDeleted
+            type: Boolean
+          - name: deletedAt
+            type: LocalDateTime
+          - name: deletedBy
+            type: String
+          - name: metadata
+            type: DocumentMetadata
+          - name: tags
+            type: List<String>
+        relationships:
+          - type: OneToMany
+            target: Revision
+            mappedBy: document
+            cascade: [PERSIST, MERGE]
+            fetch: LAZY
+          - type: OneToMany
+            target: Attachment
+            mappedBy: document
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+      
+      - name: revision
+        tableName: document_revisions
+        auditable: true
+        fields:
+          - name: revisionId
+            type: Long
+          - name: versionNumber
+            type: Integer
+          - name: content
+            type: String
+          - name: changes
+            type: String
+          - name: modifiedBy
+            type: String
+          - name: comment
+            type: String
+        relationships:
+          - type: ManyToOne
+            target: Document
+            joinColumn: document_id
+            fetch: LAZY
+      
+      - name: attachment
+        tableName: document_attachments
+        auditable: true
+        fields:
+          - name: attachmentId
+            type: Long
+          - name: fileName
+            type: String
+          - name: fileSize
+            type: Long
+          - name: mimeType
+            type: String
+          - name: storageUrl
+            type: String
+          - name: uploadedBy
+            type: String
+          - name: isDeleted
+            type: Boolean
+        relationships:
+          - type: ManyToOne
+            target: Document
+            joinColumn: document_id
+            fetch: LAZY
+    
+    valueObjects:
+      - name: DocumentMetadata
+        fields:
+          - name: category
+            type: String
+          - name: department
+            type: String
+          - name: confidentialityLevel
+            type: String
+          - name: expirationDate
+            type: LocalDate
+          - name: reviewDate
+            type: LocalDate
+    
+    enums:
+      - name: DocumentType
+        values:
+          - CONTRACT
+          - INVOICE
+          - REPORT
+          - PROPOSAL
+          - MEMO
+          - POLICY
+          - PROCEDURE
+          - OTHER
+      
+      - name: DocumentStatus
+        values:
+          - DRAFT
+          - IN_REVIEW
+          - APPROVED
+          - PUBLISHED
+          - ARCHIVED
+          - OBSOLETE

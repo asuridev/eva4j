@@ -1,0 +1,217 @@
+# EJEMPLO 6: DOMINIO COMPLEJO CON MÚLTIPLES AGREGADOS
+# Varios agregados en un mismo archivo
+# Ideal para: Validar generación de múltiples agregados simultáneos
+
+aggregates:
+  # AGREGADO 1: Customer
+  - name: Customer
+    entities:
+      - name: customer
+        isRoot: true
+        tableName: customers
+        auditable: true
+        fields:
+          - name: customerId
+            type: String
+          - name: name
+            type: FullName
+          - name: email
+            type: String
+          - name: phone
+            type: String
+          - name: customerType
+            type: CustomerType
+          - name: registrationDate
+            type: LocalDate
+        relationships:
+          - type: OneToMany
+            target: Address
+            mappedBy: customer
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+      
+      - name: address
+        tableName: customer_addresses
+        fields:
+          - name: addressId
+            type: Long
+          - name: street
+            type: String
+          - name: city
+            type: String
+          - name: state
+            type: String
+          - name: zipCode
+            type: String
+          - name: country
+            type: String
+          - name: addressType
+            type: AddressType
+          - name: isDefault
+            type: Boolean
+        relationships:
+          - type: ManyToOne
+            target: Customer
+            joinColumn: customer_id
+            fetch: LAZY
+    
+    valueObjects:
+      - name: FullName
+        fields:
+          - name: firstName
+            type: String
+          - name: middleName
+            type: String
+          - name: lastName
+            type: String
+    
+    enums:
+      - name: CustomerType
+        values:
+          - INDIVIDUAL
+          - BUSINESS
+          - PREMIUM
+          - VIP
+      
+      - name: AddressType
+        values:
+          - BILLING
+          - SHIPPING
+          - BOTH
+  
+  # AGREGADO 2: Supplier
+  - name: Supplier
+    entities:
+      - name: supplier
+        isRoot: true
+        tableName: suppliers
+        auditable: true
+        fields:
+          - name: supplierId
+            type: String
+          - name: companyName
+            type: String
+          - name: contactPerson
+            type: String
+          - name: email
+            type: String
+          - name: phone
+            type: String
+          - name: status
+            type: SupplierStatus
+          - name: rating
+            type: Integer
+        relationships:
+          - type: OneToMany
+            target: Contract
+            mappedBy: supplier
+            cascade: [PERSIST, MERGE]
+            fetch: LAZY
+      
+      - name: contract
+        tableName: contracts
+        auditable: true
+        fields:
+          - name: contractId
+            type: Long
+          - name: contractNumber
+            type: String
+          - name: startDate
+            type: LocalDate
+          - name: endDate
+            type: LocalDate
+          - name: amount
+            type: BigDecimal
+          - name: status
+            type: ContractStatus
+          - name: terms
+            type: String
+        relationships:
+          - type: ManyToOne
+            target: Supplier
+            joinColumn: supplier_id
+            fetch: LAZY
+    
+    enums:
+      - name: SupplierStatus
+        values:
+          - ACTIVE
+          - INACTIVE
+          - BLACKLISTED
+      
+      - name: ContractStatus
+        values:
+          - DRAFT
+          - ACTIVE
+          - EXPIRED
+          - TERMINATED
+  
+  # AGREGADO 3: Inventory
+  - name: Inventory
+    entities:
+      - name: inventory
+        isRoot: true
+        tableName: inventory
+        auditable: true
+        fields:
+          - name: inventoryId
+            type: String
+          - name: productId
+            type: String
+          - name: warehouseId
+            type: String
+          - name: quantity
+            type: Integer
+          - name: reservedQuantity
+            type: Integer
+          - name: availableQuantity
+            type: Integer
+          - name: minimumStock
+            type: Integer
+          - name: maximumStock
+            type: Integer
+          - name: status
+            type: InventoryStatus
+        relationships:
+          - type: OneToMany
+            target: StockMovement
+            mappedBy: inventory
+            cascade: [PERSIST, MERGE]
+            fetch: LAZY
+      
+      - name: stockMovement
+        tableName: stock_movements
+        auditable: true
+        fields:
+          - name: movementId
+            type: Long
+          - name: movementType
+            type: MovementType
+          - name: quantity
+            type: Integer
+          - name: reference
+            type: String
+          - name: notes
+            type: String
+        relationships:
+          - type: ManyToOne
+            target: Inventory
+            joinColumn: inventory_id
+            fetch: LAZY
+    
+    enums:
+      - name: InventoryStatus
+        values:
+          - IN_STOCK
+          - LOW_STOCK
+          - OUT_OF_STOCK
+          - DISCONTINUED
+      
+      - name: MovementType
+        values:
+          - PURCHASE
+          - SALE
+          - ADJUSTMENT
+          - RETURN
+          - TRANSFER
+          - DAMAGED

@@ -1,0 +1,143 @@
+# EJEMPLO 4: DOMINIO CON MÚLTIPLES ENTIDADES SECUNDARIAS
+# Agregado con varias entidades secundarias y relaciones complejas
+# Ideal para: Validar jerarquías y múltiples OneToMany
+
+aggregates:
+  - name: Invoice
+    entities:
+      - name: invoice
+        isRoot: true
+        tableName: invoices
+        auditable: true
+        fields:
+          - name: id
+            type: String
+          - name: invoiceNumber
+            type: String
+          - name: customerId
+            type: String
+          - name: issueDate
+            type: LocalDate
+          - name: dueDate
+            type: LocalDate
+          - name: status
+            type: InvoiceStatus
+          - name: subtotal
+            type: BigDecimal
+          - name: taxAmount
+            type: BigDecimal
+          - name: totalAmount
+            type: BigDecimal
+          - name: billingAddress
+            type: Address
+          - name: currency
+            type: String
+        relationships:
+          - type: OneToMany
+            target: InvoiceItem
+            mappedBy: invoice
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+          - type: OneToMany
+            target: Payment
+            mappedBy: invoice
+            cascade: [PERSIST, MERGE]
+            fetch: LAZY
+          - type: OneToMany
+            target: InvoiceNote
+            mappedBy: invoice
+            cascade: [ALL]
+            fetch: LAZY
+
+      - name: invoiceItem
+        tableName: invoice_items
+        fields:
+          - name: id
+            type: Long
+          - name: description
+            type: String
+          - name: quantity
+            type: Integer
+          - name: unitPrice
+            type: BigDecimal
+          - name: taxRate
+            type: BigDecimal
+          - name: lineTotal
+            type: BigDecimal
+          - name: productCode
+            type: String
+
+
+      - name: payment
+        tableName: payments
+        auditable: true
+        fields:
+          - name: id
+            type: Long
+          - name: paymentDate
+            type: LocalDateTime
+          - name: amount
+            type: BigDecimal
+          - name: method
+            type: PaymentMethod
+          - name: reference
+            type: String
+          - name: status
+            type: PaymentStatus
+
+
+      - name: invoiceNote
+        tableName: invoice_notes
+        auditable: true
+        fields:
+          - name: id
+            type: Long
+          - name: note
+            type: String
+          - name: author
+            type: String
+          - name: isInternal
+            type: Boolean
+        
+
+    valueObjects:
+      - name: Address
+        fields:
+          - name: street
+            type: String
+          - name: city
+            type: String
+          - name: state
+            type: String
+          - name: zipCode
+            type: String
+          - name: country
+            type: String
+
+    enums:
+      - name: InvoiceStatus
+        values:
+          - DRAFT
+          - PENDING
+          - SENT
+          - PAID
+          - PARTIALLY_PAID
+          - OVERDUE
+          - CANCELLED
+          - VOID
+
+      - name: PaymentMethod
+        values:
+          - CASH
+          - CREDIT_CARD
+          - DEBIT_CARD
+          - BANK_TRANSFER
+          - PAYPAL
+          - CHECK
+
+      - name: PaymentStatus
+        values:
+          - PENDING
+          - COMPLETED
+          - FAILED
+          - REFUNDED
