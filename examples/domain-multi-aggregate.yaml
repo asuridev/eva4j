@@ -11,7 +11,7 @@ aggregates:
         tableName: customers
         auditable: true
         fields:
-          - name: customerId
+          - name: id
             type: String
           - name: name
             type: FullName
@@ -33,7 +33,7 @@ aggregates:
       - name: address
         tableName: customer_addresses
         fields:
-          - name: addressId
+          - name: id
             type: Long
           - name: street
             type: String
@@ -49,11 +49,6 @@ aggregates:
             type: AddressType
           - name: isDefault
             type: Boolean
-        relationships:
-          - type: ManyToOne
-            target: Customer
-            joinColumn: customer_id
-            fetch: LAZY
     
     valueObjects:
       - name: FullName
@@ -87,7 +82,7 @@ aggregates:
         tableName: suppliers
         auditable: true
         fields:
-          - name: supplierId
+          - name: id
             type: String
           - name: companyName
             type: String
@@ -101,18 +96,12 @@ aggregates:
             type: SupplierStatus
           - name: rating
             type: Integer
-        relationships:
-          - type: OneToMany
-            target: Contract
-            mappedBy: supplier
-            cascade: [PERSIST, MERGE]
-            fetch: LAZY
       
       - name: contract
         tableName: contracts
         auditable: true
         fields:
-          - name: contractId
+          - name: id
             type: Long
           - name: contractNumber
             type: String
@@ -126,11 +115,6 @@ aggregates:
             type: ContractStatus
           - name: terms
             type: String
-        relationships:
-          - type: ManyToOne
-            target: Supplier
-            joinColumn: supplier_id
-            fetch: LAZY
     
     enums:
       - name: SupplierStatus
@@ -154,7 +138,7 @@ aggregates:
         tableName: inventory
         auditable: true
         fields:
-          - name: inventoryId
+          - name: id
             type: String
           - name: productId
             type: String
@@ -193,11 +177,6 @@ aggregates:
             type: String
           - name: notes
             type: String
-        relationships:
-          - type: ManyToOne
-            target: Inventory
-            joinColumn: inventory_id
-            fetch: LAZY
     
     enums:
       - name: InventoryStatus

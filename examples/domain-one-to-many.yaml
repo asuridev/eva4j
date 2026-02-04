@@ -10,7 +10,7 @@ aggregates:
         tableName: orders
         auditable: true
         fields:
-          - name: orderId
+          - name: id
             type: String
           - name: orderNumber
             type: String
@@ -46,11 +46,7 @@ aggregates:
             type: Money
           - name: subtotal
             type: Money
-        relationships:
-          - type: ManyToOne
-            target: Order
-            joinColumn: order_id
-            fetch: LAZY
+        
     
     valueObjects:
       - name: Money

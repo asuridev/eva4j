@@ -10,7 +10,7 @@ aggregates:
         tableName: documents
         auditable: true
         fields:
-          - name: documentId
+          - name: id
             type: String
           - name: title
             type: String
@@ -52,7 +52,7 @@ aggregates:
         tableName: document_revisions
         auditable: true
         fields:
-          - name: revisionId
+          - name: id
             type: Long
           - name: versionNumber
             type: Integer
@@ -64,17 +64,13 @@ aggregates:
             type: String
           - name: comment
             type: String
-        relationships:
-          - type: ManyToOne
-            target: Document
-            joinColumn: document_id
-            fetch: LAZY
+       
       
       - name: attachment
         tableName: document_attachments
         auditable: true
         fields:
-          - name: attachmentId
+          - name: id
             type: Long
           - name: fileName
             type: String
@@ -88,11 +84,7 @@ aggregates:
             type: String
           - name: isDeleted
             type: Boolean
-        relationships:
-          - type: ManyToOne
-            target: Document
-            joinColumn: document_id
-            fetch: LAZY
+        
     
     valueObjects:
       - name: DocumentMetadata

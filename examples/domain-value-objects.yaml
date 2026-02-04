@@ -10,7 +10,7 @@ aggregates:
         tableName: users
         auditable: true
         fields:
-          - name: userId
+          - name: id
             type: String
           - name: username
             type: String

@@ -10,7 +10,7 @@ aggregates:
         tableName: blog_posts
         auditable: true
         fields:
-          - name: postId
+          - name: id
             type: String
           - name: title
             type: String
@@ -45,7 +45,7 @@ aggregates:
         tableName: comments
         auditable: true
         fields:
-          - name: commentId
+          - name: id
             type: Long
           - name: authorName
             type: String
@@ -59,11 +59,6 @@ aggregates:
             type: Integer
           - name: isApproved
             type: Boolean
-        relationships:
-          - type: ManyToOne
-            target: BlogPost
-            joinColumn: post_id
-            fetch: LAZY
     
     valueObjects:
       - name: PostMetadata

@@ -10,7 +10,7 @@ aggregates:
         tableName: shopping_carts
         auditable: true
         fields:
-          - name: cartId
+          - name: id
             type: String
           - name: customerId
             type: String
@@ -43,7 +43,7 @@ aggregates:
         tableName: cart_items
         auditable: true
         fields:
-          - name: cartItemId
+          - name: id
             type: Long
           - name: productId
             type: String
@@ -63,11 +63,6 @@ aggregates:
             type: Boolean
           - name: giftMessage
             type: String
-        relationships:
-          - type: ManyToOne
-            target: ShoppingCart
-            joinColumn: cart_id
-            fetch: LAZY
     
     enums:
       - name: CartStatus

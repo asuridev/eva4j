@@ -11,7 +11,7 @@ aggregates:
         tableName: products
         auditable: true
         fields:
-          - name: productId
+          - name: id
             type: String
           - name: name
             type: String
