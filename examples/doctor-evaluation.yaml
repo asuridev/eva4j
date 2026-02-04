@@ -1,0 +1,110 @@
+# EJEMPLO 4: DOMINIO CON MÚLTIPLES ENTIDADES SECUNDARIAS
+# Agregado con varias entidades secundarias y relaciones complejas
+# Ideal para: Validar jerarquías y múltiples OneToMany
+
+aggregates:
+  - name: Evaluation
+    entities:
+      - name: evaluation
+        isRoot: true
+        tableName: evaluations
+        auditable: true
+        fields:
+          - name: id
+            type: String
+          - name: requestId
+            type: String
+          - name: score
+            type: Integer
+        relationships:
+          - type: OneToMany
+            target: EvaluationDoctor
+            mappedBy: evaluation
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+          - type: OneToMany
+            target: EvaluationBranch
+            mappedBy: evaluation
+            cascade: [ PERSIST, MERGE, REMOVE ]
+            fetch: LAZY
+
+      - name: evaluationDoctor
+        auditable: true
+        tableName: evaluation_doctors
+        fields:
+          - name: id
+            type: String
+          - name: cedula
+            type: String
+          - name: scores
+            type: Integer
+          - name: observation
+            type: String
+          - name: isConformSenescyt
+            type: Boolean
+          - name: isConformAcess
+            type: Boolean
+          - name: isconforWatchList
+            type: Boolean
+          - name: degrees
+            type: List<Degrees>
+
+
+      - name: evaluationBranch
+        tableName: evaluation_branchs
+        auditable: true
+        fields:
+          - name: id
+            type: String
+          - name: unicode
+            type: String
+          - name: isConformAcess
+            type: Boolean
+          - name: operatingPermit
+            type: OperatingPermit
+
+
+
+    valueObjects:
+      - name: Degrees
+        fields:
+          - name: name
+            type: String
+          - name: levelDegress
+            type: Integer
+          - name: registerNumber
+            type: String
+          - name: institution
+            type: String
+          - name: dateOfIssuance
+            type: LocalDate
+          - name: typeDegrees
+            type: TypeDegrees
+          - name: knowledgeArea
+            type: String
+
+      - name: OperatingPermit
+        fields:
+          - name: ruc
+            type: String
+          - name: tradeName
+            type: String
+          - name: type
+            type: String
+          - name: permitNumber
+            type: String
+          - name: issueDate
+            type: LocalDate
+          - name: expirationDate
+            type: LocalDate
+          - name: status
+            type: String
+
+
+
+    enums:
+      - name: TypeDegrees
+        values:
+          - NATIONAL
+          - INTERNATIONAL
+

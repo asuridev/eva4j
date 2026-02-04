@@ -51,7 +51,7 @@ function parseAggregate(aggregateData) {
   }));
   
   // Parse value objects FIRST to get their names
-  const parsedValueObjects = valueObjects.map(vo => parseValueObject(vo));
+  const parsedValueObjects = valueObjects.map(vo => parseValueObject(vo, aggregateEnums, packageName, moduleName));
   const valueObjectNames = parsedValueObjects.map(vo => vo.name);
   
   // Generate inverse relationships from mappedBy
@@ -276,9 +276,12 @@ function parseRelationship(relData, ownerEntity) {
 /**
  * Parse a value object
  * @param {Object} voData - Value object data from YAML
+ * @param {Array} aggregateEnums - Aggregate enums
+ * @param {String} packageName - Package name
+ * @param {String} moduleName - Module name
  * @returns {Object} Parsed value object
  */
-function parseValueObject(voData) {
+function parseValueObject(voData, aggregateEnums = [], packageName = '', moduleName = '') {
   const { name, properties, fields: fieldsYaml, methods = [], validation = [] } = voData;
   
   // Accept both 'properties' and 'fields' field names
@@ -293,7 +296,7 @@ function parseValueObject(voData) {
     fields,
     methods: parsedMethods,
     validation,
-    imports: generateValueObjectImports(fields, parsedMethods)
+    imports: generateValueObjectImports(fields, parsedMethods, aggregateEnums, packageName, moduleName)
   };
 }
 
@@ -459,8 +462,8 @@ function generateEntityImports(fields, relationships, enums = [], aggregateEnums
     });
   }
   
-  // Relationship imports
-  if (relationships.some(rel => rel.isCollection)) {
+  // Collection imports - check both fields and relationships
+  if (fields.some(f => f.isCollection) || relationships.some(rel => rel.isCollection)) {
     imports.add('import java.util.List;');
     imports.add('import java.util.ArrayList;');
     imports.add('import java.util.Collections;');
@@ -473,9 +476,12 @@ function generateEntityImports(fields, relationships, enums = [], aggregateEnums
  * Generate imports for value object
  * @param {Array} fields - Value object fields
  * @param {Array} methods - Value object methods
+ * @param {Array} aggregateEnums - Aggregate enums for import detection
+ * @param {String} packageName - Package name
+ * @param {String} moduleName - Module name
  * @returns {Array} Import statements
  */
-function generateValueObjectImports(fields, methods) {
+function generateValueObjectImports(fields, methods, aggregateEnums = [], packageName = '', moduleName = '') {
   const imports = new Set();
   
   fields.forEach(field => {
@@ -488,7 +494,21 @@ function generateValueObjectImports(fields, methods) {
     if (field.javaType.includes('LocalDateTime')) {
       imports.add('import java.time.LocalDateTime;');
     }
+    
+    // Enum imports - check if field type matches any aggregate enum
+    if (packageName && moduleName && aggregateEnums.length > 0) {
+      const matchingEnum = aggregateEnums.find(e => e.name === field.javaType);
+      if (matchingEnum) {
+        imports.add(`import ${packageName}.${moduleName}.domain.models.enums.${matchingEnum.name};`);
+      }
+    }
   });
+  
+  // Collection imports
+  if (fields.some(f => f.isCollection)) {
+    imports.add('import java.util.List;');
+    imports.add('import java.util.ArrayList;');
+  }
   
   return Array.from(imports).sort();
 }

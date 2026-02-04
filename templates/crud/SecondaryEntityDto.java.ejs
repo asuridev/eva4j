@@ -6,7 +6,7 @@ import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
 <% if (hasEnums) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
 <% } %>
-<% if (hasNestedRelationships) { %>
+<% if (hasNestedRelationships || fields.some(f => f.isCollection)) { %>
 import java.util.List;
 <% } %>
 <% imports.forEach(imp => { %>

@@ -33,7 +33,7 @@ public class <%= name %>Jpa<% if (auditable) { %> extends AuditableEntity<% } %>
     @Column(name = "<%= field.name.replace(/([A-Z])/g, '_$1').toLowerCase() %>")
     <% } %>
     @Builder.Default
-    private <%- field.javaType %> <%= field.name %> = new ArrayList<>();
+    private <%- field.javaTypeJpa %> <%= field.name %> = new ArrayList<>();
   <% } else if (field.isValueObject) { %>
     <% if (index === 0) { %>@Id
     <% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)

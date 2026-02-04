@@ -5,6 +5,7 @@ import <%= packageName %>.<%= moduleName %>.domain.models.entities.*;
 import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
 import <%= packageName %>.<%= moduleName %>.infrastructure.database.entities.*;
 import <%= packageName %>.<%= moduleName %>.infrastructure.database.valueObjects.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,7 +26,13 @@ public class <%= aggregateName %>Mapper {
         
         <%= rootEntity.name %> domain = new <%= rootEntity.name %>(
 <% rootEntity.fields.forEach((field, idx) => { %>
-  <% if (field.isValueObject) { %>            toDomain<%= field.javaType %>(jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())<% } else { %>            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% } %><%= idx < rootEntity.fields.length - 1 || rootEntity.relationships.filter(r => !r.isCollection).length > 0 ? ',' : '' %>
+  <% if (field.isCollection && field.isValueObject) { %>
+            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() != null ? jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>().stream().map(this::toDomain<%= field.collectionElementType %>).collect(Collectors.toList()) : new ArrayList<>()<%= idx < rootEntity.fields.length - 1 || rootEntity.relationships.filter(r => !r.isCollection).length > 0 ? ',' : '' %>
+  <% } else if (field.isValueObject) { %>
+            toDomain<%= field.javaType %>(jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())<%= idx < rootEntity.fields.length - 1 || rootEntity.relationships.filter(r => !r.isCollection).length > 0 ? ',' : '' %>
+  <% } else { %>
+            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<%= idx < rootEntity.fields.length - 1 || rootEntity.relationships.filter(r => !r.isCollection).length > 0 ? ',' : '' %>
+  <% } %>
 <% }); %>
 <% rootEntity.relationships.filter(r => !r.isCollection).forEach((rel, idx) => { %>            toDomain<%= rel.target %>(jpa.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>())<%= idx < rootEntity.relationships.filter(r => !r.isCollection).length - 1 ? ',' : '' %>
 <% }); %>
@@ -53,7 +60,9 @@ public class <%= aggregateName %>Mapper {
         
         <%= rootEntity.name %>Jpa jpa = <%= rootEntity.name %>Jpa.builder()
 <% rootEntity.fields.filter(f => !(f.name === 'createdAt' || f.name === 'updatedAt')).forEach(field => { -%>
-<% if (field.isValueObject) { -%>
+<% if (field.isCollection && field.isValueObject) { -%>
+                .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() != null ? domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>().stream().map(this::toJpa<%= field.collectionElementType %>).collect(Collectors.toList()) : new ArrayList<>())
+<% } else if (field.isValueObject) { -%>
                 .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
 <% } else { -%>
                 .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
@@ -94,7 +103,13 @@ public class <%= aggregateName %>Mapper {
         
         return new <%= entity.name %>(
 <% entity.fields.forEach((field, idx) => { %>
-  <% if (field.isValueObject) { %>            toDomain<%= field.javaType %>(jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())<% } else { %>            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% } %><%= idx < entity.fields.length - 1 ? ',' : '' %>
+  <% if (field.isCollection && field.isValueObject) { %>
+            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() != null ? jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>().stream().map(this::toDomain<%= field.collectionElementType %>).collect(Collectors.toList()) : new ArrayList<>()<%= idx < entity.fields.length - 1 ? ',' : '' %>
+  <% } else if (field.isValueObject) { %>
+            toDomain<%= field.javaType %>(jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())<%= idx < entity.fields.length - 1 ? ',' : '' %>
+  <% } else { %>
+            jpa.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<%= idx < entity.fields.length - 1 ? ',' : '' %>
+  <% } %>
 <% }); %>
         );
     }
@@ -108,7 +123,9 @@ public class <%= aggregateName %>Mapper {
         
         return <%= entity.name %>Jpa.builder()
 <% entity.fields.filter(f => !(f.name === 'createdAt' || f.name === 'updatedAt')).forEach(field => { -%>
-<% if (field.isValueObject) { -%>
+<% if (field.isCollection && field.isValueObject) { -%>
+                .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() != null ? domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>().stream().map(this::toJpa<%= field.collectionElementType %>).collect(Collectors.toList()) : new ArrayList<>())
+<% } else if (field.isValueObject) { -%>
                 .<%= field.name %>(toJpa<%= field.javaType %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()))
 <% } else { -%>
                 .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
