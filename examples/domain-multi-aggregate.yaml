@@ -167,7 +167,7 @@ aggregates:
         tableName: stock_movements
         auditable: true
         fields:
-          - name: movementId
+          - name: id
             type: Long
           - name: movementType
             type: MovementType
