@@ -2,7 +2,7 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 
 import <%= packageName %>.<%= moduleName %>.application.queries.Get<%= aggregateName %>Query;
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
-import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ResponseMapper;
+import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
@@ -20,10 +20,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class Get<%= aggregateName %>QueryHandler implements QueryHandler<Get<%= aggregateName %>Query, <%= aggregateName %>ResponseDto> {
 
     private final <%= aggregateName %>Repository repository;
-    private final <%= aggregateName %>ResponseMapper mapper;
+    private final <%= aggregateName %>ApplicationMapper mapper;
 
     public Get<%= aggregateName %>QueryHandler(<%= aggregateName %>Repository repository, 
-                                                <%= aggregateName %>ResponseMapper mapper) {
+                                                <%= aggregateName %>ApplicationMapper mapper) {
         this.repository = repository;
         this.mapper = mapper;
     }

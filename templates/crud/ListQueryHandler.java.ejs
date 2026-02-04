@@ -2,7 +2,7 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 
 import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
-import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ResponseMapper;
+import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
@@ -21,10 +21,10 @@ import java.util.List;
 public class FindAll<%= aggregateName %>sQueryHandler implements QueryHandler<FindAll<%= aggregateName %>sQuery, List<<%= aggregateName %>ResponseDto>> {
 
     private final <%= aggregateName %>Repository repository;
-    private final <%= aggregateName %>ResponseMapper mapper;
+    private final <%= aggregateName %>ApplicationMapper mapper;
 
     public FindAll<%= aggregateName %>sQueryHandler(<%= aggregateName %>Repository repository, 
-                                                     <%= aggregateName %>ResponseMapper mapper) {
+                                                     <%= aggregateName %>ApplicationMapper mapper) {
         this.repository = repository;
         this.mapper = mapper;
     }

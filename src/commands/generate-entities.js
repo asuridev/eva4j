@@ -598,13 +598,13 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     resourceNameKebab
   };
   
-  // 1. Generate ResponseMapper
+  // 1. Generate ApplicationMapper
   await renderAndWrite(
-    path.join(templatesDir, 'ResponseMapper.java.ejs'),
-    path.join(moduleBasePath, 'application', 'mappers', `${aggregateName}ResponseMapper.java`),
+    path.join(templatesDir, 'ApplicationMapper.java.ejs'),
+    path.join(moduleBasePath, 'application', 'mappers', `${aggregateName}ApplicationMapper.java`),
     baseContext
   );
-  generatedFiles.push({ type: 'Application Mapper', name: `${aggregateName}ResponseMapper`, path: `${moduleName}/application/mappers/${aggregateName}ResponseMapper.java` });
+  generatedFiles.push({ type: 'Application Mapper', name: `${aggregateName}ApplicationMapper`, path: `${moduleName}/application/mappers/${aggregateName}ApplicationMapper.java` });
   
   // 2. Generate Commands
   await renderAndWrite(

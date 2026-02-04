@@ -2,10 +2,8 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 
 import <%= packageName %>.<%= moduleName %>.application.commands.Create<%= aggregateName %>Command;
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
-<% secondaryEntities.forEach(entity => { %>
-import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= entity.name %>;
-<% }); %>
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
 import lombok.extern.slf4j.Slf4j;
@@ -20,9 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class Create<%= aggregateName %>CommandHandler implements CommandHandler<Create<%= aggregateName %>Command> {
 
     private final <%= aggregateName %>Repository repository;
+    private final <%= aggregateName %>ApplicationMapper mapper;
 
-    public Create<%= aggregateName %>CommandHandler(<%= aggregateName %>Repository repository) {
+    public Create<%= aggregateName %>CommandHandler(<%= aggregateName %>Repository repository, <%= aggregateName %>ApplicationMapper mapper) {
         this.repository = repository;
+        this.mapper = mapper;
     }
 
     @Override
@@ -30,40 +30,9 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
     public void handle(Create<%= aggregateName %>Command command) {
         log.info("Handling Create<%= aggregateName %>Command: {}", command);
         
-        // Build <%= aggregateName %> aggregate from command
-        <%= aggregateName %> entity = new <%= aggregateName %>();
-<% commandFields.forEach(field => { %>
-        entity.set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(command.<%= field.name %>());
-<% }); %>
+        // Build <%= aggregateName %> aggregate from command using mapper
+        <%= aggregateName %> entity = mapper.fromCommand(command);
         
-<% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
-<% oneToManyRelationships.forEach(rel => { %>
-        // Create <%= rel.targetEntityName %>s from command
-        if (command.<%= rel.fieldName %>() != null) {
-            command.<%= rel.fieldName %>().forEach(itemDto -> {
-                <%= rel.targetEntityName %> item = new <%= rel.targetEntityName %>();
-<% rel.fields.forEach(field => { %>
-                item.set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(itemDto.<%= field.name %>());
-<% }); %>
-                entity.add<%= rel.targetEntityName %>(item);
-            });
-        }
-        
-<% }); %>
-<% } %>
-<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
-<% oneToOneRelationships.forEach(rel => { %>
-        // Create <%= rel.targetEntityName %> from command
-        if (command.<%= rel.fieldName %>() != null) {
-            <%= rel.targetEntityName %> item = new <%= rel.targetEntityName %>();
-<% rel.fields.forEach(field => { %>
-            item.set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(command.<%= rel.fieldName %>().<%= field.name %>());
-<% }); %>
-            entity.set<%= rel.targetEntityName %>(item);
-        }
-        
-<% }); %>
-<% } %>
         // Save aggregate
         <%= aggregateName %> saved = repository.save(entity);
         log.info("<%= aggregateName %> created successfully with id: {}", saved.getId());
