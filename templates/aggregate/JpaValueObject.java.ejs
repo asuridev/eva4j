@@ -24,6 +24,9 @@ public class <%= name %>Jpa {
     <%= annotation %>
     <% }); %>
   <% } %>
+  <% if (field.isEnum) { %>
+    @Enumerated(EnumType.STRING)
+  <% } %>
     private <%= field.javaType %> <%= field.name %>;
     
 <% }); %>
