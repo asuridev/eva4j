@@ -60,11 +60,11 @@ async function addKafkaClientCommand() {
     spinner.text = 'Adding Kafka dependencies to build.gradle...';
     await addKafkaDependencies(projectDir);
 
-    // 2. Generate kafka.yml files for all environments
+    // 2. Generate kafka.yaml files for all environments
     spinner.text = 'Generating Kafka configuration files...';
     await generateKafkaConfigFiles(projectDir, context);
 
-    // 3. Add kafka.yml imports to application-*.yml files
+    // 3. Add kafka.yaml imports to application-*.yaml files
     spinner.text = 'Updating application configuration files...';
     await addKafkaImports(projectDir);
 
@@ -72,8 +72,8 @@ async function addKafkaClientCommand() {
     spinner.text = 'Generating KafkaConfig class...';
     await generateKafkaConfigClass(projectDir, context);
 
-    // 5. Update docker-compose.yml if it exists
-    spinner.text = 'Updating docker-compose.yml...';
+    // 5. Update docker-compose.yaml if it exists
+    spinner.text = 'Updating docker-compose.yaml...';
     await updateDockerCompose(projectDir, context);
 
     // 6. Save feature to configuration
@@ -83,12 +83,12 @@ async function addKafkaClientCommand() {
 
     console.log(chalk.blue('\n📦 Added components:'));
     console.log(chalk.gray('  ├── build.gradle (Kafka dependencies)'));
-    console.log(chalk.gray('  ├── docker-compose.yml (Kafka cluster)'));
+    console.log(chalk.gray('  ├── docker-compose.yaml (Kafka cluster)'));
     console.log(chalk.gray('  ├── src/main/resources/parameters/'));
-    console.log(chalk.gray('  │   ├── local/kafka.yml'));
-    console.log(chalk.gray('  │   ├── develop/kafka.yml'));
-    console.log(chalk.gray('  │   ├── test/kafka.yml'));
-    console.log(chalk.gray('  │   └── production/kafka.yml'));
+    console.log(chalk.gray('  │   ├── local/kafka.yaml'));
+    console.log(chalk.gray('  │   ├── develop/kafka.yaml'));
+    console.log(chalk.gray('  │   ├── test/kafka.yaml'));
+    console.log(chalk.gray('  │   └── production/kafka.yaml'));
     console.log(chalk.gray('  └── shared/configurations/kafkaConfig/KafkaConfig.java'));
     
     console.log(chalk.blue('\n✅ Kafka client configured successfully!'));
@@ -96,7 +96,7 @@ async function addKafkaClientCommand() {
     console.log(chalk.white(`   Consumer Group: ${projectName}-api-group`));
     console.log(chalk.white('   Kafka UI: http://localhost:8080'));
     console.log(chalk.gray('\n   Run "docker-compose up -d" to start the Kafka cluster'));
-    console.log(chalk.gray('   Update kafka.yml files to customize broker URLs per environment'));
+    console.log(chalk.gray('   Update kafka.yaml files to customize broker URLs per environment'));
     console.log();
 
   } catch (error) {
@@ -139,49 +139,49 @@ async function addKafkaDependencies(projectDir) {
 }
 
 /**
- * Generate kafka.yml configuration files for all environments
+ * Generate kafka.yaml configuration files for all environments
  */
 async function generateKafkaConfigFiles(projectDir, context) {
   const templatePath = path.join(__dirname, '..', '..', 'templates', 'base', 'resources', 'parameters');
   const environments = ['local', 'develop', 'test', 'production'];
 
   for (const env of environments) {
-    const outputPath = path.join(projectDir, 'src', 'main', 'resources', 'parameters', env, 'kafka.yml');
-    const templateFile = path.join(templatePath, env, 'kafka.yml.ejs');
+    const outputPath = path.join(projectDir, 'src', 'main', 'resources', 'parameters', env, 'kafka.yaml');
+    const templateFile = path.join(templatePath, env, 'kafka.yaml.ejs');
     
     await renderAndWrite(templateFile, outputPath, context);
   }
 }
 
 /**
- * Add kafka.yml imports to application-*.yml files
+ * Add kafka.yaml imports to application-*.yaml files
  */
 async function addKafkaImports(projectDir) {
   const resourcesDir = path.join(projectDir, 'src', 'main', 'resources');
   const environments = ['local', 'develop', 'test', 'production'];
 
   for (const env of environments) {
-    const appYmlPath = path.join(resourcesDir, `application-${env}.yml`);
+    const appYmlPath = path.join(resourcesDir, `application-${env}.yaml`);
     
     if (await fs.pathExists(appYmlPath)) {
       let content = await fs.readFile(appYmlPath, 'utf-8');
       
-      // Check if kafka.yml import already exists
-      if (content.includes('kafka.yml')) {
+      // Check if kafka.yaml import already exists
+      if (content.includes('kafka.yaml')) {
         continue;
       }
 
-      // Add kafka.yml import after existing imports
+      // Add kafka.yaml import after existing imports
       const importPattern = /(spring:\s*\n\s*config:\s*\n\s*import:\s*\n(?:\s*-\s*"[^"]+"\s*\n)*)/;
       
       if (importPattern.test(content)) {
         content = content.replace(
           importPattern,
-          `$1      - "classpath:parameters/${env}/kafka.yml"\n`
+          `$1      - "classpath:parameters/${env}/kafka.yaml"\n`
         );
       } else {
         // If no imports section exists, add it
-        content = `spring:\n  config:\n    import:\n      - "classpath:parameters/${env}/kafka.yml"\n\n` + content;
+        content = `spring:\n  config:\n    import:\n      - "classpath:parameters/${env}/kafka.yaml"\n\n` + content;
       }
 
       await fs.writeFile(appYmlPath, content, 'utf-8');
@@ -200,12 +200,12 @@ async function generateKafkaConfigClass(projectDir, context) {
 }
 
 /**
- * Update docker-compose.yml to add Kafka services
+ * Update docker-compose.yaml to add Kafka services
  */
 async function updateDockerCompose(projectDir, context) {
-  const dockerComposePath = path.join(projectDir, 'docker-compose.yml');
+  const dockerComposePath = path.join(projectDir, 'docker-compose.yaml');
   
-  // Check if docker-compose.yml exists
+  // Check if docker-compose.yaml exists
   if (!(await fs.pathExists(dockerComposePath))) {
     return; // No docker-compose to update
   }
@@ -217,7 +217,7 @@ async function updateDockerCompose(projectDir, context) {
     return; // Kafka already configured
   }
 
-  // Parse existing docker-compose.yml
+  // Parse existing docker-compose.yaml
   const dockerComposeObj = yaml.load(dockerComposeContent);
   
   // Ensure services section exists
@@ -227,7 +227,7 @@ async function updateDockerCompose(projectDir, context) {
 
   // Read and render Kafka services template
   const kafkaTemplateContent = await renderTemplate(
-    path.join(__dirname, '..', '..', 'templates', 'base', 'docker', 'kafka-services.yml.ejs'),
+    path.join(__dirname, '..', '..', 'templates', 'base', 'docker', 'kafka-services.yaml.ejs'),
     context
   );
   
@@ -237,7 +237,7 @@ async function updateDockerCompose(projectDir, context) {
   // Merge Kafka services into existing docker-compose
   Object.assign(dockerComposeObj.services, kafkaServices);
   
-  // Write updated docker-compose.yml
+  // Write updated docker-compose.yaml
   const updatedYaml = yaml.dump(dockerComposeObj, {
     indent: 2,
     lineWidth: -1,

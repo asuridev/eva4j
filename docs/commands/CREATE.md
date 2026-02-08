@@ -38,7 +38,7 @@ my-project/
 ├── build.gradle                 # Gradle configuration
 ├── settings.gradle              # Module settings
 ├── gradle/                      # Gradle wrapper
-├── docker-compose.yml           # Development services (DB, Kafka, etc.)
+├── docker-compose.yaml           # Development services (DB, Kafka, etc.)
 ├── src/
 │   └── main/
 │       ├── java/
@@ -49,11 +49,11 @@ my-project/
 │       │           ├── domain/                # Shared models
 │       │           └── infrastructure/        # Shared config
 │       └── resources/
-│           ├── application.yml                # Main config
-│           ├── application-local.yml          # Local config
-│           ├── application-develop.yml        # Development config
-│           ├── application-test.yml           # Test config
-│           └── application-production.yml     # Production config
+│           ├── application.yaml                # Main config
+│           ├── application-local.yaml          # Local config
+│           ├── application-develop.yaml        # Development config
+│           ├── application-test.yaml           # Test config
+│           └── application-production.yaml     # Production config
 ├── .gitignore
 └── README.md
 ```
@@ -113,11 +113,11 @@ eva4j create poc-microservice
 - Kafka UI (topic management)
 
 ### 4. Multi-Environment Configuration
-- `application.yml` - Base configuration
-- `application-local.yml` - Local development with Docker
-- `application-develop.yml` - Development environment
-- `application-test.yml` - Automated testing
-- `application-production.yml` - Production
+- `application.yaml` - Base configuration
+- `application-local.yaml` - Local development with Docker
+- `application-develop.yaml` - Development environment
+- `application-test.yaml` - Automated testing
+- `application-production.yaml` - Production
 
 ### 5. Included Dependencies
 - Spring Boot Web (REST APIs)

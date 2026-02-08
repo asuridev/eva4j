@@ -419,7 +419,7 @@ eva4j g usecase GetLowStockProducts --type query
 # Create HTTP client
 eva4j g http PaymentGateway
 
-# Configure in application.yml
+# Configure in application.yaml
 # Implement client methods
 # Use in domain through ports
 ```
@@ -467,13 +467,13 @@ eva4j add kafka-client
 
 **What it does:**
 - Adds `spring-kafka` dependencies to build.gradle
-- Creates kafka.yml configuration for all environments
+- Creates kafka.yaml configuration for all environments
 - Generates KafkaConfig.java in shared module
-- Updates application-*.yml to import kafka.yml
+- Updates application-*.yaml to import kafka.yaml
 
 **Generated Configuration:**
 ```yaml
-# parameters/local/kafka.yml
+# parameters/local/kafka.yaml
 spring.kafka:
   bootstrap-servers: localhost:9092
   consumer:
@@ -619,7 +619,7 @@ public interface ProductServiceFeignClient {
 
 **Configuration Added:**
 ```yaml
-# parameters/local/urls.yml
+# parameters/local/urls.yaml
 urls:
   product-service: http://localhost:8041
 ```
@@ -669,7 +669,7 @@ public class KafkaMessageBroker implements MessageBroker {
 
 **Configuration Added:**
 ```yaml
-# parameters/local/kafka.yml
+# parameters/local/kafka.yaml
 spring.kafka:
   topics:
     user-created: USER_CREATED
@@ -711,7 +711,7 @@ eva4j g kafka-listener <module-name>
 
 **Prerequisites:** 
 - Kafka client must be installed
-- At least one topic must exist in kafka.yml
+- At least one topic must exist in kafka.yaml
 
 **Interactive Prompts:**
 - Select topics to listen to (checkbox, multiple selection)
@@ -764,7 +764,7 @@ eva4j detach [module-name]
 4. Updates all package references (shared → module-name)
 5. Copies test files
 6. Copies environment configurations (develop, test, production)
-7. Copies parameters folder (kafka.yml, urls.yml)
+7. Copies parameters folder (kafka.yaml, urls.yaml)
 8. Updates Kafka configuration references
 9. Removes Spring Modulith dependencies
 10. Increments server port (+1)
@@ -799,10 +799,10 @@ user_msvc/
     │   │   └── rest/             # Original module controllers
     │   └── application/          # Original module use cases
     └── resources/
-        ├── application.yml         # Updated port
-        ├── application-develop.yml # Copied from parent
+        ├── application.yaml         # Updated port
+        ├── application-develop.yaml # Copied from parent
         └── parameters/             # Copied and updated
-            └── */kafka.yml         # Package refs updated
+            └── */kafka.yaml         # Package refs updated
 ```
 
 **Deploy Strategy:**
@@ -946,7 +946,7 @@ my-project/
 ├── build.gradle                    # Dependencies with Spring Modulith
 ├── settings.gradle
 ├── .eva4j.json                     # Project configuration
-├── docker-compose.yml              # Local database
+├── docker-compose.yaml              # Local database
 ├── README.md
 └── src/
     ├── main/
@@ -989,24 +989,24 @@ my-project/
     │   │   └── product/                       # Product module
     │   │       └── ... (same structure)
     │   └── resources/
-    │       ├── application.yml                # Main config (port 8040)
-    │       ├── application-local.yml          # Local profile
-    │       ├── application-develop.yml        # Development profile
-    │       ├── application-test.yml           # Test profile
-    │       ├── application-production.yml     # Production profile
+    │       ├── application.yaml                # Main config (port 8040)
+    │       ├── application-local.yaml          # Local profile
+    │       ├── application-develop.yaml        # Development profile
+    │       ├── application-test.yaml           # Test profile
+    │       ├── application-production.yaml     # Production profile
     │       └── parameters/
     │           ├── local/
-    │           │   ├── kafka.yml              # Kafka config (localhost)
-    │           │   └── urls.yml               # Service URLs (localhost)
+    │           │   ├── kafka.yaml              # Kafka config (localhost)
+    │           │   └── urls.yaml               # Service URLs (localhost)
     │           ├── develop/
-    │           │   ├── kafka.yml
-    │           │   └── urls.yml
+    │           │   ├── kafka.yaml
+    │           │   └── urls.yaml
     │           ├── test/
-    │           │   ├── kafka.yml
-    │           │   └── urls.yml
+    │           │   ├── kafka.yaml
+    │           │   └── urls.yaml
     │           └── production/
-    │               ├── kafka.yml
-    │               └── urls.yml
+    │               ├── kafka.yaml
+    │               └── urls.yaml
     └── test/
         └── java/com/company/myproject/
             └── ApplicationTests.java
@@ -1096,10 +1096,10 @@ Eva4j projects support 4 environments out of the box:
 
 | Environment | Profile | Use Case | Config File |
 |-------------|---------|----------|-------------|
-| **local** | `local` | Developer machine | `application-local.yml` |
-| **develop** | `develop` | Development server | `application-develop.yml` |
-| **test** | `test` | QA/Staging | `application-test.yml` |
-| **production** | `production` | Production | `application-production.yml` |
+| **local** | `local` | Developer machine | `application-local.yaml` |
+| **develop** | `develop` | Development server | `application-develop.yaml` |
+| **test** | `test` | QA/Staging | `application-test.yaml` |
+| **production** | `production` | Production | `application-production.yaml` |
 
 **Run with profile:**
 ```bash
@@ -1117,14 +1117,14 @@ java -jar app.jar --spring.profiles.active=production
 ```
 resources/parameters/
 ├── local/
-│   ├── kafka.yml     # bootstrap-servers: localhost:9092
-│   └── urls.yml      # product-service: http://localhost:8041
+│   ├── kafka.yaml     # bootstrap-servers: localhost:9092
+│   └── urls.yaml      # product-service: http://localhost:8041
 ├── develop/
-│   ├── kafka.yml     # bootstrap-servers: dev-kafka.company.com:9092
-│   └── urls.yml      # product-service: https://dev-product.company.com
+│   ├── kafka.yaml     # bootstrap-servers: dev-kafka.company.com:9092
+│   └── urls.yaml      # product-service: https://dev-product.company.com
 └── production/
-    ├── kafka.yml     # bootstrap-servers: prod-kafka.company.com:9092
-    └── urls.yml      # product-service: https://product.company.com
+    ├── kafka.yaml     # bootstrap-servers: prod-kafka.company.com:9092
+    └── urls.yaml      # product-service: https://product.company.com
 ```
 
 ---

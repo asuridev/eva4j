@@ -94,7 +94,7 @@ async function detachCommand(moduleName, options) {
   
   // Get current server port and increment
   const applicationYml = await fs.readFile(
-    path.join(projectDir, 'src', 'main', 'resources', 'application.yml'),
+    path.join(projectDir, 'src', 'main', 'resources', 'application.yaml'),
     'utf-8'
   );
   const portMatch = applicationYml.match(/port:\s*(\d+)/);
@@ -556,10 +556,10 @@ async function copyEnvironmentProfiles(parentDir, newProjectDir, packageName, mo
   
   // Copy environment profile files
   const profileFiles = [
-    'application-develop.yml',
-    'application-local.yml',
-    'application-production.yml',
-    'application-test.yml'
+    'application-develop.yaml',
+    'application-local.yaml',
+    'application-production.yaml',
+    'application-test.yaml'
   ];
   
   for (const file of profileFiles) {
@@ -574,19 +574,19 @@ async function copyEnvironmentProfiles(parentDir, newProjectDir, packageName, mo
   if (await fs.pathExists(parametersDir)) {
     await fs.copy(parametersDir, path.join(newResourcesDir, 'parameters'));
     
-    // Update package references in kafka.yml files
+    // Update package references in kafka.yaml files
     await updateKafkaConfigReferences(newResourcesDir, packageName, moduleName);
   }
 }
 
 /**
- * Update package references in kafka.yml files
+ * Update package references in kafka.yaml files
  */
 async function updateKafkaConfigReferences(resourcesDir, packageName, moduleName) {
   const environments = ['local', 'develop', 'test', 'production'];
   
   for (const env of environments) {
-    const kafkaYmlPath = path.join(resourcesDir, 'parameters', env, 'kafka.yml');
+    const kafkaYmlPath = path.join(resourcesDir, 'parameters', env, 'kafka.yaml');
     
     if (await fs.pathExists(kafkaYmlPath)) {
       let content = await fs.readFile(kafkaYmlPath, 'utf-8');

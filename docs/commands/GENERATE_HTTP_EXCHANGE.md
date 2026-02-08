@@ -199,7 +199,7 @@ public class PaymentGatewayAdapter implements PaymentGatewayPort {
 ### Application Properties
 
 ```yaml
-# application.yml
+# application.yaml
 
 # External service configuration
 external:

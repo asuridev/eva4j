@@ -338,7 +338,7 @@ The command validates:
 
 **404 when calling endpoints**
 - Solution: Verify the application is running and the base path is correct
-- Check `server.port` and `server.servlet.context-path` in `application.yml`
+- Check `server.port` and `server.servlet.context-path` in `application.yaml`
 
 **Validation errors ignored**
 - Solution: Add `@Valid` annotation to request body parameters

@@ -48,7 +48,7 @@ eva4j detach payment
 <module-name>-service/
 ├── build.gradle                   # Independent Gradle config
 ├── settings.gradle
-├── docker-compose.yml             # Service-specific infrastructure
+├── docker-compose.yaml             # Service-specific infrastructure
 ├── Dockerfile                     # Container image definition
 ├── src/
 │   └── main/
@@ -59,8 +59,8 @@ eva4j detach payment
 │       │       ├── application/             # Same application layer
 │       │       └── infrastructure/          # Same infrastructure layer
 │       └── resources/
-│           ├── application.yml              # Service-specific config
-│           └── application-*.yml            # Environment configs
+│           ├── application.yaml              # Service-specific config
+│           └── application-*.yaml            # Environment configs
 └── README.md
 ```
 
@@ -75,7 +75,7 @@ eva4j detach payment
 ### Microservice Additions
 - ✅ **Independent Application class** - Separate Spring Boot app
 - ✅ **Own database** - Dedicated database configuration
-- ✅ **Docker support** - Dockerfile and docker-compose.yml
+- ✅ **Docker support** - Dockerfile and docker-compose.yaml
 - ✅ **Service discovery ready** - Eureka client configuration (optional)
 - ✅ **API Gateway ready** - Can integrate with Spring Cloud Gateway
 
@@ -95,8 +95,8 @@ eva4j detach payment
 ### What Gets Created
 1. **New Application.java** - Standalone Spring Boot application
 2. **Independent build.gradle** - Only necessary dependencies
-3. **Docker support** - Dockerfile and docker-compose.yml
-4. **Service configuration** - application.yml with service-specific settings
+3. **Docker support** - Dockerfile and docker-compose.yaml
+4. **Service configuration** - application.yaml with service-specific settings
 5. **README.md** - Service documentation
 
 ### What Gets Removed
@@ -141,7 +141,7 @@ After detaching a module:
 
 1. **Review configuration:**
    ```yaml
-   # application.yml in detached service
+   # application.yaml in detached service
    server:
      port: 8081  # Different port
    
@@ -176,7 +176,7 @@ After detaching a module:
 
 6. **Set up service discovery:**
    ```yaml
-   # application.yml
+   # application.yaml
    eureka:
      client:
        service-url:
@@ -272,7 +272,7 @@ The command validates:
 - Solution: Check that all necessary dependencies are in the new build.gradle
 
 **Cannot connect to other services**
-- Solution: Configure service URLs in application.yml
+- Solution: Configure service URLs in application.yaml
 - Use service discovery or configure direct URLs
 
 **Database connection errors**

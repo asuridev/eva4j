@@ -87,17 +87,17 @@ class BaseGenerator {
   async generateResources() {
     const resourcesPath = path.join(this.projectDir, 'src', 'main', 'resources');
     
-    // Base application.yml files
-    await this.generateFile('resources/application.yml.ejs', 
-      path.join(resourcesPath, 'application.yml'));
-    await this.generateFile('resources/application-local.yml.ejs', 
-      path.join(resourcesPath, 'application-local.yml'));
-    await this.generateFile('resources/application-develop.yml.ejs', 
-      path.join(resourcesPath, 'application-develop.yml'));
-    await this.generateFile('resources/application-test.yml.ejs', 
-      path.join(resourcesPath, 'application-test.yml'));
-    await this.generateFile('resources/application-production.yml.ejs', 
-      path.join(resourcesPath, 'application-production.yml'));
+    // Base application.yaml files
+    await this.generateFile('resources/application.yaml.ejs', 
+      path.join(resourcesPath, 'application.yaml'));
+    await this.generateFile('resources/application-local.yaml.ejs', 
+      path.join(resourcesPath, 'application-local.yaml'));
+    await this.generateFile('resources/application-develop.yaml.ejs', 
+      path.join(resourcesPath, 'application-develop.yaml'));
+    await this.generateFile('resources/application-test.yaml.ejs', 
+      path.join(resourcesPath, 'application-test.yaml'));
+    await this.generateFile('resources/application-production.yaml.ejs', 
+      path.join(resourcesPath, 'application-production.yaml'));
     
     // DB configuration per environment
     if (this.context.dependencies?.includes('data-jpa')) {
@@ -112,14 +112,14 @@ class BaseGenerator {
     }
 
     // CORS configuration per environment
-    await this.generateFile('resources/parameters/local/cors.yml.ejs', 
-      path.join(resourcesPath, 'parameters', 'local', 'cors.yml'));
-    await this.generateFile('resources/parameters/develop/cors.yml.ejs', 
-      path.join(resourcesPath, 'parameters', 'develop', 'cors.yml'));
-    await this.generateFile('resources/parameters/test/cors.yml.ejs', 
-      path.join(resourcesPath, 'parameters', 'test', 'cors.yml'));
-    await this.generateFile('resources/parameters/production/cors.yml.ejs', 
-      path.join(resourcesPath, 'parameters', 'production', 'cors.yml'));
+    await this.generateFile('resources/parameters/local/cors.yaml.ejs', 
+      path.join(resourcesPath, 'parameters', 'local', 'cors.yaml'));
+    await this.generateFile('resources/parameters/develop/cors.yaml.ejs', 
+      path.join(resourcesPath, 'parameters', 'develop', 'cors.yaml'));
+    await this.generateFile('resources/parameters/test/cors.yaml.ejs', 
+      path.join(resourcesPath, 'parameters', 'test', 'cors.yaml'));
+    await this.generateFile('resources/parameters/production/cors.yaml.ejs', 
+      path.join(resourcesPath, 'parameters', 'production', 'cors.yaml'));
   }
 
   async generateRootFiles() {
@@ -129,8 +129,8 @@ class BaseGenerator {
       path.join(this.projectDir, 'README.md'));
     
     if (this.context.features.includeDocker) {
-      await this.generateFile('docker/docker-compose.yml.ejs', 
-        path.join(this.projectDir, 'docker-compose.yml'));
+      await this.generateFile('docker/docker-compose.yaml.ejs', 
+        path.join(this.projectDir, 'docker-compose.yaml'));
     }
   }
 

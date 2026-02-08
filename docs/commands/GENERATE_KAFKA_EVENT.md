@@ -253,7 +253,7 @@ public class KafkaProducerConfig {
 ### Application Properties
 
 ```yaml
-# application.yml
+# application.yaml
 
 spring:
   kafka:

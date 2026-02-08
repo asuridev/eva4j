@@ -135,8 +135,8 @@ async function generateKafkaEventCommand(moduleName, eventName) {
     spinner.text = 'Generating event record...';
     await generateEventRecord(projectDir, packagePath, context);
 
-    // 2. Update kafka.yml files
-    spinner.text = 'Updating kafka.yml configuration...';
+    // 2. Update kafka.yaml files
+    spinner.text = 'Updating kafka.yaml configuration...';
     await updateKafkaYml(projectDir, topicPropertyKey, topicPropertyValue);
 
     // 3. Create/Update MessageBroker interface
@@ -158,7 +158,7 @@ async function generateKafkaEventCommand(moduleName, eventName) {
     console.log(chalk.gray(`  ├── ${moduleName}/application/ports/MessageBroker.java`));
     console.log(chalk.gray(`  ├── ${moduleName}/infrastructure/adapters/kafkaMessageBroker/KafkaMessageBroker.java`));
     console.log(chalk.gray(`  ├── shared/configurations/kafkaConfig/KafkaConfig.java`));
-    console.log(chalk.gray('  └── parameters/*/kafka.yml (all environments)'));
+    console.log(chalk.gray('  └── parameters/*/kafka.yaml (all environments)'));
     
     console.log(chalk.blue('\n✅ Kafka event configured successfully!'));
     console.log(chalk.white(`\n   Event: ${eventClassName}`));
@@ -192,13 +192,13 @@ async function generateEventRecord(projectDir, packagePath, context) {
 }
 
 /**
- * Update kafka.yml files in all environments
+ * Update kafka.yaml files in all environments
  */
 async function updateKafkaYml(projectDir, topicKey, topicValue) {
   const environments = ['local', 'develop', 'test', 'production'];
 
   for (const env of environments) {
-    const kafkaYmlPath = path.join(projectDir, 'src', 'main', 'resources', 'parameters', env, 'kafka.yml');
+    const kafkaYmlPath = path.join(projectDir, 'src', 'main', 'resources', 'parameters', env, 'kafka.yaml');
     
     if (!(await fs.pathExists(kafkaYmlPath))) {
       continue;

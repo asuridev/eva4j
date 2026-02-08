@@ -124,10 +124,10 @@ async function generateHttpExchangeCommand(moduleName, portName) {
     // Generate Adapter (Feign Client)
     await generateAdapter(projectDir, moduleBasePath, context);
 
-    // Create or update urls.yml configuration files
+    // Create or update urls.yaml configuration files
     const urlsConfigLocations = await createOrUpdateUrlsConfig(projectDir, baseUrlProperty, baseUrl.trim());
 
-    // Ensure urls.yml is imported in all application-*.yml files
+    // Ensure urls.yaml is imported in all application-*.yaml files
     await ensureUrlsImport(projectDir);
 
     spinner.succeed(chalk.green('HTTP exchange adapter generated successfully! ✨'));
@@ -196,7 +196,7 @@ async function generateAdapter(projectDir, moduleBasePath, context) {
 }
 
 /**
- * Create or update urls.yml files in each environment directory
+ * Create or update urls.yaml files in each environment directory
  * Returns array of locations where configuration was added
  */
 async function createOrUpdateUrlsConfig(projectDir, propertyName, propertyValue) {
@@ -205,7 +205,7 @@ async function createOrUpdateUrlsConfig(projectDir, propertyName, propertyValue)
 
   for (const env of environments) {
     const parametersDir = path.join(projectDir, 'src', 'main', 'resources', 'parameters', env);
-    const urlsFilePath = path.join(parametersDir, 'urls.yml');
+    const urlsFilePath = path.join(parametersDir, 'urls.yaml');
 
     // Ensure directory exists
     await fs.ensureDir(parametersDir);
@@ -246,10 +246,10 @@ async function createOrUpdateUrlsConfig(projectDir, propertyName, propertyValue)
 
       // Record location
       const statusIndicator = fileExists ? '' : ' (created)';
-      locations.push(`parameters/${env}/urls.yml${statusIndicator}`);
+      locations.push(`parameters/${env}/urls.yaml${statusIndicator}`);
     } else {
       // Property already exists, skip
-      locations.push(`parameters/${env}/urls.yml (already exists)`);
+      locations.push(`parameters/${env}/urls.yaml (already exists)`);
     }
   }
 
@@ -257,13 +257,13 @@ async function createOrUpdateUrlsConfig(projectDir, propertyName, propertyValue)
 }
 
 /**
- * Ensure urls.yml is imported in all application-*.yml files
+ * Ensure urls.yaml is imported in all application-*.yaml files
  */
 async function ensureUrlsImport(projectDir) {
   const environments = ['local', 'develop', 'test', 'production'];
   
   for (const env of environments) {
-    const appConfigPath = path.join(projectDir, 'src', 'main', 'resources', `application-${env}.yml`);
+    const appConfigPath = path.join(projectDir, 'src', 'main', 'resources', `application-${env}.yaml`);
     
     if (!(await fs.pathExists(appConfigPath))) {
       continue;
@@ -288,8 +288,8 @@ async function ensureUrlsImport(projectDir) {
       config.spring.config.import = [config.spring.config.import];
     }
 
-    // Check if urls.yml import already exists
-    const urlsImportPath = `classpath:parameters/${env}/urls.yml`;
+    // Check if urls.yaml import already exists
+    const urlsImportPath = `classpath:parameters/${env}/urls.yaml`;
     if (!config.spring.config.import.includes(urlsImportPath)) {
       config.spring.config.import.push(urlsImportPath);
 

@@ -36,7 +36,7 @@ eva4j generate kafka-listener <module>
 After running the command, you'll be prompted to:
 
 1. **Select topics to listen to** (multiple selection with space bar)
-   - Topics are read from `kafka.yml` configuration
+   - Topics are read from `kafka.yaml` configuration
    - Must select at least one topic
    - Can select multiple topics at once
 
@@ -53,12 +53,12 @@ eva4j add kafka-client
 This configures:
 - Spring Kafka dependencies
 - Kafka consumer configuration
-- Topic management in `kafka.yml`
+- Topic management in `kafka.yaml`
 - EventEnvelope infrastructure
 
-### 2. Topics Must Exist in kafka.yml
+### 2. Topics Must Exist in kafka.yaml
 
-Topics are defined in: `src/main/resources/parameters/local/kafka.yml`
+Topics are defined in: `src/main/resources/parameters/local/kafka.yaml`
 
 ```yaml
 topics:
@@ -245,9 +245,9 @@ eva4j generate kafka-listener analytics
 
 ## Configuration
 
-### kafka.yml Structure
+### kafka.yaml Structure
 
-Location: `src/main/resources/parameters/local/kafka.yml`
+Location: `src/main/resources/parameters/local/kafka.yaml`
 
 ```yaml
 bootstrap-servers: localhost:9092
@@ -262,12 +262,12 @@ topics:
 ### Environment-Specific Configuration
 
 ```yaml
-# parameters/local/kafka.yml
+# parameters/local/kafka.yaml
 bootstrap-servers: localhost:9092
 topics:
   user-created: dev.user.events.created
 
-# parameters/prod/kafka.yml
+# parameters/prod/kafka.yaml
 bootstrap-servers: kafka-cluster.prod:9092
 topics:
   user-created: prod.user.events.created
@@ -288,7 +288,7 @@ Checks Kafka client installed
     ↓
 Validates module exists
     ↓
-Reads available topics from kafka.yml
+Reads available topics from kafka.yaml
     ↓
 Prompts user to select topics (multi-select)
     ↓
@@ -528,14 +528,14 @@ public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerCont
 eva4j add kafka-client
 ```
 
-### ❌ "No topics found in kafka.yml"
+### ❌ "No topics found in kafka.yaml"
 
 **Solution:** Generate topics first:
 ```bash
 eva4j generate kafka-event user user-created
 ```
 
-Or manually add to `kafka.yml`:
+Or manually add to `kafka.yaml`:
 ```yaml
 topics:
   user-created: user.events.created
@@ -558,7 +558,7 @@ eva4j add module <module-name>
 **Checklist:**
 1. Kafka server is running
 2. Topic exists in Kafka cluster
-3. Topic name in `kafka.yml` matches actual Kafka topic
+3. Topic name in `kafka.yaml` matches actual Kafka topic
 4. Consumer group is not paused
 5. No deserialization errors in logs
 

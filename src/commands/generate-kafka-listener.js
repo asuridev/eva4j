@@ -45,11 +45,11 @@ async function generateKafkaListenerCommand(moduleName) {
     process.exit(1);
   }
 
-  // Read available topics from kafka.yml
+  // Read available topics from kafka.yaml
   const topics = await getAvailableTopics(projectDir);
   
   if (topics.length === 0) {
-    console.error(chalk.red('❌ No topics found in kafka.yml'));
+    console.error(chalk.red('❌ No topics found in kafka.yaml'));
     console.error(chalk.gray('   Add topics using: eva4j generate kafka-event <module> <event-name>'));
     process.exit(1);
   }
@@ -146,10 +146,10 @@ async function generateKafkaListenerCommand(moduleName) {
 }
 
 /**
- * Read available topics from kafka.yml
+ * Read available topics from kafka.yaml
  */
 async function getAvailableTopics(projectDir) {
-  const kafkaYmlPath = path.join(projectDir, 'src', 'main', 'resources', 'parameters', 'local', 'kafka.yml');
+  const kafkaYmlPath = path.join(projectDir, 'src', 'main', 'resources', 'parameters', 'local', 'kafka.yaml');
   
   if (!(await fs.pathExists(kafkaYmlPath))) {
     return [];
