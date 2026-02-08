@@ -127,6 +127,8 @@ class BaseGenerator {
       path.join(this.projectDir, '.gitignore'));
     await this.generateFile('root/README.md.ejs', 
       path.join(this.projectDir, 'README.md'));
+    await this.generateFile('root/AGENTS.md.ejs', 
+      path.join(this.projectDir, 'AGENTS.md'));
     
     if (this.context.features.includeDocker) {
       await this.generateFile('docker/docker-compose.yaml.ejs', 

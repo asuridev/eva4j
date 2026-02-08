@@ -1,0 +1,914 @@
+# AI Agent Guide for <%= artifactId %>
+
+This document provides comprehensive guidance for AI agents to understand, navigate, and contribute to this eva4j-generated Spring Boot project. The project follows **Hexagonal Architecture**, **Domain-Driven Design (DDD)**, and **CQRS** patterns.
+
+---
+
+## Table of Contents
+
+1. [Architecture Overview](#architecture-overview)
+2. [Project Structure](#project-structure)
+3. [domain.yaml - The Heart of Code Generation](#domainyaml---the-heart-of-code-generation)
+4. [Generated Code Mapping](#generated-code-mapping)
+5. [Key Commands](#key-commands)
+6. [CQRS Pattern Implementation](#cqrs-pattern-implementation)
+7. [Adding New Features](#adding-new-features)
+8. [Conventions & Best Practices](#conventions--best-practices)
+9. [Configuration Management](#configuration-management)
+
+---
+
+## Architecture Overview
+
+This project implements **Hexagonal Architecture (Ports & Adapters)** with three distinct layers:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    INFRASTRUCTURE LAYER                      │
+│  (REST Controllers, JPA Entities, External Adapters)         │
+│                                                              │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │            APPLICATION LAYER                       │    │
+│  │  (Commands, Queries, Use Cases, DTOs, Mappers)     │    │
+│  │                                                     │    │
+│  │  ┌──────────────────────────────────────────┐     │    │
+│  │  │         DOMAIN LAYER                     │     │    │
+│  │  │  (Entities, Value Objects, Repositories) │     │    │
+│  │  └──────────────────────────────────────────┘     │    │
+│  └────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Layer Responsibilities
+
+**Domain Layer** (Pure Java, framework-agnostic):
+- Business entities and value objects
+- Domain logic and invariants
+- Repository interfaces (ports)
+- Domain services
+
+**Application Layer** (Orchestration):
+- Use cases (command and query handlers)
+- Commands and Queries (CQRS)
+- DTOs for data transfer
+- Mappers between layers
+- Application services
+
+**Infrastructure Layer** (Technical details):
+- JPA entities with Lombok
+- Spring Data repositories
+- REST controllers
+- External API clients
+- Event publishers/consumers
+- Database adapters
+
+---
+
+## Project Structure
+
+```
+<%= artifactId %>/
+├── .eva4j.json                    # Project metadata & module registry
+├── AGENTS.md                      # This file
+├── README.md                      # Project documentation
+├── build.gradle                   # Gradle build configuration
+├── settings.gradle
+└── src/
+    ├── main/
+    │   ├── java/<%= packageName.replace(/\./g, '/') %>/
+    │   │   ├── <%= applicationClassName %>.java  # Spring Boot entry point
+    │   │   ├── common/            # Infrastructure (config, exceptions, security)
+    │   │   ├── shared/            # Cross-cutting domain (base entities, events)
+    │   │   └── [modules]/         # Business modules (after `eva4j add module`)
+    │   │       └── user/          # Example module
+    │   │           ├── domain/
+    │   │           │   ├── models/
+    │   │           │   │   ├── entities/        # Pure Java domain entities
+    │   │           │   │   ├── valueObjects/    # Immutable value objects
+    │   │           │   │   └── enums/           # Enumerations
+    │   │           │   ├── repositories/        # Repository interfaces
+    │   │           │   └── services/            # Domain services
+    │   │           ├── application/
+    │   │           │   ├── commands/            # Write operations
+    │   │           │   ├── queries/             # Read operations
+    │   │           │   ├── usecases/            # Command/Query handlers
+    │   │           │   ├── dtos/                # Data Transfer Objects
+    │   │           │   ├── mappers/             # Layer-to-layer mapping
+    │   │           │   ├── events/              # Domain events
+    │   │           │   └── ports/               # Output ports (interfaces)
+    │   │           ├── infrastructure/
+    │   │           │   ├── database/
+    │   │           │   │   ├── entities/        # JPA entities (Lombok)
+    │   │           │   │   ├── repositories/    # JPA implementations
+    │   │           │   │   └── mappers/         # Domain ↔ JPA mapping
+    │   │           │   ├── rest/
+    │   │           │   │   └── controllers/     # REST endpoints
+    │   │           │   ├── kafkaListener/       # Event consumers
+    │   │           │   └── adapters/            # External API clients
+    │   │           ├── package-info.java        # Spring Modulith module marker
+    │   │           └── domain.yaml              # ⭐ DOMAIN MODEL DEFINITION
+    │   └── resources/
+    │       ├── application.yaml                 # Main configuration
+    │       ├── application-{env}.yaml           # Environment-specific configs
+    │       └── parameters/
+    │           └── {env}/
+    │               ├── db.yaml                  # Database settings
+    │               ├── cors.yaml                # CORS configuration
+    │               ├── kafka.yaml               # Kafka topics (if added)
+    │               └── urls.yaml                # External API URLs (if added)
+    └── test/
+        └── java/<%= packageName.replace(/\./g, '/') %>/
+            └── [module]/
+```
+
+### Module Organization
+
+Each module (e.g., `user`, `order`, `product`) is:
+- **Self-contained**: Own domain, application, and infrastructure layers
+- **Independent**: Can be extracted to microservice with `eva4j detach`
+- **Bounded Context**: Represents a business capability
+- **Spring Modulith Module**: Boundaries enforced at runtime
+
+---
+
+## domain.yaml - The Heart of Code Generation
+
+**Location**: `src/main/java/<%= packageName.replace(/\./g, '/') %>/[module]/domain.yaml`
+
+The `domain.yaml` file is the **single source of truth** for your domain model. It drives code generation for:
+- Domain entities (pure Java)
+- JPA entities (with Lombok, @Entity, @Table)
+- Repository interfaces and implementations
+- Mappers (bidirectional domain ↔ JPA)
+- CRUD operations (when using `eva4j g resource`)
+
+### Basic Structure
+
+```yaml
+aggregates:
+  - name: Order                    # Aggregate root name (PascalCase)
+    entities:
+      - name: order                # Entity name (camelCase or snake_case)
+        isRoot: true               # ⚠️ ONE entity MUST have isRoot: true
+        tableName: orders          # Optional, defaults to snake_case plural
+        auditable: true            # Adds createdAt/updatedAt fields
+        fields:
+          - name: id
+            type: String           # String → UUID, Long → IDENTITY
+          - name: customerId
+            type: String
+          - name: status
+            type: OrderStatus      # Reference to enum below
+          - name: totalAmount
+            type: Money            # Reference to value object below
+          - name: orderDate
+            type: LocalDateTime
+        relationships:
+          - type: OneToMany
+            target: OrderItem      # Secondary entity
+            mappedBy: order        # Field in OrderItem
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+      
+      - name: orderItem            # Secondary entity (no isRoot)
+        tableName: order_items
+        fields:
+          - name: id
+            type: Long
+          - name: productId
+            type: String
+          - name: quantity
+            type: Integer
+          - name: unitPrice
+            type: BigDecimal
+    
+    valueObjects:                  # Embedded objects (@Embeddable)
+      - name: Money
+        fields:
+          - name: amount
+            type: BigDecimal
+          - name: currency
+            type: String
+    
+    enums:                         # Enumerations
+      - name: OrderStatus
+        values:
+          - DRAFT
+          - CONFIRMED
+          - SHIPPED
+          - DELIVERED
+          - CANCELLED
+```
+
+### Supported Field Types
+
+| YAML Type        | Java Type        | Notes                          |
+|------------------|------------------|--------------------------------|
+| `String`         | `String`         | UUID when used as ID           |
+| `Long`           | `Long`           | IDENTITY when used as ID       |
+| `Integer`        | `Integer`        |                                |
+| `Double`         | `Double`         |                                |
+| `BigDecimal`     | `BigDecimal`     | For monetary values            |
+| `Boolean`        | `Boolean`        |                                |
+| `LocalDate`      | `LocalDate`      | Date without time              |
+| `LocalDateTime`  | `LocalDateTime`  | Date with time                 |
+| `List<Type>`     | `List<Type>`     | Collections                    |
+| `EnumName`       | `EnumName`       | Reference to enum in aggregate |
+| `ValueObjName`   | `ValueObjName`   | Reference to value object      |
+
+### Relationships
+
+**OneToMany** (Parent → Children):
+```yaml
+relationships:
+  - type: OneToMany
+    target: OrderItem              # Child entity
+    mappedBy: order                # Field in child that references parent
+    cascade: [PERSIST, MERGE, REMOVE]
+    fetch: LAZY                    # LAZY or EAGER
+```
+
+**ManyToOne** (Child → Parent):
+```yaml
+relationships:
+  - type: ManyToOne
+    target: Order                  # Parent entity
+    joinColumn: order_id           # FK column name
+    fetch: EAGER
+```
+
+**OneToOne** (Bidirectional):
+```yaml
+# In User entity:
+relationships:
+  - type: OneToOne
+    target: UserProfile
+    mappedBy: user
+    cascade: [PERSIST, MERGE, REMOVE]
+    fetch: LAZY
+
+# In UserProfile entity:
+relationships:
+  - type: ManyToOne
+    target: User
+    joinColumn: user_id
+    fetch: LAZY
+```
+
+### Auditable Entities
+
+```yaml
+entities:
+  - name: user
+    isRoot: true
+    auditable: true                # ✅ Auto-adds createdAt, updatedAt
+    fields:
+      - name: id
+        type: String
+      # No need to add createdAt/updatedAt manually!
+```
+
+Generated domain entity extends `AuditableEntity`:
+```java
+public class User extends AuditableEntity {
+    // createdAt and updatedAt inherited
+}
+```
+
+---
+
+## Generated Code Mapping
+
+### From domain.yaml to Code
+
+For aggregate `Order` with entity `order` (isRoot: true):
+
+#### 1. Domain Entity (Pure Java)
+**File**: `domain/models/entities/Order.java`
+```java
+package <%= packageName %>.order.domain.models.entities;
+
+public class Order {
+    private String id;
+    private String customerId;
+    private OrderStatus status;
+    private Money totalAmount;
+    private LocalDateTime orderDate;
+    private List<OrderItem> items;
+    
+    // Constructor, getters, setters, business logic
+}
+```
+
+#### 2. JPA Entity (Lombok)
+**File**: `infrastructure/database/entities/OrderJpa.java`
+```java
+package <%= packageName %>.order.infrastructure.database.entities;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+@Entity
+@Table(name = "orders")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class OrderJpa {
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+    
+    private String customerId;
+    
+    @Enumerated(EnumType.STRING)
+    private OrderStatus status;
+    
+    @Embedded
+    private MoneyJpa totalAmount;
+    
+    private LocalDateTime orderDate;
+    
+    @OneToMany(mappedBy = "order", cascade = {...}, fetch = FetchType.LAZY)
+    private List<OrderItemJpa> items;
+}
+```
+
+#### 3. Repository Interface (Domain)
+**File**: `domain/repositories/OrderRepository.java`
+```java
+package <%= packageName %>.order.domain.repositories;
+
+public interface OrderRepository {
+    Order save(Order order);
+    Optional<Order> findById(String id);
+    List<Order> findAll();
+    void deleteById(String id);
+}
+```
+
+#### 4. JPA Repository (Spring Data)
+**File**: `infrastructure/database/repositories/OrderJpaRepository.java`
+```java
+package <%= packageName %>.order.infrastructure.database.repositories;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface OrderJpaRepository extends JpaRepository<OrderJpa, String> {
+}
+```
+
+#### 5. Repository Implementation
+**File**: `infrastructure/database/repositories/OrderRepositoryImpl.java`
+```java
+package <%= packageName %>.order.infrastructure.database.repositories;
+
+@Component
+public class OrderRepositoryImpl implements OrderRepository {
+    private final OrderJpaRepository jpaRepository;
+    private final OrderMapper mapper;
+    
+    @Override
+    public Order save(Order order) {
+        OrderJpa jpaEntity = mapper.toJpa(order);
+        OrderJpa saved = jpaRepository.save(jpaEntity);
+        return mapper.toDomain(saved);
+    }
+    // ... other methods
+}
+```
+
+#### 6. Mapper (Domain ↔ JPA)
+**File**: `infrastructure/database/mappers/OrderMapper.java`
+```java
+package <%= packageName %>.order.infrastructure.database.mappers;
+
+@Component
+public class OrderMapper {
+    public Order toDomain(OrderJpa jpa) { /* ... */ }
+    public OrderJpa toJpa(Order domain) { /* ... */ }
+    public List<Order> toDomainList(List<OrderJpa> jpaList) { /* ... */ }
+}
+```
+
+#### 7. Value Object (Domain + JPA)
+**File**: `domain/models/valueObjects/Money.java`
+```java
+public record Money(BigDecimal amount, String currency) {
+    // Immutable value object
+}
+```
+
+**File**: `infrastructure/database/valueObjects/MoneyJpa.java`
+```java
+@Embeddable
+@Getter
+@Setter
+public class MoneyJpa {
+    private BigDecimal amount;
+    private String currency;
+}
+```
+
+#### 8. Enum
+**File**: `domain/models/enums/OrderStatus.java`
+```java
+public enum OrderStatus {
+    DRAFT, CONFIRMED, SHIPPED, DELIVERED, CANCELLED
+}
+```
+
+---
+
+## Key Commands
+
+### Project Setup
+```bash
+# Create new project
+eva4j create my-project
+
+# Add a new module
+eva4j add module order
+
+# View project configuration
+eva4j info
+```
+
+### Code Generation (must have domain.yaml)
+```bash
+# Generate entities from domain.yaml
+eva4j generate entities order
+eva4j g entities order         # Alias
+
+# Generate CRUD REST API
+eva4j g resource order          # Creates controller + DTOs + CRUD handlers
+
+# Generate custom use case
+eva4j g usecase order CreateCustomOrder
+```
+
+### Event-Driven Features
+```bash
+# Add Kafka client
+eva4j add kafka-client
+
+# Publish events
+eva4j g kafka-event order order-created
+
+# Consume events
+eva4j g kafka-listener notification
+```
+
+### External API Integration
+```bash
+# Add HTTP client for external service
+eva4j g http-exchange order payment-service
+```
+
+### Record Generation
+```bash
+# Generate record from JSON (clipboard or --json)
+eva4j g record
+```
+
+### Microservice Extraction
+```bash
+# Extract module to independent microservice
+eva4j detach order              # Creates ../order_msvc/ project
+```
+
+---
+
+## CQRS Pattern Implementation
+
+This project uses **CQRS (Command Query Responsibility Segregation)**.
+
+### Commands (Write Operations)
+
+**Command**: `application/commands/CreateOrderCommand.java`
+```java
+public record CreateOrderCommand(
+    String customerId,
+    List<CreateOrderItemDto> items
+) implements Command {
+}
+```
+
+**Handler**: `application/usecases/CreateOrderCommandHandler.java`
+```java
+@Service
+public class CreateOrderCommandHandler implements CommandHandler<CreateOrderCommand, String> {
+    private final OrderRepository orderRepository;
+    
+    @Override
+    public String handle(CreateOrderCommand command) {
+        // Business logic
+        Order order = new Order(/* ... */);
+        Order saved = orderRepository.save(order);
+        return saved.getId();
+    }
+}
+```
+
+### Queries (Read Operations)
+
+**Query**: `application/queries/GetOrderQuery.java`
+```java
+public record GetOrderQuery(String orderId) implements Query {
+}
+```
+
+**Handler**: `application/usecases/GetOrderQueryHandler.java`
+```java
+@Service
+public class GetOrderQueryHandler implements QueryHandler<GetOrderQuery, OrderResponseDto> {
+    private final OrderRepository orderRepository;
+    private final OrderApplicationMapper mapper;
+    
+    @Override
+    public OrderResponseDto handle(GetOrderQuery query) {
+        Order order = orderRepository.findById(query.orderId())
+            .orElseThrow(() -> new NotFoundException("Order not found"));
+        return mapper.toDto(order);
+    }
+}
+```
+
+### Dispatching via UseCaseMediator
+
+**Controller**: `infrastructure/rest/controllers/OrderController.java`
+```java
+@RestController
+@RequestMapping("/api/orders")
+public class OrderController {
+    private final UseCaseMediator mediator;
+    
+    @PostMapping
+    public ResponseEntity<String> createOrder(@RequestBody CreateOrderDto dto) {
+        CreateOrderCommand command = new CreateOrderCommand(dto.customerId(), dto.items());
+        String orderId = mediator.dispatch(command);
+        return ResponseEntity.ok(orderId);
+    }
+    
+    @GetMapping("/{id}")
+    public ResponseEntity<OrderResponseDto> getOrder(@PathVariable String id) {
+        GetOrderQuery query = new GetOrderQuery(id);
+        OrderResponseDto response = mediator.dispatch(query);
+        return ResponseEntity.ok(response);
+    }
+}
+```
+
+---
+
+## Adding New Features
+
+### 1. Adding a New Entity to Existing Module
+
+**Edit**: `modules/order/domain.yaml`
+
+```yaml
+aggregates:
+  - name: Order
+    entities:
+      # ... existing entities ...
+      
+      - name: coupon              # ✅ Add new secondary entity
+        tableName: coupons
+        fields:
+          - name: id
+            type: String
+          - name: code
+            type: String
+          - name: discount
+            type: BigDecimal
+```
+
+**Regenerate**:
+```bash
+eva4j g entities order
+```
+
+### 2. Adding a New Enum
+
+**Edit**: `modules/order/domain.yaml`
+
+```yaml
+aggregates:
+  - name: Order
+    # ...
+    enums:
+      - name: PaymentMethod       # ✅ Add new enum
+        values:
+          - CREDIT_CARD
+          - DEBIT_CARD
+          - CASH
+          - BANK_TRANSFER
+```
+
+**Regenerate**:
+```bash
+eva4j g entities order
+```
+
+### 3. Adding a Custom Use Case
+
+```bash
+eva4j g usecase order CancelOrder
+```
+
+Creates:
+- `application/commands/CancelOrderCommand.java`
+- `application/usecases/CancelOrderCommandHandler.java`
+
+**Implement business logic** in the handler:
+```java
+@Service
+public class CancelOrderCommandHandler implements CommandHandler<CancelOrderCommand, Void> {
+    private final OrderRepository orderRepository;
+    
+    @Override
+    public Void handle(CancelOrderCommand command) {
+        Order order = orderRepository.findById(command.orderId())
+            .orElseThrow(() -> new NotFoundException("Order not found"));
+        
+        // Business logic
+        if (order.getStatus() == OrderStatus.SHIPPED) {
+            throw new BusinessException("Cannot cancel shipped order");
+        }
+        
+        order.setStatus(OrderStatus.CANCELLED);
+        orderRepository.save(order);
+        return null;
+    }
+}
+```
+
+### 4. Adding Event Publishing
+
+```bash
+eva4j g kafka-event order order-cancelled
+```
+
+**Publish event** in use case:
+```java
+@Service
+public class CancelOrderCommandHandler implements CommandHandler<CancelOrderCommand, Void> {
+    private final OrderRepository orderRepository;
+    private final KafkaTemplate<String, EventEnvelope<Map<String, Object>>> kafkaTemplate;
+    
+    @Value("${topics.order-cancelled}")
+    private String orderCancelledTopic;
+    
+    @Override
+    public Void handle(CancelOrderCommand command) {
+        Order order = orderRepository.findById(command.orderId())
+            .orElseThrow(() -> new NotFoundException("Order not found"));
+        
+        order.setStatus(OrderStatus.CANCELLED);
+        orderRepository.save(order);
+        
+        // Publish event
+        Map<String, Object> eventData = Map.of(
+            "orderId", order.getId(),
+            "customerId", order.getCustomerId(),
+            "cancelledAt", LocalDateTime.now()
+        );
+        
+        EventEnvelope<Map<String, Object>> event = new EventEnvelope<>(
+            "OrderCancelled", "order-service", eventData
+        );
+        
+        kafkaTemplate.send(orderCancelledTopic, event);
+        return null;
+    }
+}
+```
+
+### 5. Adding Event Listener
+
+```bash
+eva4j g kafka-listener notification
+# Select topics: order-cancelled
+```
+
+**Implement listener logic**:
+```java
+@Component("notificationOrderCancelledListener")
+public class NotificationOrderCancelledListener {
+    private final NotificationService notificationService;
+    
+    @KafkaListener(topics = "${topics.order-cancelled}")
+    public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+        String orderId = (String) event.data().get("orderId");
+        String customerId = (String) event.data().get("customerId");
+        
+        notificationService.sendCancellationEmail(customerId, orderId);
+        
+        ack.acknowledge();
+    }
+}
+```
+
+---
+
+## Conventions & Best Practices
+
+### Naming Conventions
+
+| Element                | Convention        | Example                    |
+|------------------------|-------------------|----------------------------|
+| Module name            | camelCase         | `order`, `userManagement`  |
+| Aggregate name         | PascalCase        | `Order`, `UserProfile`     |
+| Entity name (YAML)     | camelCase         | `order`, `orderItem`       |
+| Generated class        | PascalCase        | `Order`, `OrderItem`       |
+| Command/Query          | PascalCase + suffix | `CreateOrderCommand`     |
+| Handler                | PascalCase + Handler | `CreateOrderCommandHandler` |
+| Repository             | PascalCase + Repository | `OrderRepository`      |
+| Controller             | PascalCase + Controller | `OrderController`      |
+| DTO                    | PascalCase + Dto  | `OrderResponseDto`         |
+| Value Object           | PascalCase        | `Money`, `Address`         |
+| Enum                   | UPPER_SNAKE_CASE  | `CONFIRMED`, `SHIPPED`     |
+
+### File Organization
+
+**DO**:
+- ✅ Keep domain entities pure (no annotations)
+- ✅ Put business logic in domain entities/services
+- ✅ Use value objects for concepts with multiple fields (Money, Address)
+- ✅ Use DTOs for API contracts
+- ✅ Map between layers explicitly
+
+**DON'T**:
+- ❌ Put business logic in controllers
+- ❌ Use JPA entities in controllers/DTOs
+- ❌ Mix domain and infrastructure concerns
+- ❌ Bypass the repository for database access
+
+### ID Generation Strategy
+
+```yaml
+# UUID (recommended for distributed systems)
+fields:
+  - name: id
+    type: String          # → @GeneratedValue(strategy = GenerationType.UUID)
+
+# Auto-increment (traditional)
+fields:
+  - name: id
+    type: Long            # → @GeneratedValue(strategy = GenerationType.IDENTITY)
+```
+
+### Relationship Best Practices
+
+**Use `LAZY` fetch by default**:
+```yaml
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE, REMOVE]
+    fetch: LAZY          # ✅ Prevents N+1 queries
+```
+
+**Cascade operations carefully**:
+- `PERSIST`: Save children when saving parent
+- `MERGE`: Update children when updating parent
+- `REMOVE`: Delete children when deleting parent
+- `REFRESH`: Reload children when reloading parent
+- `DETACH`: Detach children when detaching parent
+- `ALL`: All of the above
+
+---
+
+## Configuration Management
+
+### Environment-Specific Configuration
+
+Configuration is split by environment:
+
+**Main**: `resources/application.yaml`
+```yaml
+spring:
+  profiles:
+    active: ${PROFILE:local}
+  config:
+    import:
+      - optional:classpath:application-${spring.profiles.active}.yaml
+```
+
+**Environment files**:
+- `application-local.yaml` (development)
+- `application-develop.yaml` (dev server)
+- `application-test.yaml` (testing)
+- `application-production.yaml` (production)
+
+Each imports environment-specific parameters:
+```yaml
+spring:
+  config:
+    import:
+      - optional:classpath:parameters/${spring.profiles.active}/db.yaml
+      - optional:classpath:parameters/${spring.profiles.active}/cors.yaml
+```
+
+### Database Configuration
+
+**File**: `resources/parameters/local/db.yaml`
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/<%= artifactId %>_db
+    username: postgres
+    password: postgres
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+```
+
+### Kafka Configuration
+
+**File**: `resources/parameters/local/kafka.yaml`
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: <%= artifactId %>-consumer
+
+topics:
+  order-created: order.events.created
+  order-cancelled: order.events.cancelled
+```
+
+---
+
+## Important Notes for AI Agents
+
+### Code Generation Flow
+
+1. **domain.yaml is the source of truth** for domain models
+2. **Never edit generated files** directly (domain/models/entities, infrastructure/database/entities)
+3. **Always regenerate** after modifying domain.yaml: `eva4j g entities <module>`
+4. **Hand-written code** goes in:
+   - Application layer (use cases, commands, queries)
+   - Domain services
+   - Infrastructure adapters
+
+### Safe to Modify
+
+- ✅ Use case handlers (application/usecases)
+- ✅ Commands and queries (application/commands, application/queries)
+- ✅ Controllers (infrastructure/rest/controllers)
+- ✅ DTOs (application/dtos)
+- ✅ Domain services (domain/services)
+- ✅ Configuration files
+
+### Do Not Modify (Generated)
+
+- ❌ Domain entities (domain/models/entities)
+- ❌ JPA entities (infrastructure/database/entities)
+- ❌ Repository interfaces (domain/repositories)
+- ❌ Repository implementations (infrastructure/database/repositories)
+- ❌ Mappers (infrastructure/database/mappers)
+
+### Documentation References
+
+- **[DOMAIN_YAML_GUIDE.md](https://github.com/asuridev/eva4j)**: Complete domain.yaml syntax reference
+- **[eva4j CLI Documentation](https://github.com/asuridev/eva4j/tree/main/docs/commands)**: Detailed command documentation
+- **[Examples](https://github.com/asuridev/eva4j/tree/main/examples)**: Sample domain.yaml files
+
+---
+
+## Quick Command Reference
+
+```bash
+# Project management
+eva4j create <project>              # Create new project
+eva4j add module <name>             # Add module
+eva4j info                          # View config
+
+# Code generation
+eva4j g entities <module>           # Generate from domain.yaml
+eva4j g resource <module>           # Generate CRUD REST
+eva4j g usecase <module> <name>     # Add custom use case
+eva4j g record                      # Generate record from JSON
+
+# Event-driven
+eva4j add kafka-client              # Enable Kafka
+eva4j g kafka-event <mod> <event>   # Publish events
+eva4j g kafka-listener <module>     # Consume events
+
+# External integration
+eva4j g http-exchange <mod> <api>   # External API client
+
+# Microservices
+eva4j detach <module>               # Extract to microservice
+```
+
+---
+
+**Generated by eva4j CLI** - Version <%= version || '1.0.0' %>  
+For more information, visit: https://github.com/asuridev/eva4j
