@@ -218,18 +218,30 @@ aggregates:
 
 ### Relationships
 
-**OneToMany** (Parent → Children):
+> **⚠️ IMPORTANT**: eva4j **automatically generates inverse relationships**. For bidirectional relationships (OneToMany, OneToOne), you only need to define the relationship **on the parent side** with `mappedBy`. The inverse relationship (ManyToOne) is automatically created. You do NOT need to define both directions manually.
+
+**OneToMany (Parent → Children)** - Bidirectional:
 ```yaml
+# ✅ ONLY define this in the parent entity (Order)
 relationships:
   - type: OneToMany
     target: OrderItem              # Child entity
     mappedBy: order                # Field in child that references parent
     cascade: [PERSIST, MERGE, REMOVE]
     fetch: LAZY                    # LAZY or EAGER
+
+# ✅ eva4j automatically generates ManyToOne in OrderItem
+# You DON'T need to add this in orderItem entity:
+# relationships:
+#   - type: ManyToOne
+#     target: Order
+#     joinColumn: order_id
 ```
 
-**ManyToOne** (Child → Parent):
+**ManyToOne (Child → Parent)** - Unidirectional:
 ```yaml
+# Only use this if you need ONLY child → parent navigation
+# (no parent → children collection)
 relationships:
   - type: ManyToOne
     target: Order                  # Parent entity
@@ -237,22 +249,22 @@ relationships:
     fetch: EAGER
 ```
 
-**OneToOne** (Bidirectional):
+**OneToOne** - Bidirectional:
 ```yaml
-# In User entity:
+# ✅ ONLY define this in the owning entity (User)
 relationships:
   - type: OneToOne
     target: UserProfile
-    mappedBy: user
+    mappedBy: user                 # Field in UserProfile
     cascade: [PERSIST, MERGE, REMOVE]
     fetch: LAZY
 
-# In UserProfile entity:
-relationships:
-  - type: ManyToOne
-    target: User
-    joinColumn: user_id
-    fetch: LAZY
+# ✅ eva4j automatically generates the inverse ManyToOne in UserProfile
+# You DON'T need to add this in userProfile entity:
+# relationships:
+#   - type: ManyToOne
+#     target: User
+#     joinColumn: user_id
 ```
 
 ### Auditable Entities
@@ -761,6 +773,20 @@ fields:
 ```
 
 ### Relationship Best Practices
+
+**Bidirectional relationships are auto-generated**:
+```yaml
+# ✅ Define only the parent side
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE, REMOVE]
+    fetch: LAZY
+
+# ❌ DO NOT define the inverse ManyToOne in OrderItem
+# eva4j generates it automatically!
+```
 
 **Use `LAZY` fetch by default**:
 ```yaml
