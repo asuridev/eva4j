@@ -2,9 +2,11 @@
 
 ## Description
 
-The `generate kafka-listener` command creates or updates a Kafka listener class (`KafkaController`) in a module's infrastructure layer. This allows your module to consume events from Kafka topics and process them using the event-driven architecture.
+The `generate kafka-listener` command creates individual Kafka listener classes in a module's infrastructure layer. Each listener class is dedicated to a single topic, following the **Open/Closed Principle** for better maintainability and scalability.
 
-The command generates Spring Kafka `@KafkaListener` methods that automatically consume events from configured topics, deserialize them into `EventEnvelope` objects, and provide integration with the `UseCaseMediator` for processing.
+The command generates Spring Kafka `@KafkaListener` components that automatically consume events from configured topics, deserialize them into `EventEnvelope` objects, and provide integration with the `UseCaseMediator` for processing.
+
+**Key Feature:** Each topic gets its own listener class (e.g., `UserUserCreatedListener.java`, `OrderOrderPlacedListener.java`), with module-prefixed names to avoid bean conflicts when multiple modules subscribe to the same event.
 
 ---
 
@@ -12,9 +14,10 @@ The command generates Spring Kafka `@KafkaListener` methods that automatically c
 
 - **Create Kafka consumers** to receive events from external systems
 - **Process async events** using Spring Kafka listeners
+- **Follow Open/Closed Principle** with individual listener classes per topic
 - **Integrate with CQRS** architecture via UseCaseMediator
 - **Acknowledge messages** automatically with manual commit mode
-- **Support multiple topics** in a single listener class
+- **Support multiple topics** by generating multiple listener classes
 - **Enable event-driven communication** between microservices
 
 ---
@@ -79,10 +82,10 @@ eva4j generate kafka-event <module> <event-name>
 ### Example 1: Basic Listener Creation
 
 ```bash
-# Create listener in 'user' module
+# Create listeners in 'user' module
 eva4j generate kafka-listener user
 
-# Select topic from interactive menu:
+# Select topics from interactive menu:
 # ✓ user-created (user.events.created)
 # ✓ user-updated (user.events.updated)
 ```
@@ -90,10 +93,13 @@ eva4j generate kafka-listener user
 **Generated:**
 ```
 user/infrastructure/kafkaListener/
-└── KafkaController.java
+├── UserUserCreatedListener.java
+└── UserUserUpdatedListener.java
 ```
 
-**Generated code:**
+**Note:** Listener class names include module prefix (User + UserCreated = UserUserCreatedListener) to avoid bean name conflicts when multiple modules subscribe to the same event.
+
+**Generated code for UserUserCreatedListener.java:**
 ```java
 package com.example.user.infrastructure.kafkaListener;
 
@@ -107,34 +113,28 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
-@Component
-public class KafkaController {
+/**
+ * Kafka listener for user-created topic
+ * Processes events from user.events.created
+ */
+@Component("userUserCreatedListener")
+public class UserUserCreatedListener {
 
     private final UseCaseMediator useCaseMediator;
 
     @Value("${topics.user-created}")
-    private String usercreatedTopic;
+    private String userCreatedTopic;
 
-    @Value("${topics.user-updated}")
-    private String userupdatedTopic;
-
-    public KafkaController(UseCaseMediator useCaseMediator) {
+    public UserUserCreatedListener(UseCaseMediator useCaseMediator) {
         this.useCaseMediator = useCaseMediator;
     }
 
     @KafkaListener(topics = "${topics.user-created}")
-    void handleUserCreatedListener(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+    public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
         // TODO: Implement event processing logic
         // Example: useCaseMediator.dispatch(new YourCommand(event.data()));
         
         ack.acknowledge(); // Confirm successful processing
-    }
-
-    @KafkaListener(topics = "${topics.user-updated}")
-    void handleUserUpdatedListener(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
-        // TODO: Implement event processing logic
-        
-        ack.acknowledge();
     }
 
 }
@@ -142,7 +142,7 @@ public class KafkaController {
 
 ---
 
-### Example 2: Adding Listeners to Existing KafkaController
+### Example 2: Adding More Listeners
 
 ```bash
 # Run command again to add more listeners
@@ -150,21 +150,44 @@ eva4j generate kafka-listener order
 
 # Select additional topics:
 # ✓ order-shipped (order.events.shipped)
+# ✓ payment-processed (payment.events.processed)
 ```
 
-**Result:** New listener method is **appended** to existing `KafkaController.java`:
+**Result:** New listener classes are **created independently**:
 
-```java
-@Value("${topics.order-shipped}")
-private String ordershippedTopic;
-
-@KafkaListener(topics = "${topics.order-shipped}")
-void handleOrderShippedListener(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
-    // TODO: Implement event processing logic
-    
-    ack.acknowledge();
-}
 ```
+order/infrastructure/kafkaListener/
+├── OrderOrderShippedListener.java
+└── OrderPaymentProcessedListener.java
+```
+
+**Note:** Even if payment-processed event was created in the payment module, each listener class is named with the consuming module's prefix (Order + PaymentProcessed = OrderPaymentProcessedListener).
+
+---
+
+### Example 3: Multiple Modules Subscribing to Same Event
+
+**Scenario:** Both `user` and `notification` modules want to listen to `user-created` event.
+
+```bash
+# In user module
+eva4j generate kafka-listener user
+# Select: user-created
+# Generates: UserUserCreatedListener.java
+
+# In notification module
+eva4j generate kafka-listener notification
+# Select: user-created
+# Generates: NotificationUserCreatedListener.java
+```
+
+**Result:** No bean name conflicts! Each module has its own listener:
+
+**Benefits of individual classes:**
+- ✅ **Open/Closed Principle**: Add new listeners without modifying existing code
+- ✅ **Single Responsibility**: Each class handles one topic
+- ✅ **Easy Testing**: Test each listener independently
+- ✅ **Clear Naming**: Class name indicates what it listens to
 
 ---
 
@@ -173,25 +196,39 @@ void handleOrderShippedListener(EventEnvelope<Map<String, Object>> event, Acknow
 **Implement event processing in generated listener:**
 
 ```java
-@KafkaListener(topics = "${topics.user-created}")
-void handleUserCreatedListener(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
-    try {
-        // Extract data from event
-        String userId = (String) event.data().get("userId");
-        String email = (String) event.data().get("email");
-        
-        // Create command for use case
-        CreateWelcomeEmailCommand command = new CreateWelcomeEmailCommand(userId, email);
-        
-        // Dispatch to use case via mediator
-        useCaseMediator.dispatch(command);
-        
-        // Acknowledge successful processing
-        ack.acknowledge();
-        
-    } catch (Exception e) {
-        // Handle error (event will be reprocessed by Kafka)
-        throw new RuntimeException("Failed to process user-created event", e);
+// UserCreatedListener.java
+@Component
+public class UserCreatedListener {
+
+    private final UseCaseMediator useCaseMediator;
+
+    @Value("${topics.user-created}")
+    private String userCreatedTopic;
+
+    public UserCreatedListener(UseCaseMediator useCaseMediator) {
+        this.useCaseMediator = useCaseMediator;
+    }
+
+    @KafkaListener(topics = "${topics.user-created}")
+    public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+        try {
+            // Extract data from event
+            String userId = (String) event.data().get("userId");
+            String email = (String) event.data().get("email");
+            
+            // Create command for use case
+            CreateWelcomeEmailCommand command = new CreateWelcomeEmailCommand(userId, email);
+            
+            // Dispatch to use case via mediator
+            useCaseMediator.dispatch(command);
+            
+            // Acknowledge successful processing
+            ack.acknowledge();
+            
+        } catch (Exception e) {
+            // Handle error (event will be reprocessed by Kafka)
+            throw new RuntimeException("Failed to process user-created event", e);
+        }
     }
 }
 ```
@@ -220,26 +257,37 @@ eva4j generate kafka-listener analytics
 <module>/
 └── infrastructure/
     └── kafkaListener/
-        └── KafkaController.java    # Spring Kafka listener class
+        ├── <Module><Topic>Listener.java      # Individual listener per topic
+        ├── UserUserCreatedListener.java      # User module listening to user-created
+        ├── OrderOrderPlacedListener.java     # Order module listening to order-placed
+        └── NotificationUserCreatedListener.java  # Notification module listening to user-created
 ```
+
+**Note:** Class names follow pattern: `{ModuleName}{TopicName}Listener` to prevent Spring bean conflicts.
 
 ### Components
 
-#### 1. **KafkaController.java**
+#### 1. **Individual Listener Classes** (e.g., `UserUserCreatedListener.java`)
 
-**Purpose:** Spring component that contains all Kafka listener methods for the module
+**Purpose:** Spring component dedicated to consuming events from a single Kafka topic
 
 **Key Features:**
-- `@Component` - Spring-managed bean
-- `@KafkaListener` - Annotation for each topic listener
-- `@Value` - Injects topic names from configuration
+- `@Component("beanName")` - Spring-managed bean with explicit unique name
+- `@KafkaListener` - Listens to one specific topic
+- `@Value` - Injects topic name from configuration
 - `UseCaseMediator` - Integration with CQRS commands
 - `Acknowledgment` - Manual commit control
+- **Single Responsibility**: Each class handles only one topic
+- **Open/Closed Principle**: Add new listeners without modifying existing ones
+- **Module-Prefixed Naming**: Prevents bean conflicts across modules
+
+**Class Naming Pattern:**
+- Module: `user`, Topic: `user-created` → Class: `UserUserCreatedListener`
+- Module: `notification`, Topic: `user-created` → Class: `NotificationUserCreatedListener`
+- Module: `order`, Topic: `order-placed` → Class: `OrderOrderPlacedListener`
 
 **Method Naming:**
-- Topic: `user-created` → Method: `handleUserCreatedListener()`
-- Topic: `order-placed` → Method: `handleOrderPlacedListener()`
-- Topic: `payment-processed` → Method: `handlePaymentProcessedListener()`
+- All listeners use the same method: `handle()`
 
 ---
 
@@ -292,13 +340,14 @@ Reads available topics from kafka.yaml
     ↓
 Prompts user to select topics (multi-select)
     ↓
-Checks if KafkaController exists
-    ├── NO → Creates new KafkaController with all selected topics
-    └── YES → Appends new listener methods to existing class
-    ↓
-Generates @Value fields for each topic
-    ↓
-Generates @KafkaListener methods
+For each selected topic:
+    ├── Generate listener class name (e.g., UserUserCreatedListener = User module + UserCreated topic)
+    ├── Generate bean name (e.g., userUserCreatedListener)
+    ├── Check if listener class already exists
+    │   ├── YES → Skip (show warning)
+    │   └── NO → Create new listener class
+    ├── Generate @Value field for topic
+    └── Generate handle() method with @KafkaListener
 ```
 
 ### 2. Runtime Event Processing Flow
@@ -308,7 +357,7 @@ Kafka topic receives event
     ↓
 Spring Kafka deserializes to EventEnvelope<Map<String, Object>>
     ↓
-@KafkaListener method invoked
+Corresponding listener class's handle() method invoked
     ↓
 Extract data from event.data()
     ↓
@@ -428,7 +477,9 @@ void handleUserCreatedListener(EventEnvelope<Map<String, Object>> event, Acknowl
    }
    ```
 
-4. **Don't create multiple KafkaController classes** - Use one per module
+4. **Each listener class handles one topic** - Follows Single Responsibility Principle
+
+5. **Add new listeners without modifying existing code** - Follows Open/Closed Principle
 
 ---
 
@@ -618,10 +669,13 @@ kafka-console-producer --broker-list localhost:9092 --topic user.events.created
 ```java
 @SpringBootTest
 @EmbeddedKafka(topics = {"user.events.created"})
-class KafkaControllerTest {
+class UserUserCreatedListenerTest {
     
     @Autowired
     private KafkaTemplate<String, EventEnvelope<Map<String, Object>>> kafkaTemplate;
+    
+    @Autowired
+    private UserUserCreatedListener listener;
     
     @Test
     void shouldConsumeUserCreatedEvent() throws Exception {

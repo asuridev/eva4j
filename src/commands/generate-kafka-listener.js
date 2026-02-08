@@ -74,66 +74,67 @@ async function generateKafkaListenerCommand(moduleName) {
     }
   ]);
 
-  const spinner = ora('Generating Kafka listener...').start();
+  const spinner = ora('Generating Kafka listeners...').start();
 
   try {
-    const listenerPath = path.join(
-      projectDir,
-      'src',
-      'main',
-      'java',
-      packagePath,
-      moduleName,
-      'infrastructure',
-      'kafkaListener',
-      'KafkaController.java'
-    );
+    const generatedListeners = [];
 
-    const listenerExists = await fs.pathExists(listenerPath);
-
-    if (!listenerExists) {
-      // First time: Create new KafkaController class with first topic
-      spinner.text = 'Creating KafkaController class...';
+    // Generate individual listener class for each topic
+    for (const topicKey of selectedTopics) {
+      const topicContext = buildTopicContext(packageName, moduleName, topicKey, topics);
       
-      const firstTopic = selectedTopics[0];
-      const firstContext = buildTopicContext(packageName, moduleName, firstTopic, topics);
-      
-      const templatePath = path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'KafkaController.java.ejs');
-      await renderAndWrite(templatePath, listenerPath, firstContext);
+      const listenerPath = path.join(
+        projectDir,
+        'src',
+        'main',
+        'java',
+        packagePath,
+        moduleName,
+        'infrastructure',
+        'kafkaListener',
+        `${topicContext.listenerClassName}.java`
+      );
 
-      // Add remaining topics as additional methods
-      for (let i = 1; i < selectedTopics.length; i++) {
-        spinner.text = `Adding listener for ${selectedTopics[i]}...`;
-        const topicContext = buildTopicContext(packageName, moduleName, selectedTopics[i], topics);
-        await addListenerMethod(listenerPath, topicContext);
+      // Check if listener already exists
+      if (await fs.pathExists(listenerPath)) {
+        console.log(chalk.yellow(`   ⚠ ${topicContext.listenerClassName}.java already exists, skipping...`));
+        continue;
       }
 
-    } else {
-      // Update existing KafkaController class
-      spinner.text = 'Updating existing KafkaController class...';
+      spinner.text = `Generating ${topicContext.listenerClassName}...`;
       
-      for (const topicKey of selectedTopics) {
-        const topicContext = buildTopicContext(packageName, moduleName, topicKey, topics);
-        await addListenerMethod(listenerPath, topicContext);
-      }
+      const templatePath = path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'KafkaListenerClass.java.ejs');
+      await renderAndWrite(templatePath, listenerPath, topicContext);
+      
+      generatedListeners.push(topicContext.listenerClassName);
     }
 
-    spinner.succeed(chalk.green(`✨ Kafka listener ${listenerExists ? 'updated' : 'generated'} successfully!`));
+    if (generatedListeners.length === 0) {
+      spinner.warn(chalk.yellow('No new listeners were generated (all already exist)'));
+    } else {
+      spinner.succeed(chalk.green(`✨ ${generatedListeners.length} Kafka listener(s) generated successfully!`));
+    }
 
     // Display generated components
-    console.log(chalk.blue('\n📦 Generated/Updated components:'));
-    console.log(chalk.gray(`  └── ${moduleName}/infrastructure/kafkaListener/KafkaController.java`));
-    
-    console.log(chalk.blue('\n📝 Listener methods added:'));
-    selectedTopics.forEach(topic => {
-      const methodName = generateMethodName(topic);
-      console.log(chalk.gray(`  ├── ${methodName}() - listening to topic: ${topic}`));
+    console.log(chalk.blue('\n📦 Generated components:'));
+    generatedListeners.forEach(className => {
+      console.log(chalk.gray(`  ├── ${moduleName}/infrastructure/kafkaListener/${className}.java`));
     });
+    
+    if (generatedListeners.length > 0) {
+      console.log(chalk.blue('\n✅ Listeners configured:'));
+      selectedTopics.forEach(topic => {
+        const className = generateListenerClassName(topic, moduleName);
+        console.log(chalk.gray(`  ├── ${className} - listening to: ${topic}`));
+      });
 
-    console.log(chalk.yellow('\n⚠️  Next steps:'));
-    console.log(chalk.gray('  1. Implement event processing logic in listener methods'));
-    console.log(chalk.gray('  2. Consider creating use cases to handle events via UseCaseMediator'));
-    console.log(chalk.gray('  3. Test your listeners with Kafka producer'));
+      console.log(chalk.yellow('\n💡 Next steps:'));
+      console.log(chalk.gray('  1. Implement event processing logic in each listener\'s handle() method'));
+      console.log(chalk.gray('  2. Consider creating use cases to handle events via UseCaseMediator'));
+      console.log(chalk.gray('  3. Test your listeners with Kafka producer'));
+      console.log(chalk.gray('\n  Each listener class follows the Open/Closed principle'));
+      console.log(chalk.gray('  Add new listeners without modifying existing ones!'));
+    }
 
   } catch (error) {
     spinner.fail(chalk.red('Failed to generate Kafka listener'));
@@ -175,6 +176,12 @@ function buildTopicContext(packageName, moduleName, topicKey, allTopics) {
   const topic = allTopics.find(t => t.key === topicKey);
   const topicValue = topic.value;
 
+  // Generate class name: user-created + user module → UserUserCreatedListener
+  const listenerClassName = generateListenerClassName(topicKey, moduleName);
+  
+  // Generate bean name: UserUserCreatedListener → userUserCreatedListener
+  const listenerBeanName = toCamelCase(listenerClassName);
+  
   // Generate method name: user-created → handleUserCreatedListener
   const methodName = generateMethodName(topicKey);
   
@@ -188,8 +195,20 @@ function buildTopicContext(packageName, moduleName, topicKey, allTopics) {
     topicValue,
     topicSpringProperty: `\${topics.${topicKey}}`,
     topicVariableName,
-    methodName
+    methodName,
+    listenerClassName,
+    listenerBeanName
   };
+}
+
+/**
+ * Generate listener class name from topic key and module name
+ * Example: user-created + notification → NotificationUserCreatedListener
+ */
+function generateListenerClassName(topicKey, moduleName) {
+  const modulePrefix = toPascalCase(moduleName);
+  const topicName = toPascalCase(topicKey);
+  return `${modulePrefix}${topicName}Listener`;
 }
 
 /**
@@ -199,69 +218,6 @@ function buildTopicContext(packageName, moduleName, topicKey, allTopics) {
 function generateMethodName(topicKey) {
   const pascalCase = toPascalCase(topicKey);
   return `handle${pascalCase}Listener`;
-}
-
-/**
- * Add a listener method to existing KafkaListener class
- */
-async function addListenerMethod(listenerPath, context) {
-  let content = await fs.readFile(listenerPath, 'utf-8');
-
-  // Check if method already exists
-  if (content.includes(`void ${context.methodName}(`)) {
-    console.log(chalk.yellow(`   ⚠ Method ${context.methodName}() already exists, skipping...`));
-    return;
-  }
-
-  // Add @Value field if not exists
-  if (!content.includes(`private String ${context.topicVariableName}Topic;`)) {
-    content = await addValueField(content, context);
-  }
-
-  // Add listener method before closing brace
-  const methodTemplatePath = path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerMethod.java.ejs');
-  const methodContent = await renderTemplate(methodTemplatePath, context);
-
-  // Find last closing brace
-  const lastBraceIndex = content.lastIndexOf('}');
-  if (lastBraceIndex === -1) {
-    throw new Error('Could not find closing brace in KafkaController class');
-  }
-
-  // Insert method before closing brace
-  content = content.slice(0, lastBraceIndex) + methodContent + '\n}\n';
-
-  await fs.writeFile(listenerPath, content, 'utf-8');
-}
-
-/**
- * Add @Value field to KafkaController class
- */
-async function addValueField(content, context) {
-  const valueFieldTemplatePath = path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ValueField.java.ejs');
-  const valueFieldContent = await renderTemplate(valueFieldTemplatePath, context);
-
-  // Find existing @Value fields
-  const valueFieldPattern = /(@Value\([^)]+\)\s*\n\s*private\s+String\s+\w+Topic;\s*\n)/g;
-  const valueFields = [...content.matchAll(valueFieldPattern)];
-
-  if (valueFields.length > 0) {
-    // Add after last @Value field
-    const lastField = valueFields[valueFields.length - 1];
-    const insertPos = lastField.index + lastField[0].length;
-    return content.slice(0, insertPos) + valueFieldContent + content.slice(insertPos);
-  } else {
-    // Add after UseCaseMediator field declaration
-    const fieldPattern = /(private\s+final\s+UseCaseMediator\s+useCaseMediator;\s*\n)/;
-    const fieldMatch = content.match(fieldPattern);
-    
-    if (fieldMatch) {
-      const insertPos = fieldMatch.index + fieldMatch[0].length;
-      return content.slice(0, insertPos) + '\n' + valueFieldContent + content.slice(insertPos);
-    }
-  }
-
-  return content;
 }
 
 module.exports = generateKafkaListenerCommand;

@@ -1,0 +1,37 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.kafkaListener;
+
+import <%= packageName %>.shared.infrastructure.configurations.useCaseConfig.UseCaseMediator;
+import <%= packageName %>.shared.infrastructure.eventEnvelope.EventEnvelope;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.stereotype.Component;
+
+import java.util.Map;
+
+/**
+ * Kafka listener for <%= topicNameKebab %> topic
+ * Processes events from <%= topicValue %>
+ */
+@Component("<%= listenerBeanName %>")
+public class <%= listenerClassName %> {
+
+    private final UseCaseMediator useCaseMediator;
+
+    @Value("<%= topicSpringProperty %>")
+    private String <%= topicVariableName %>Topic;
+
+    public <%= listenerClassName %>(UseCaseMediator useCaseMediator) {
+        this.useCaseMediator = useCaseMediator;
+    }
+
+    @KafkaListener(topics = "<%= topicSpringProperty %>")
+    public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+        // TODO: Implement event processing logic
+        // Example: useCaseMediator.dispatch(new YourCommand(event.data()));
+        
+        ack.acknowledge(); // Confirmar procesamiento exitoso
+    }
+
+}

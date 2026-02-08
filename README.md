@@ -702,7 +702,7 @@ eva4j g kafka-event product stock-updated
 
 ### 8. `generate kafka-listener` (alias: `g kafka-listener`)
 
-Create Kafka event listeners/consumers.
+Create individual Kafka event listener classes for consuming events from topics.
 
 ```bash
 eva4j generate kafka-listener <module-name>
@@ -718,29 +718,40 @@ eva4j g kafka-listener <module-name>
 
 **Generated Structure:**
 ```java
-// infrastructure/kafkaListener/KafkaController.java (created/updated)
-@RestController
-@RequestMapping("/kafka")
-public class KafkaController {
+// infrastructure/kafkaListener/UserUserCreatedListener.java (one class per topic)
+@Component("userUserCreatedListener")
+public class UserUserCreatedListener {
     
-    @KafkaListener(
-        topics = "#{@kafkaTopics.getUserCreated()}", 
-        groupId = "${spring.kafka.consumer.group-id}"
-    )
-    public void handleUserCreatedListener(
-        @Payload EventEnvelope<String> envelope,
-        @Header(KafkaHeaders.RECEIVED_KEY) UUID key
-    ) {
+    private final UseCaseMediator useCaseMediator;
+    
+    @Value("${topics.user-created}")
+    private String userCreatedTopic;
+    
+    public UserUserCreatedListener(UseCaseMediator useCaseMediator) {
+        this.useCaseMediator = useCaseMediator;
+    }
+    
+    @KafkaListener(topics = "${topics.user-created}")
+    public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
         // Handle event
-        log.info("Received user-created event: {}", envelope);
+        useCaseMediator.dispatch(new YourCommand(event.data()));
+        ack.acknowledge();
     }
 }
 ```
+
+**Key Features:**
+- ✅ Individual class per topic (Open/Closed Principle)
+- ✅ Module-prefixed names: `UserUserCreatedListener`, `NotificationUserCreatedListener`
+- ✅ Explicit bean names to avoid conflicts: `@Component("userUserCreatedListener")`
+- ✅ Manual acknowledgment control
+- ✅ UseCaseMediator integration
 
 **Example:**
 ```bash
 eva4j g kafka-listener notification
 # Select: user-created, order-placed
+# Generates: NotificationUserCreatedListener.java, NotificationOrderPlacedListener.java
 ```
 
 ---
