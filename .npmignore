@@ -17,10 +17,6 @@ logs/
 Thumbs.db
 
 # Test files
-test/
-tests/
-*.test.js
-__tests__/
 coverage/
 .nyc_output/
 
