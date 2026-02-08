@@ -234,7 +234,7 @@ async function generateEntitiesCommand(moduleName) {
         relationships: rootEntity.relationships,
         imports: generateEntityImports(rootEntity.fields, rootEntity.relationships, rootEntity.enums, allEnums, packageName, moduleName, false),
         valueObjects,
-        enums: rootEntity.enums,
+        enums: allEnums,
         auditable: rootEntity.auditable
       };
 
@@ -276,7 +276,7 @@ async function generateEntitiesCommand(moduleName) {
           relationships: entity.relationships,
           imports: generateEntityImports(entity.fields, entity.relationships, entity.enums, allEnums, packageName, moduleName, false),
           valueObjects,
-          enums: entity.enums,
+          enums: allEnums,
           auditable: entity.auditable
         };
 

@@ -112,7 +112,7 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
   const table = tableName || toSnakeCase(pluralize(name));
   
   // Parse properties/fields with value object detection
-  const fields = entityFields.map(prop => parseProperty(prop, valueObjectNames));
+  const fields = entityFields.map(prop => parseProperty(prop, valueObjectNames, aggregateEnums));
   
   // Parse relationships from YAML
   const yamlRelations = relationships.map(rel => parseRelationship(rel, className));
@@ -150,9 +150,10 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
  * Parse a property
  * @param {Object} propData - Property data from YAML
  * @param {Array} valueObjectNames - Names of value objects in aggregate
+ * @param {Array} aggregateEnums - Enums from the aggregate
  * @returns {Object} Parsed property
  */
-function parseProperty(propData, valueObjectNames = []) {
+function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
   const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues } = propData;
   
   const javaType = mapYamlTypeToJava(type, enumValues);
@@ -173,6 +174,9 @@ function parseProperty(propData, valueObjectNames = []) {
   // Auto-detect if the type is a value object
   const isDetectedValueObject = valueObjectNames.includes(javaType) || valueObjectNames.includes(collectionElementType);
   
+  // Check if field type matches any aggregate enum
+  const isEnumType = aggregateEnums.some(e => e.name === javaType);
+  
   return {
     name: fieldName,
     originalName: name,
@@ -184,7 +188,7 @@ function parseProperty(propData, valueObjectNames = []) {
     annotations,
     isValueObject: isValueObject || isDetectedValueObject,
     isEmbedded,
-    isEnum: !!enumValues,
+    isEnum: !!enumValues || isEnumType,
     isCollection,
     collectionElementType,
     columnAnnotations: extractColumnAnnotations(annotations)
@@ -288,7 +292,7 @@ function parseValueObject(voData, aggregateEnums = [], packageName = '', moduleN
   const voFields = properties || fieldsYaml || [];
   
   const className = toPascalCase(name);
-  const fields = voFields.map(prop => parseProperty(prop));
+  const fields = voFields.map(prop => parseProperty(prop, [], aggregateEnums));
   const parsedMethods = methods.map(method => parseMethod(method));
   
   return {
