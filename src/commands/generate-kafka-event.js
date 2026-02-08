@@ -6,7 +6,7 @@ const fs = require('fs-extra');
 const yaml = require('js-yaml');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject, moduleExists } = require('../utils/validator');
-const { toPackagePath, toPascalCase, toSnakeCase, toKebabCase } = require('../utils/naming');
+const { toPackagePath, toPascalCase, toCamelCase, toSnakeCase, toKebabCase } = require('../utils/naming');
 const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
 
 async function generateKafkaEventCommand(moduleName, eventName) {
@@ -113,6 +113,7 @@ async function generateKafkaEventCommand(moduleName, eventName) {
   try {
     // Generate property names
     const topicNameKebab = toKebabCase(eventName);
+    const topicNameCamel = toCamelCase(eventName);
     const topicNameSnake = toSnakeCase(eventName).toUpperCase();
     const topicPropertyKey = topicNameKebab;
     const topicPropertyValue = topicNameSnake;
@@ -124,6 +125,7 @@ async function generateKafkaEventCommand(moduleName, eventName) {
       eventClassName,
       topicNameSnake,
       topicNameKebab,
+      topicNameCamel,
       topicPropertyKey,
       topicPropertyValue,
       topicSpringProperty,
@@ -368,7 +370,7 @@ async function createOrUpdateKafkaMessageBroker(projectDir, packagePath, context
     }
 
     // Check if @Value field exists for this topic
-    const valueFieldName = `${context.topicNameKebab.replace(/-/g, '')}Topic`;
+    const valueFieldName = `${context.topicNameCamel}Topic`;
     if (!content.includes(`private String ${valueFieldName};`)) {
       // Find the last @Value field and add after it, or after class declaration
       const valueFieldPattern = /(@Value\([^)]+\)\s*\n\s*private\s+String\s+\w+Topic;\s*\n)/g;
@@ -428,7 +430,7 @@ async function updateKafkaConfig(projectDir, packagePath, context) {
 
   let content = await fs.readFile(configPath, 'utf-8');
 
-  const beanMethodName = `${context.topicNameKebab.replace(/-/g, '')}Topic`;
+  const beanMethodName = `${context.topicNameCamel}Topic`;
 
   // Check if bean already exists
   if (content.includes(`public NewTopic ${beanMethodName}(`)) {
@@ -437,7 +439,7 @@ async function updateKafkaConfig(projectDir, packagePath, context) {
 
   // Generate bean method
   const templatePath = path.join(__dirname, '..', '..', 'templates', 'kafka-event', 'KafkaConfigBean.java.ejs');
-  const valueFieldName = `${context.topicNameKebab.replace(/-/g, '')}Topic`;
+  const valueFieldName = `${context.topicNameCamel}Topic`;
   const beanMethod = await renderTemplate(templatePath, { ...context, beanMethodName, valueFieldName });
 
   // Find the last closing brace and insert before it

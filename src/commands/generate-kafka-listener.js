@@ -178,8 +178,8 @@ function buildTopicContext(packageName, moduleName, topicKey, allTopics) {
   // Generate method name: user-created → handleUserCreatedListener
   const methodName = generateMethodName(topicKey);
   
-  // Generate variable name: user-created → usercreatedTopic
-  const topicVariableName = toCamelCase(topicKey.replace(/-/g, ''));
+  // Generate variable name: user-created → userCreatedTopic
+  const topicVariableName = toCamelCase(topicKey);
 
   return {
     packageName,
