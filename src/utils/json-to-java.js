@@ -5,9 +5,10 @@ const { toPascalCase, toCamelCase } = require('./naming');
  * Parse JSON and extract all records (main + nested)
  * @param {object|string} json - JSON object or string
  * @param {string} mainRecordName - Name for the main record
+ * @param {string} suffix - Suffix to append to record names (e.g., 'Dto', 'Command')
  * @returns {Object} { mainRecord, nestedRecords, allRecords }
  */
-function parseJsonToRecords(json, mainRecordName) {
+function parseJsonToRecords(json, mainRecordName, suffix = '') {
   let obj = typeof json === 'string' ? JSON.parse(json) : json;
   
   // If the JSON is an array, use the first element as the template
@@ -22,10 +23,10 @@ function parseJsonToRecords(json, mainRecordName) {
   const processedTypes = new Set(); // Avoid duplicate nested records
   
   // Parse main record fields
-  const mainFields = parseFields(obj, mainRecordName, nestedRecords, processedTypes);
+  const mainFields = parseFields(obj, mainRecordName, nestedRecords, processedTypes, suffix);
   
   const mainRecord = {
-    name: toPascalCase(mainRecordName),
+    name: toPascalCase(mainRecordName) + suffix,
     fields: mainFields,
     imports: generateImportsForFields(mainFields),
     jsonExample: JSON.stringify(obj, null, 2)
@@ -47,13 +48,14 @@ function parseJsonToRecords(json, mainRecordName) {
  * @param {string} parentName - Parent record name for context
  * @param {Map} nestedRecords - Map to store nested record definitions
  * @param {Set} processedTypes - Set of already processed type names
+ * @param {string} suffix - Suffix to append to record names
  * @returns {Array} Array of field definitions
  */
-function parseFields(obj, parentName, nestedRecords, processedTypes) {
+function parseFields(obj, parentName, nestedRecords, processedTypes, suffix = '') {
   const fields = [];
   
   for (const [key, value] of Object.entries(obj)) {
-    const field = parseField(key, value, parentName, nestedRecords, processedTypes);
+    const field = parseField(key, value, parentName, nestedRecords, processedTypes, suffix);
     fields.push(field);
   }
   
@@ -67,9 +69,10 @@ function parseFields(obj, parentName, nestedRecords, processedTypes) {
  * @param {string} parentName - Parent record name
  * @param {Map} nestedRecords - Map to store nested record definitions
  * @param {Set} processedTypes - Set of already processed type names
+ * @param {string} suffix - Suffix to append to record names
  * @returns {Object} Field definition
  */
-function parseField(key, value, parentName, nestedRecords, processedTypes) {
+function parseField(key, value, parentName, nestedRecords, processedTypes, suffix = '') {
   const fieldName = toCamelCase(key);
   const isNullable = value === null;
   const isArray = Array.isArray(value);
@@ -104,12 +107,12 @@ function parseField(key, value, parentName, nestedRecords, processedTypes) {
     // Array of objects - create nested record
     if (typeof firstElement === 'object' && firstElement !== null && !Array.isArray(firstElement)) {
       const singularName = pluralize.singular(key);
-      const recordName = toPascalCase(singularName);
+      const recordName = toPascalCase(singularName) + suffix;
       
       // Only process if not already processed
       if (!processedTypes.has(recordName)) {
         processedTypes.add(recordName);
-        const nestedFields = parseFields(firstElement, recordName, nestedRecords, processedTypes);
+        const nestedFields = parseFields(firstElement, recordName, nestedRecords, processedTypes, suffix);
         
         nestedRecords.set(recordName, {
           name: recordName,
@@ -144,12 +147,12 @@ function parseField(key, value, parentName, nestedRecords, processedTypes) {
   
   // Handle nested objects (not arrays)
   if (typeof value === 'object' && !Array.isArray(value)) {
-    const recordName = toPascalCase(key);
+    const recordName = toPascalCase(key) + suffix;
     
     // Only process if not already processed
     if (!processedTypes.has(recordName)) {
       processedTypes.add(recordName);
-      const nestedFields = parseFields(value, recordName, nestedRecords, processedTypes);
+      const nestedFields = parseFields(value, recordName, nestedRecords, processedTypes, suffix);
       
       nestedRecords.set(recordName, {
         name: recordName,

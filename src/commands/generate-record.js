@@ -79,8 +79,8 @@ async function generateRecordCommand(options = {}) {
           if (!input || input.trim().length === 0) {
             return 'Record name is required';
           }
-          if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(input)) {
-            return 'Record name must start with a letter and contain only letters and numbers';
+          if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(input)) {
+            return 'Record name must start with a letter and contain only letters, numbers, hyphens, or underscores';
           }
           return true;
         }
@@ -116,8 +116,17 @@ async function generateRecordCommand(options = {}) {
     const spinner = ora('Parsing JSON and generating records...').start();
 
     try {
+      // Determine suffix based on target folder
+      const suffixMap = {
+        'dtos': 'Dto',
+        'commands': 'Command',
+        'queries': 'Query',
+        'events': 'Event'
+      };
+      const suffix = suffixMap[targetFolder] || '';
+      
       // Parse JSON to records
-      const { mainRecord, nestedRecords, allRecords } = parseJsonToRecords(jsonData, recordName);
+      const { mainRecord, nestedRecords, allRecords } = parseJsonToRecords(jsonData, recordName, suffix);
 
       spinner.text = 'Generating record files...';
 
@@ -131,43 +140,102 @@ async function generateRecordCommand(options = {}) {
       });
       console.log();
 
+      // Ask for generation mode if there are nested records
+      let generationMode = 'separated';
+      if (nestedRecords.length > 0) {
+        const modeAnswer = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'generationMode',
+            message: 'Select generation mode:',
+            choices: [
+              {
+                name: 'Separate files (one file per record)',
+                value: 'separated'
+              },
+              {
+                name: 'Nested structure (single file with inner records)',
+                value: 'nested'
+              }
+            ],
+            default: 'separated'
+          }
+        ]);
+        generationMode = modeAnswer.generationMode;
+      }
+
       spinner.start('Generating files...');
 
       // Generate all records
       const generatedFiles = [];
       
-      for (const record of allRecords) {
-        // Collect nested record names for imports
-        const nestedRecordImports = record.fields
-          .filter(f => f.isNestedRecord)
-          .map(f => f.nestedRecordName)
-          .filter((value, index, self) => self.indexOf(value) === index); // unique
-
+      if (generationMode === 'nested') {
+        // Nested mode: Generate single file with inner records
+        // Merge all imports from main record and nested records
+        const allImports = new Set([
+          ...mainRecord.imports,
+          ...nestedRecords.flatMap(nr => nr.imports)
+        ]);
+        
         const context = {
           packageName,
           moduleName,
-          recordName: record.name,
+          recordName: mainRecord.name,
           targetFolder,
-          fields: record.fields,
-          imports: record.imports,
-          jsonExample: record.jsonExample,
-          hasNestedRecords: nestedRecordImports.length > 0,
-          nestedRecordImports
+          fields: mainRecord.fields,
+          imports: Array.from(allImports).sort(),
+          jsonExample: mainRecord.jsonExample,
+          nestedRecords: nestedRecords
         };
 
-        const templatePath = path.join(__dirname, '..', '..', 'templates', 'record', 'Record.java.ejs');
+        const templatePath = path.join(__dirname, '..', '..', 'templates', 'record', 'NestedRecord.java.ejs');
         const outputPath = path.join(
           projectDir,
           'src', 'main', 'java', packagePath,
           moduleName, 'application', targetFolder,
-          `${record.name}.java`
+          `${mainRecord.name}.java`
         );
 
         await renderAndWrite(templatePath, outputPath, context);
         generatedFiles.push({
-          name: record.name,
+          name: mainRecord.name,
           path: path.relative(projectDir, outputPath)
         });
+      } else {
+        // Separated mode: Generate one file per record (current behavior)
+        for (const record of allRecords) {
+          // Collect nested record names for imports
+          const nestedRecordImports = record.fields
+            .filter(f => f.isNestedRecord)
+            .map(f => f.nestedRecordName)
+            .filter((value, index, self) => self.indexOf(value) === index); // unique
+
+          const context = {
+            packageName,
+            moduleName,
+            recordName: record.name,
+            targetFolder,
+            fields: record.fields,
+            imports: record.imports,
+            jsonExample: record.jsonExample,
+            hasNestedRecords: nestedRecordImports.length > 0,
+            nestedRecordImports
+          };
+
+          const templatePath = path.join(__dirname, '..', '..', 'templates', 'record', 'Record.java.ejs');
+          const outputPath = path.join(
+            projectDir,
+            'src', 'main', 'java', packagePath,
+            moduleName, 'application', targetFolder,
+            `${record.name}.java`
+          );
+
+          await renderAndWrite(templatePath, outputPath, context);
+          generatedFiles.push({
+            name: record.name,
+            path: path.relative(projectDir, outputPath)
+          });
+        }
       }
 
       spinner.succeed(chalk.green('Records generated successfully! ✨'));
@@ -182,7 +250,8 @@ async function generateRecordCommand(options = {}) {
       console.log(chalk.white(`   Location: application/${targetFolder}`));
       console.log(chalk.white(`   Main Record: ${mainRecord.name}`));
       if (nestedRecords.length > 0) {
-        console.log(chalk.white(`   Nested Records: ${nestedRecords.map(r => r.name).join(', ')}`));
+        const mode = generationMode === 'nested' ? 'as inner records' : 'as separate files';
+        console.log(chalk.white(`   Nested Records: ${nestedRecords.map(r => r.name).join(', ')} (${mode})`));
       }
       console.log();
 

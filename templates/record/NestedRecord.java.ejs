@@ -1,0 +1,34 @@
+package <%= packageName %>.<%= moduleName %>.application.<%= targetFolder %>;
+
+<% imports.forEach(imp => { %>
+<%= imp %>
+<% }); %>
+
+/**
+ * <%= recordName %> record (with nested records)
+ * Generated from JSON
+ * 
+ * Example JSON structure:
+ * <pre>
+ * <%- jsonExample.split('\n').map(line => ' * ' + line).join('\n') %>
+ * </pre>
+ */
+public record <%= recordName %>(
+<% fields.forEach((field, index) => { %>
+    <%- field.javaType %> <%= field.name %><%= index < fields.length - 1 ? ',' : '' %>
+<% }); %>
+) {
+<% if (nestedRecords && nestedRecords.length > 0) { %>
+<% nestedRecords.forEach((nested, nestedIndex) => { %>
+    
+    /**
+     * <%= nested.name %> nested record
+     */
+    public record <%= nested.name %>(
+<% nested.fields.forEach((field, index) => { %>
+        <%- field.javaType %> <%= field.name %><%= index < nested.fields.length - 1 ? ',' : '' %>
+<% }); %>
+    ) {}
+<% }); %>
+<% } %>
+}
