@@ -1,5 +1,11 @@
 package <%= packageName %>.<%= moduleName %>.infrastructure.database.entities;
 
+<% // Check if any field is a Value Object to conditionally import AttributeOverride %>
+<% const hasValueObjects = fields.some(f => f.isValueObject); %>
+<% if (hasValueObjects) { %>
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+<% } %>
 <% imports.forEach(imp => { %>
 <%= imp %>
 <% }); %>
@@ -26,6 +32,12 @@ import <%= packageName %>.shared.domain.AuditableEntity;
 @Builder
 public class <%= name %>Jpa<% if (auditable) { %> extends AuditableEntity<% } %> {
     
+<%
+// Helper function to convert camelCase to snake_case
+function toSnakeCase(str) {
+  return str.replace(/([A-Z])/g, '_$1').toLowerCase();
+}
+%>
 <% fields.filter(f => !(auditable && (f.name === 'createdAt' || f.name === 'updatedAt'))).forEach((field, index) => { %>
   <% if (field.isCollection) { %>
     @ElementCollection
@@ -40,7 +52,14 @@ public class <%= name %>Jpa<% if (auditable) { %> extends AuditableEntity<% } %>
     <% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)
     <% } else if (field.javaType === 'Long' || field.javaType === 'Integer') { %>@GeneratedValue(strategy = GenerationType.IDENTITY)
     <% } %><% } %><% if (field.annotations.length > 0) { %><% field.annotations.forEach(annotation => { %><%= annotation %>
-    <% }); %><% } %><% if (field.isEmbedded) { %>@Embedded
+    <% }); %><% } %><% if (field.isEmbedded || field.isValueObject) { %><% 
+    // Find the Value Object definition to get its fields
+    const vo = valueObjects && valueObjects.find(v => v.name === field.javaType);
+    if (vo && vo.fields && vo.fields.length > 0) {
+    %>@AttributeOverrides({
+    <% vo.fields.forEach((voField, voIdx) => { %>        @AttributeOverride(name = "<%= voField.name %>", column = @Column(name = "<%= toSnakeCase(field.name) %>_<%= toSnakeCase(voField.name) %>"))<%= voIdx < vo.fields.length - 1 ? ',' : '' %>
+    <% }); %>    })
+    <% } %>@Embedded
     <% } %><% if (field.isEnum) { %>@Enumerated(EnumType.STRING)
     <% } %>private <%- field.isValueObject ? field.javaTypeJpa : field.javaType %> <%= field.name %>;
   <% } %>

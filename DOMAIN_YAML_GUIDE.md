@@ -3,6 +3,8 @@
 ## 📋 Tabla de Contenidos
 
 - [Introducción](#introducción)
+  - [¿Qué genera automáticamente?](#qué-genera-automáticamente)
+  - [Buenas Prácticas de DDD Implementadas](#buenas-prácticas-de-ddd-implementadas)
 - [Estructura General](#estructura-general)
 - [Definición de Agregados](#definición-de-agregados)
 - [Entidades](#entidades)
@@ -35,6 +37,69 @@ Para cada agregado definido, eva4j genera:
 - ✅ Mapper bidireccional (`OrderMapper.java`)
 - ✅ Repositorio JPA (`OrderJpaRepository.java`)
 - ✅ Implementación de repositorio (`OrderRepositoryImpl.java`)
+
+### Buenas Prácticas de DDD Implementadas
+
+Las entidades de dominio generadas siguen estrictamente los principios de Domain-Driven Design:
+
+**🔒 Encapsulación:**
+- ❌ **No hay setters públicos** en entidades de dominio
+- ✅ Estado modificable **solo mediante métodos de negocio**
+- ✅ Protección de invariantes del dominio
+
+**✅ Constructores sin Validaciones Automáticas:**
+- Los constructores asignan valores directamente sin validaciones automáticas
+- Las validaciones se implementarán en un release futuro mediante configuración en domain.yaml
+- Por ahora, las validaciones deben implementarse manualmente en métodos de negocio según sea necesario
+
+**📦 Inmutabilidad de Value Objects:**
+- Campos declarados como `final`
+- Sin setters, solo getters
+- Correcta implementación de `equals()` y `hashCode()`
+
+**🎯 Métodos de Negocio:**
+- Para modificar estado, debes agregar métodos de negocio explícitos
+- Relaciones `OneToMany` generan automáticamente métodos `add*()` y `remove*()`
+- Relaciones `OneToOne` bidireccionales usan `assign*()` para mantener consistencia
+
+**Ejemplo de entidad generada:**
+
+```java
+public class Order {
+    private String orderNumber;
+    private OrderStatus status;
+    
+    // Constructor sin validaciones automáticas
+    public Order(String orderNumber, OrderStatus status) {
+        this.orderNumber = orderNumber;
+        this.status = status;
+    }
+    
+    // Getters públicos
+    public String getOrderNumber() { return orderNumber; }
+    public OrderStatus getStatus() { return status; }
+    
+    // ❌ NO hay setters públicos
+    
+    // ✅ Métodos de negocio para modificar estado (agrega estos manualmente según tu lógica)
+    public void confirm() {
+        // Aquí puedes agregar validaciones según tus reglas de negocio
+        if (this.orderNumber == null || this.orderNumber.isEmpty()) {
+            throw new IllegalStateException("Cannot confirm order without order number");
+        }
+        this.status = OrderStatus.CONFIRMED;
+    }
+    
+    public void cancel() {
+        if (this.status == OrderStatus.DELIVERED) {
+            throw new IllegalStateException("Cannot cancel delivered order");
+        }
+        this.status = OrderStatus.CANCELLED;
+    }
+}
+```
+
+**📝 Nota Importante:** Para modificar el estado de una entidad, debes agregar métodos de negocio personalizados que encapsulen la lógica y las reglas del dominio. Estos métodos pueden ser agregados manualmente después de la generación o definidos en tu archivo YAML si extends la funcionalidad.
 
 ---
 

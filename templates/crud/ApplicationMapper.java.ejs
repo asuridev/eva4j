@@ -31,12 +31,13 @@ public class <%= aggregateName %>ApplicationMapper {
     public <%= aggregateName %> fromCommand(Create<%= aggregateName %>Command command) {
         if (command == null) return null;
         
-        <%= aggregateName %> entity = new <%= aggregateName %>();
+        <%= aggregateName %> entity = new <%= aggregateName %>(
 <% if (commandFields) { %>
-<% commandFields.forEach(field => { %>
-        entity.set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(command.<%= field.name %>());
+<% commandFields.forEach((field, idx) => { %>
+            command.<%= field.name %>()<% if (idx < commandFields.length - 1) { %>,<% } %>
 <% }); %>
 <% } %>
+        );
         
 <% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
 <% oneToManyRelationships.forEach(rel => { %>
@@ -57,7 +58,7 @@ public class <%= aggregateName %>ApplicationMapper {
         // Map <%= rel.fieldName %> OneToOne relationship
         if (command.<%= rel.fieldName %>() != null) {
             <%= rel.targetEntityName %> item = fromDto<%= rel.targetEntityName %>(command.<%= rel.fieldName %>());
-            entity.set<%= rel.targetEntityName %>(item);
+            entity.assign<%= rel.targetEntityName %>(item);
         }
         
 <% }); %>
@@ -73,10 +74,11 @@ public class <%= aggregateName %>ApplicationMapper {
     private <%= rel.targetEntityName %> fromDto<%= rel.targetEntityName %>(Create<%= rel.targetEntityName %>Dto dto) {
         if (dto == null) return null;
         
-        <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>();
-<% rel.fields.forEach(field => { %>
-        entity.set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(dto.<%= field.name %>());
+        <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>(
+<% rel.fields.forEach((field, idx) => { %>
+            dto.<%= field.name %>()<% if (idx < rel.fields.length - 1) { %>,<% } %>
 <% }); %>
+        );
 <% if (rel.hasNestedRelationships && rel.nestedRelationships) { %>
 <% rel.nestedRelationships.forEach(nestedRel => { %>
         
@@ -105,10 +107,11 @@ public class <%= aggregateName %>ApplicationMapper {
     private <%= rel.targetEntityName %> fromDto<%= rel.targetEntityName %>(Create<%= rel.targetEntityName %>Dto dto) {
         if (dto == null) return null;
         
-        <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>();
-<% rel.fields.forEach(field => { %>
-        entity.set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(dto.<%= field.name %>());
+        <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>(
+<% rel.fields.forEach((field, idx) => { %>
+            dto.<%= field.name %>()<% if (idx < rel.fields.length - 1) { %>,<% } %>
 <% }); %>
+        );
         
         return entity;
     }

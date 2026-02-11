@@ -29,6 +29,7 @@ public class <%= name %> {
     public <%= name %>() {
     }
 
+    // Full constructor (for reconstruction from persistence)
     public <%= name %>(<% let paramIdx = 0; %><% fields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %><% const nonInverseRels = relationships.filter(rel => !rel.isInverse); %><% nonInverseRels.forEach(rel => { %><% if (paramIdx > 0) { %>, <% } %><%- rel.javaType %> <%= rel.fieldName %><% paramIdx++; %><% }); %>) {
 <% fields.forEach(field => { %>
         this.<%= field.name %> = <%= field.name %>;
@@ -37,6 +38,16 @@ public class <%= name %> {
         this.<%= rel.fieldName %> = <%= rel.fieldName %>;
 <% }); %>
     }
+
+<% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'); %>
+<% if (creationFields.length > 0) { %>
+    // Constructor for new entity creation (without id and audit fields)
+    public <%= name %>(<% let paramIdx = 0; %><% creationFields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %>) {
+<% creationFields.forEach(field => { %>
+        this.<%= field.name %> = <%= field.name %>;
+<% }); %>
+    }
+<% } %>
 
     // Getters
 <% fields.forEach(field => { %>
@@ -51,16 +62,17 @@ public class <%= name %> {
     }
 <% }); %>
 
-    // Setters
-<% fields.forEach(field => { %>
-    public void set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(<%- field.javaType %> <%= field.name %>) {
-        this.<%= field.name %> = <%= field.name %>;
-    }
-<% }); %>
-
+    // Business methods for inverse relationships (package-private for aggregate control)
 <% relationships.forEach(rel => { %>
-    public void set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
+  <% if (rel.isInverse) { %>
+    
+    /**
+     * Assigns <%= rel.fieldName %> (inverse relationship)
+     * Called by aggregate root to maintain bidirectional consistency
+     */
+    void assign<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
         this.<%= rel.fieldName %> = <%= rel.fieldName %>;
     }
+  <% } %>
 <% }); %>
 }

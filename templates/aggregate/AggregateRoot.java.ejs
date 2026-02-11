@@ -36,6 +36,7 @@ public class <%= name %> {
     public <%= name %>() {
     }
 
+    // Full constructor (for reconstruction from persistence)
     public <%= name %>(<% let paramIdx = 0; %><% fields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %><% domainRelationships.forEach(rel => { %><% if (!rel.isCollection) { %><% if (paramIdx > 0) { %>, <% } %><%- rel.javaType %> <%= rel.fieldName %><% paramIdx++; %><% } %><% }); %>) {
 <% fields.forEach(field => { %>
         this.<%= field.name %> = <%= field.name %>;
@@ -46,6 +47,16 @@ public class <%= name %> {
   <% } %>
 <% }); %>
     }
+
+<% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'); %>
+<% if (creationFields.length > 0) { %>
+    // Constructor for new entity creation (without id and audit fields)
+    public <%= name %>(<% let paramIdx = 0; %><% creationFields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %>) {
+<% creationFields.forEach(field => { %>
+        this.<%= field.name %> = <%= field.name %>;
+<% }); %>
+    }
+<% } %>
 
     // Getters
 <% fields.forEach(field => { %>
@@ -62,24 +73,19 @@ public class <%= name %> {
   <% } %>
 <% }); %>
 
-    // Setters
-<% fields.forEach(field => { %>
-    public void set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(<%- field.javaType %> <%= field.name %>) {
-        this.<%= field.name %> = <%= field.name %>;
-    }
-<% }); %>
-
+    // Business methods for state modification
 <% domainRelationships.forEach(rel => { %>
   <% if (!rel.isCollection && rel.type === 'OneToOne' && rel.mappedBy) { %>
-    public void set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
+    
+    /**
+     * Assigns <%= rel.fieldName %> to this <%= name %>
+     * Maintains bidirectional relationship consistency
+     */
+    public void assign<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
         this.<%= rel.fieldName %> = <%= rel.fieldName %>;
         if (<%= rel.fieldName %> != null) {
-            <%= rel.fieldName %>.set<%= name %>(this);
+            <%= rel.fieldName %>.assign<%= name %>(this);
         }
-    }
-  <% } else if (!rel.isCollection) { %>
-    public void set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
-        this.<%= rel.fieldName %> = <%= rel.fieldName %>;
     }
   <% } %>
 <% }); %>

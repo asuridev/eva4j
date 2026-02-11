@@ -31,10 +31,10 @@ aggregates:
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
       
-      - name: orderItem
+      - name: OrderItem
         tableName: order_items
         fields:
-          - name: itemId
+          - name: id
             type: Long
           - name: productId
             type: String
