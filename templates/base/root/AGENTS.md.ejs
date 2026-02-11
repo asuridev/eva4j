@@ -515,7 +515,7 @@ public class AuditorAwareImpl implements AuditorAware<String> {
 **4. Configuración en Application.java**:
 ```java
 @EnableJpaAuditing(auditorAwareRef = "auditorProvider")
-public class <%= className %>Application {
+public class <%= applicationClassName %> {
     // ...
 }
 ```
@@ -868,16 +868,18 @@ const mappableFields = entity.fields.filter(f =>
 );
 ```
 
+En los templates EJS, los campos se filtran así:
+
 ```ejs
-<%# En AggregateMapper.java.ejs %>
-<% rootEntity.fields.filter(f => 
+<%%# En AggregateMapper.java.ejs %%>
+<%% rootEntity.fields.filter(f => 
     !(f.name === 'createdAt' || 
       f.name === 'updatedAt' || 
       f.name === 'createdBy' || 
       f.name === 'updatedBy')
-).forEach(field => { %>
-    .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
-<% }); %>
+).forEach(field => { %%>
+    .<%%= field.name %%>(domain.get<%%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %%>())
+<%% }); %%>
 ```
 
 ### Relaciones Bidireccionales
