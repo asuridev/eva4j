@@ -8,7 +8,9 @@ aggregates:
       - name: user
         isRoot: true
         tableName: users
-        auditable: true
+        audit:
+          enabled: true      # Agrega createdAt, updatedAt
+          trackUser: true    # Agrega createdBy, updatedBy
         fields:
           - name: id
             type: String
@@ -33,7 +35,9 @@ aggregates:
       
       - name: userProfile
         tableName: user_profiles
-        auditable: true
+        audit:
+          enabled: true      # Agrega createdAt, updatedAt
+          trackUser: true    # Agrega createdBy, updatedBy
         fields:
           - name: id
             type: Long

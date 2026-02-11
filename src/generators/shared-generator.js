@@ -69,6 +69,30 @@ class SharedGenerator {
     await this.generateFile('domain/AuditableEntity.java.ejs', auditableEntityPath);
   }
 
+  async generateFullAuditableEntity(basePath) {
+    const domainPath = path.join(basePath, 'domain');
+    const fullAuditableEntityPath = path.join(domainPath, 'FullAuditableEntity.java');
+    
+    // Only generate if it doesn't exist
+    if (await fs.pathExists(fullAuditableEntityPath)) {
+      return;
+    }
+    
+    await this.generateFile('domain/FullAuditableEntity.java.ejs', fullAuditableEntityPath);
+  }
+
+  async generateAuditComponents(basePath) {
+    const auditPath = path.join(basePath, 'infrastructure', 'audit');
+    
+    // Generate UserContextHolder
+    await this.generateFile('infrastructure/audit/UserContextHolder.java.ejs', 
+      path.join(auditPath, 'UserContextHolder.java'));
+    
+    // Generate AuditorAwareImpl
+    await this.generateFile('infrastructure/audit/AuditorAwareImpl.java.ejs', 
+      path.join(auditPath, 'AuditorAwareImpl.java'));
+  }
+
   async generateAnnotations(basePath) {
     const annotationsPath = path.join(basePath, 'domain', 'annotations');
     const files = ['ApplicationComponent', 'DomainComponent', 'LogAfter', 'LogBefore', 'LogExceptions', 'LogTimer'];
@@ -152,11 +176,17 @@ class SharedGenerator {
       path.join(configurationsPath, 'useCaseConfig', 'UseCaseMediator.java'));
   }
 
-  async generateFilters(basePath) {
+  async generateFilters(basePath, includeUserContext = false) {
     const filtersPath = path.join(basePath, 'infrastructure', 'filters');
     
     await this.generateFile('filters/CorrelationIdFilter.java.ejs', 
       path.join(filtersPath, 'CorrelationIdFilter.java'));
+    
+    // Generate UserContextFilter if user audit tracking is enabled
+    if (includeUserContext) {
+      await this.generateFile('filters/UserContextFilter.java.ejs', 
+        path.join(filtersPath, 'UserContextFilter.java'));
+    }
   }
 
   async generateFile(templateRelPath, destPath) {

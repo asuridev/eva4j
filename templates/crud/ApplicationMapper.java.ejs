@@ -129,8 +129,8 @@ public class <%= aggregateName %>ApplicationMapper {
         }
         
         return new <%= aggregateName %>ResponseDto(
-<% rootEntity.fields.forEach((field, idx) => { %>
-            entity.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% if (idx < rootEntity.fields.length - 1 || rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse).length > 0) { %>,<% } %>
+<% responseFields.forEach((field, idx) => { %>
+            entity.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% if (idx < responseFields.length - 1 || rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse).length > 0) { %>,<% } %>
 <% }); %>
 <% rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse).forEach((rel, idx, arr) => { %>
   <% if (rel.type === 'OneToMany') { %>
@@ -157,18 +157,18 @@ public class <%= aggregateName %>ApplicationMapper {
             .collect(Collectors.toList());
     }
     
-<% secondaryEntities.forEach(entity => { %>
+<% responseSecondaryEntities.forEach(entity => { %>
     /**
      * Map <%= entity.name %> to <%= entity.name %>Dto
      */
-    private <%= entity.name %>Dto to<%= entity.name %>Dto(<%= entity.name %> entity) {
-        if (entity == null) {
+    private <%= entity.name %>Dto to<%= entity.name %>Dto(<%= entity.name %> domainEntity) {
+        if (domainEntity == null) {
             return null;
         }
         
         return new <%= entity.name %>Dto(
-<% entity.fields.forEach((field, idx) => { %>
-            entity.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% if (idx < entity.fields.length - 1) { %>,<% } %>
+<% entity.responseFields.forEach((field, idx) => { %>
+            domainEntity.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% if (idx < entity.responseFields.length - 1) { %>,<% } %>
 <% }); %>
         );
     }

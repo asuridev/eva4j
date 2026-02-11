@@ -14,19 +14,20 @@ Este documento contiene características planeadas para futuras versiones de eva
 
 ## Auditoría de Usuario (trackUser)
 
-### Descripción
+### Estado: ✅ IMPLEMENTADO
 
 Extensión de la auditoría básica (`auditable: true`) para incluir **quién** realizó cada operación, además de **cuándo**.
 
-### Estado Actual vs Futuro
+### Implementación Completa
 
-#### ✅ Implementado (Fase 1): Auditoría de Tiempo
+#### ✅ Fase 1: Auditoría de Tiempo (IMPLEMENTADO)
 
 ```yaml
 entities:
   - name: order
     isRoot: true
-    auditable: true  # Solo agrega createdAt, updatedAt
+    audit:
+      enabled: true  # Solo agrega createdAt, updatedAt
 ```
 
 **Campos generados:**
@@ -35,7 +36,7 @@ entities:
 
 ---
 
-#### 🚧 Por Implementar (Fase 2): Auditoría de Usuario
+#### ✅ Fase 2: Auditoría de Usuario (IMPLEMENTADO)
 
 ```yaml
 entities:
@@ -43,7 +44,7 @@ entities:
     isRoot: true
     audit:
       enabled: true
-      trackUser: true     # ← Nueva funcionalidad
+      trackUser: true     # ← ✅ IMPLEMENTADO
 ```
 
 **Campos adicionales generados:**
@@ -532,11 +533,11 @@ private Integer age;
 
 ## Prioridad de Implementación
 
-| Característica | Prioridad | Complejidad | Dependencias |
-|----------------|-----------|-------------|--------------|
-| Auditoría de tiempo (`auditable: true`) | ✅ Alta | 🟢 Baja | Ninguna |
-| Auditoría de usuario (`trackUser: true`) | 🚧 Media | 🟡 Media | Spring Security o alternativa |
-| Soft Delete | 🚧 Media | 🟢 Baja | Ninguna |
+| Característica | Prioridad | Complejidad | Dependencias | Estado |
+|----------------|-----------|-------------|--------------|--------|
+| Auditoría de tiempo (`audit.enabled: true`) | ✅ Alta | 🟢 Baja | Ninguna | ✅ **IMPLEMENTADO** |
+| Auditoría de usuario (`audit.trackUser: true`) | ✅ Alta | 🟡 Media | Header X-User | ✅ **IMPLEMENTADO** |
+| Soft Delete | 🚧 Media | 🟢 Baja | Ninguna | 📋 Pendiente |
 | Validaciones JSR-303 | 📋 Baja | 🟡 Media | Hibernate Validator |
 
 ---

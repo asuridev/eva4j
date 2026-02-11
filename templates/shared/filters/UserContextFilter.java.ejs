@@ -1,0 +1,45 @@
+package <%= packageName %>.shared.infrastructure.filters;
+
+import <%= packageName %>.shared.infrastructure.audit.UserContextHolder;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+/**
+ * Filter to extract user information from HTTP header and store it in ThreadLocal
+ * The stored username is used by AuditorAware for JPA audit fields (createdBy, updatedBy)
+ * 
+ * This filter reads the X-User header and makes it available throughout the request lifecycle
+ * Pattern similar to CorrelationIdFilter
+ */
+@Component
+public class UserContextFilter extends OncePerRequestFilter {
+
+    private static final String USER_HEADER = "X-User";
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain)
+        throws ServletException, IOException {
+
+        try {
+            String username = request.getHeader(USER_HEADER);
+            
+            // Set user in context (null is ok, AuditorAware will use "system" as default)
+            if (username != null && !username.trim().isEmpty()) {
+                UserContextHolder.setCurrentUser(username.trim());
+            }
+
+            filterChain.doFilter(request, response);
+        } finally {
+            // Always clear the context to prevent memory leaks
+            UserContextHolder.clear();
+        }
+    }
+}

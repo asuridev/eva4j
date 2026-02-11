@@ -59,7 +59,7 @@ public class <%= aggregateName %>Mapper {
         if (domain == null) return null;
         
         <%= rootEntity.name %>Jpa jpa = <%= rootEntity.name %>Jpa.builder()
-<% rootEntity.fields.filter(f => !(f.name === 'createdAt' || f.name === 'updatedAt')).forEach(field => { -%>
+<% rootEntity.fields.filter(f => !(f.name === 'createdAt' || f.name === 'updatedAt' || f.name === 'createdBy' || f.name === 'updatedBy')).forEach(field => { -%>
 <% if (field.isCollection && field.isValueObject) { -%>
                 .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() != null ? domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>().stream().map(this::toJpa<%= field.collectionElementType %>).collect(Collectors.toList()) : new ArrayList<>())
 <% } else if (field.isValueObject) { -%>
@@ -122,7 +122,7 @@ public class <%= aggregateName %>Mapper {
         if (domain == null) return null;
         
         return <%= entity.name %>Jpa.builder()
-<% entity.fields.filter(f => !(f.name === 'createdAt' || f.name === 'updatedAt')).forEach(field => { -%>
+<% entity.fields.filter(f => !(f.name === 'createdAt' || f.name === 'updatedAt' || f.name === 'createdBy' || f.name === 'updatedBy')).forEach(field => { -%>
 <% if (field.isCollection && field.isValueObject) { -%>
                 .<%= field.name %>(domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() != null ? domain.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>().stream().map(this::toJpa<%= field.collectionElementType %>).collect(Collectors.toList()) : new ArrayList<>())
 <% } else if (field.isValueObject) { -%>

@@ -398,21 +398,53 @@ fields:
 
 ### Auditoría Automática
 
-eva4j soporta auditoría automática de entidades usando la propiedad `auditable`. Cuando se establece en `true`, la entidad incluirá automáticamente campos de fecha de creación y modificación.
+eva4j soporta dos niveles de auditoría automática de entidades:
+
+1. **Auditoría de timestamps** (solo `createdAt`, `updatedAt`)
+2. **Auditoría completa** (timestamps + `createdBy`, `updatedBy`)
 
 #### Sintaxis
 
+**Opción 1: Solo timestamps (sintaxis legacy - deprecated)**
 ```yaml
 entities:
   - name: order
     isRoot: true
-    auditable: true  # ← Activa auditoría automática
+    auditable: true  # ⚠️ Deprecated: usar audit: {} en su lugar
     fields:
       - name: orderNumber
         type: String
 ```
 
-#### Qué genera `auditable: true`
+**Opción 2: Nueva sintaxis (recomendada)**
+```yaml
+entities:
+  - name: order
+    isRoot: true
+    audit:
+      enabled: true      # Agrega createdAt, updatedAt
+      trackUser: false   # No agrega createdBy, updatedBy
+    fields:
+      - name: orderNumber
+        type: String
+```
+
+**Opción 3: Auditoría completa con seguimiento de usuario**
+```yaml
+entities:
+  - name: order
+    isRoot: true
+    audit:
+      enabled: true      # Agrega createdAt, updatedAt
+      trackUser: true    # ← Agrega createdBy, updatedBy
+    fields:
+      - name: orderNumber
+        type: String
+```
+
+#### Qué genera cada configuración
+
+##### Solo timestamps (`audit: { enabled: true }`)
 
 **En la entidad de dominio (`Order.java`):**
 ```java
@@ -421,7 +453,7 @@ public class Order {
     private LocalDateTime createdAt;   // ← Agregado automáticamente
     private LocalDateTime updatedAt;   // ← Agregado automáticamente
     
-    // getters/setters generados automáticamente
+    // getters generados automáticamente (sin setters por DDD)
 }
 ```
 
@@ -431,7 +463,6 @@ public class Order {
 @Table(name = "orders")
 public class OrderJpa extends AuditableEntity {  // ← Extiende clase base
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     private String orderNumber;
     
     // Los campos createdAt/updatedAt heredados de AuditableEntity
@@ -452,30 +483,165 @@ public abstract class AuditableEntity {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
     
-    // getters/setters
+    // getters
 }
+```
+
+##### Con seguimiento de usuario (`audit: { enabled: true, trackUser: true }`)
+
+**En la entidad JPA (`OrderJpa.java`):**
+```java
+@Entity
+@Table(name = "orders")
+public class OrderJpa extends FullAuditableEntity {  // ← Extiende clase extendida
+    @Id
+    private String orderNumber;
+    
+    // Hereda: createdAt, updatedAt, createdBy, updatedBy
+}
+```
+
+**Clase base extendida (`FullAuditableEntity.java`):**
+```java
+@MappedSuperclass
+public abstract class FullAuditableEntity extends AuditableEntity {
+    
+    @CreatedBy
+    @Column(name = "created_by", updatable = false, length = 100)
+    private String createdBy;
+    
+    @LastModifiedBy
+    @Column(name = "updated_by", length = 100)
+    private String updatedBy;
+    
+    // getters
+    // Hereda createdAt/updatedAt de AuditableEntity
+}
+```
+
+##### Infraestructura generada para trackUser
+
+Cuando `trackUser: true`, eva4j genera automáticamente:
+
+**1. UserContextHolder** - Almacena el usuario en ThreadLocal
+```java
+public class UserContextHolder {
+    private static final ThreadLocal<String> currentUser = new ThreadLocal<>();
+    
+    public static void setCurrentUser(String username) {
+        currentUser.set(username);
+    }
+    
+    public static String getCurrentUser() {
+        return currentUser.get();
+    }
+    
+    public static void clear() {
+        currentUser.remove();
+    }
+}
+```
+
+**2. UserContextFilter** - Extrae usuario del header HTTP
+```java
+@Component
+public class UserContextFilter extends OncePerRequestFilter {
+    private static final String USER_HEADER = "X-User";
+    
+    @Override
+    protected void doFilterInternal(...) {
+        try {
+            String username = request.getHeader(USER_HEADER);
+            if (username != null && !username.trim().isEmpty()) {
+                UserContextHolder.setCurrentUser(username.trim());
+            }
+            filterChain.doFilter(request, response);
+        } finally {
+            UserContextHolder.clear();
+        }
+    }
+}
+```
+
+**3. AuditorAwareImpl** - Provee el usuario a JPA Auditing
+```java
+@Component("auditorProvider")
+public class AuditorAwareImpl implements AuditorAware<String> {
+    @Override
+    public Optional<String> getCurrentAuditor() {
+        String username = UserContextHolder.getCurrentUser();
+        if (username == null || username.trim().isEmpty()) {
+            return Optional.of("system");
+        }
+        return Optional.of(username);
+    }
+}
+```
+
+**4. Configuración en Application.java**
+```java
+@SpringBootApplication
+@EnableJpaAuditing(auditorAwareRef = "auditorProvider")  // ← Conecta con AuditorAware
+public class Application {
+    // ...
+}
+```
+
+#### Uso en aplicación
+
+##### Sin trackUser (solo timestamps)
+```java
+// Crear una orden
+Order order = new Order("ORD-001", customerId, totalAmount);
+orderRepository.save(order);
+
+// Resultado en BD:
+// created_at: 2026-02-11 10:30:00
+// updated_at: 2026-02-11 10:30:00
+```
+
+##### Con trackUser (timestamps + usuario)
+```bash
+# Request HTTP con header X-User
+curl -X POST http://localhost:8080/api/orders \
+  -H "Content-Type: application/json" \
+  -H "X-User: john.doe" \
+  -d '{"orderNumber": "ORD-001", "totalAmount": 150.00}'
+```
+
+```java
+// El filtro captura automáticamente el usuario del header X-User
+// No se requiere código adicional en el controlador o servicio
+
+Order order = new Order("ORD-001", customerId, totalAmount);
+orderRepository.save(order);
+
+// Resultado en BD:
+// created_at: 2026-02-11 10:30:00
+// updated_at: 2026-02-11 10:30:00
+// created_by: john.doe  ← Capturado automáticamente
+// updated_by: john.doe  ← Capturado automáticamente
+```
+
+##### Sin header X-User
+```java
+// Si no se envía header X-User, se usa "system" como default
+Order order = new Order("ORD-002", customerId, totalAmount);
+orderRepository.save(order);
+
+// Resultado en BD:
+// created_by: system  ← Valor por defecto
+// updated_by: system
 ```
 
 #### Características
 
 ✅ **Totalmente automático**: Los timestamps se actualizan sin código adicional  
 ✅ **Nivel de entidad**: Se puede habilitar para entidades específicas  
-✅ **Spring Data JPA**: Usa `@CreatedDate` y `@LastModifiedDate`  
+✅ **Spring Data JPA**: Usa `@CreatedDate`, `@LastModifiedDate`, `@CreatedBy`, `@LastModifiedBy`  
 ✅ **Mapper incluido**: Los campos de auditoría se mapean automáticamente entre domain y JPA  
-
-#### Configuración requerida
-
-La aplicación Spring Boot ya tiene habilitada la auditoría JPA en la clase principal:
-
-```java
-@SpringBootApplication
-@EnableJpaAuditing  // ← Ya configurado por eva4j
-public class Application {
-    public static void main(String[] args) {
-        SpringApplication.run(Application.class, args);
-    }
-}
-```
+✅ **Header HTTP flexible**: Usa `X-User` para pasar el username (ej: "john.doe")  
+✅ **ThreadLocal seguro**: Limpieza automática en finally para evitar memory leaks  
 
 #### Ejemplo completo
 
@@ -485,7 +651,9 @@ aggregates:
     entities:
       - name: product
         isRoot: true
-        auditable: true  # ← Habilita auditoría
+        audit:
+          enabled: true
+          trackUser: true  # ← Habilita auditoría completa
         fields:
           - name: productId
             type: String
@@ -493,10 +661,13 @@ aggregates:
             type: String
           - name: price
             type: BigDecimal
-          # createdAt y updatedAt se agregan automáticamente
+          # Los 4 campos de auditoría se agregan automáticamente:
+          # createdAt, updatedAt, createdBy, updatedBy
       
       - name: review
-        auditable: true  # ← Las entidades secundarias también pueden tener auditoría
+        audit:
+          enabled: true
+          trackUser: false  # ← Solo timestamps, sin usuario
         fields:
           - name: reviewId
             type: Long
@@ -515,27 +686,41 @@ CREATE TABLE products (
     product_id VARCHAR(36) PRIMARY KEY,
     name VARCHAR(255),
     price DECIMAL(19,2),
-    created_at TIMESTAMP NOT NULL,  -- ← Automático
-    updated_at TIMESTAMP NOT NULL   -- ← Automático
+    created_at TIMESTAMP NOT NULL,   -- ← Automático
+    updated_at TIMESTAMP NOT NULL,   -- ← Automático
+    created_by VARCHAR(100),          -- ← Automático (trackUser: true)
+    updated_by VARCHAR(100)           -- ← Automático (trackUser: true)
 );
 
 CREATE TABLE reviews (
     review_id BIGINT PRIMARY KEY AUTO_INCREMENT,
     comment TEXT,
     product_id VARCHAR(36),
-    created_at TIMESTAMP NOT NULL,  -- ← Automático
-    updated_at TIMESTAMP NOT NULL,  -- ← Automático
+    created_at TIMESTAMP NOT NULL,   -- ← Automático
+    updated_at TIMESTAMP NOT NULL,   -- ← Automático
+    -- NO tiene created_by/updated_by (trackUser: false)
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
 ```
 
+#### Comparación de sintaxis
+
+| Sintaxis | Campos generados | Infraestructura | Estado |
+|----------|------------------|-----------------|--------|
+| `auditable: true` | `createdAt`, `updatedAt` | `AuditableEntity` | ⚠️ Deprecated |
+| `audit: { enabled: true }` | `createdAt`, `updatedAt` | `AuditableEntity` | ✅ Recomendado |
+| `audit: { enabled: true, trackUser: true }` | `createdAt`, `updatedAt`, `createdBy`, `updatedBy` | `FullAuditableEntity`, `UserContextFilter`, `AuditorAwareImpl` | ✅ Recomendado |
+
 #### Notas importantes
 
-- ✅ `auditable` es **opcional** - por defecto es `false`
+- ✅ `audit.enabled` es **opcional** - por defecto es `false`
+- ✅ `audit.trackUser` requiere que `audit.enabled` sea `true`
 - ✅ Puede usarse en **entidad raíz** o **entidades secundarias**
-- ✅ Los campos `createdAt` y `updatedAt` **no deben** definirse manualmente en `fields`
-- ✅ El tipo es siempre `LocalDateTime`
-- ❌ **No incluye** auditoría de usuario (createdBy/updatedBy) - ver [FUTURE_FEATURES.md](FUTURE_FEATURES.md) para esa funcionalidad
+- ✅ Los campos de auditoría **no deben** definirse manualmente en `fields`
+- ✅ El filtro `UserContextFilter` se genera automáticamente cuando `trackUser: true`
+- ✅ Header `X-User` debe contener el username (formato: "john.doe", "jane@example.com", etc.)
+- ✅ Valor por defecto sin header: "system"
+- ⚠️ Sintaxis `auditable: true` está deprecated - usar `audit: {}` en su lugar
 
 ---
 

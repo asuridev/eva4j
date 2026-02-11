@@ -1,0 +1,33 @@
+package <%= packageName %>.shared.infrastructure.audit;
+
+import org.springframework.data.domain.AuditorAware;
+import org.springframework.stereotype.Component;
+
+import java.util.Optional;
+
+/**
+ * Implementation of AuditorAware for JPA Auditing
+ * Provides the current auditor (user) to be used in @CreatedBy and @LastModifiedBy fields
+ * 
+ * The username is retrieved from UserContextHolder which is populated by UserContextFilter
+ * from the X-User HTTP header
+ */
+@Component("auditorProvider")
+public class AuditorAwareImpl implements AuditorAware<String> {
+    
+    /**
+     * Gets the current auditor (user) for audit fields
+     * @return Optional containing the username, or "system" if no user is set
+     */
+    @Override
+    public Optional<String> getCurrentAuditor() {
+        String username = UserContextHolder.getCurrentUser();
+        
+        // If no user is set in context, use "system" as default
+        if (username == null || username.trim().isEmpty()) {
+            return Optional.of("system");
+        }
+        
+        return Optional.of(username);
+    }
+}

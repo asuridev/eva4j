@@ -8,7 +8,9 @@ aggregates:
       - name: order
         isRoot: true
         tableName: orders
-        auditable: true
+        audit:
+          enabled: true      # Agrega createdAt, updatedAt
+          trackUser: true    # Agrega createdBy, updatedBy
         fields:
           - name: id
             type: String

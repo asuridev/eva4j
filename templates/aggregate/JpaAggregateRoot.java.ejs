@@ -15,7 +15,11 @@ import <%= packageName %>.<%= moduleName %>.infrastructure.database.valueObjects
 <% if (enums.length > 0) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
 <% } %>
-<% if (auditable) { %>
+<% if (audit && audit.enabled && audit.trackUser) { %>
+import <%= packageName %>.shared.domain.FullAuditableEntity;
+<% } else if (audit && audit.enabled) { %>
+import <%= packageName %>.shared.domain.AuditableEntity;
+<% } else if (auditable) { %>
 import <%= packageName %>.shared.domain.AuditableEntity;
 <% } %>
 
@@ -30,15 +34,24 @@ import <%= packageName %>.shared.domain.AuditableEntity;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class <%= name %>Jpa<% if (auditable) { %> extends AuditableEntity<% } %> {
+public class <%= name %>Jpa<% if (audit && audit.enabled && audit.trackUser) { %> extends FullAuditableEntity<% } else if (audit && audit.enabled) { %> extends AuditableEntity<% } else if (auditable) { %> extends AuditableEntity<% } %> {
     
 <%
 // Helper function to convert camelCase to snake_case
 function toSnakeCase(str) {
   return str.replace(/([A-Z])/g, '_$1').toLowerCase();
 }
+
+// Filter out audit fields based on configuration
+const auditFields = [];
+if (auditable || (audit && audit.enabled)) {
+  auditFields.push('createdAt', 'updatedAt');
+}
+if (audit && audit.trackUser) {
+  auditFields.push('createdBy', 'updatedBy');
+}
 %>
-<% fields.filter(f => !(auditable && (f.name === 'createdAt' || f.name === 'updatedAt'))).forEach((field, index) => { %>
+<% fields.filter(f => !auditFields.includes(f.name)).forEach((field, index) => { %>
   <% if (field.isCollection) { %>
     @ElementCollection
     @CollectionTable(name = "<%= tableName %>_<%= field.name %>", joinColumns = @JoinColumn(name = "<%= name.toLowerCase() %>_id"))

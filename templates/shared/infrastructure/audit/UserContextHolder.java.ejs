@@ -1,0 +1,36 @@
+package <%= packageName %>.shared.infrastructure.audit;
+
+/**
+ * ThreadLocal holder for storing the current user information
+ * Used by AuditorAware to populate audit fields in entities
+ * 
+ * Pattern similar to MDC (Mapped Diagnostic Context) for user context
+ */
+public class UserContextHolder {
+    
+    private static final ThreadLocal<String> currentUser = new ThreadLocal<>();
+    
+    /**
+     * Set the current user for the current thread
+     * @param username the username to set (e.g., "john.doe")
+     */
+    public static void setCurrentUser(String username) {
+        currentUser.set(username);
+    }
+    
+    /**
+     * Get the current user for the current thread
+     * @return the username or null if not set
+     */
+    public static String getCurrentUser() {
+        return currentUser.get();
+    }
+    
+    /**
+     * Clear the current user from the current thread
+     * Should be called in a finally block to prevent memory leaks
+     */
+    public static void clear() {
+        currentUser.remove();
+    }
+}

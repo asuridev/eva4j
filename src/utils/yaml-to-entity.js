@@ -88,23 +88,70 @@ function parseAggregate(aggregateData) {
  * @returns {Object} Parsed entity
  */
 function parseEntity(entityData, aggregateName, packageName = '', moduleName = '', aggregateEnums = [], valueObjectNames = [], inverseRelationships = {}) {
-  const { name, isRoot = false, tableName, properties, fields: fieldsYaml, relationships = [], auditable = false } = entityData;
+  const { name, isRoot = false, tableName, properties, fields: fieldsYaml, relationships = [], auditable = false, audit } = entityData;
   
   // Accept both 'properties' and 'fields' field names
   let entityFields = properties || fieldsYaml || [];
   
-  // Validate auditable property
-  if (auditable !== undefined && typeof auditable !== 'boolean') {
-    throw new Error(`Entity "${name}": auditable property must be a boolean (true/false)`);
+  // Process audit configuration
+  let auditConfig = {
+    enabled: false,
+    trackUser: false
+  };
+  
+  // Legacy support: auditable: true (deprecated but still supported)
+  if (auditable !== undefined) {
+    if (typeof auditable !== 'boolean') {
+      throw new Error(`Entity "${name}": auditable property must be a boolean (true/false)`);
+    }
+    if (auditable === true) {
+      console.warn(`⚠️  Entity "${name}": 'auditable: true' is deprecated. Use 'audit: { enabled: true }' instead.`);
+      auditConfig.enabled = true;
+      auditConfig.trackUser = false;
+    }
   }
   
-  // Inject audit fields if auditable is true
-  if (auditable === true) {
+  // New syntax: audit: { enabled: true, trackUser: true }
+  if (audit !== undefined) {
+    if (typeof audit !== 'object' || audit === null) {
+      throw new Error(`Entity "${name}": audit property must be an object with { enabled, trackUser } properties`);
+    }
+    
+    if (audit.enabled !== undefined) {
+      if (typeof audit.enabled !== 'boolean') {
+        throw new Error(`Entity "${name}": audit.enabled must be a boolean (true/false)`);
+      }
+      auditConfig.enabled = audit.enabled;
+    }
+    
+    if (audit.trackUser !== undefined) {
+      if (typeof audit.trackUser !== 'boolean') {
+        throw new Error(`Entity "${name}": audit.trackUser must be a boolean (true/false)`);
+      }
+      auditConfig.trackUser = audit.trackUser;
+    }
+    
+    // Validate: trackUser requires enabled
+    if (auditConfig.trackUser === true && auditConfig.enabled === false) {
+      throw new Error(`Entity "${name}": audit.trackUser requires audit.enabled to be true`);
+    }
+  }
+  
+  // Inject audit fields based on configuration
+  if (auditConfig.enabled) {
     entityFields = [
       ...entityFields,
       { name: 'createdAt', type: 'LocalDateTime' },
       { name: 'updatedAt', type: 'LocalDateTime' }
     ];
+    
+    if (auditConfig.trackUser) {
+      entityFields = [
+        ...entityFields,
+        { name: 'createdBy', type: 'String' },
+        { name: 'updatedBy', type: 'String' }
+      ];
+    }
   }
   
   const className = toPascalCase(name);
@@ -138,7 +185,8 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
     fieldName,
     tableName: table,
     isRoot,
-    auditable: auditable === true,
+    auditable: auditable === true, // Legacy support
+    audit: auditConfig, // New audit configuration
     fields,
     relationships: relations,
     enums,

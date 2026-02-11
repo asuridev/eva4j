@@ -1,0 +1,187 @@
+# EJEMPLO: AUDITORÍA COMPLETA CON SEGUIMIENTO DE USUARIO
+# Demuestra el uso de audit: { enabled: true, trackUser: true }
+# Para capturar quién y cuándo se crean/modifican registros
+
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true      # Agrega createdAt, updatedAt
+          trackUser: true    # Agrega createdBy, updatedBy
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+          - name: customerId
+            type: String
+          - name: status
+            type: OrderStatus
+          - name: totalAmount
+            type: BigDecimal
+          - name: orderDate
+            type: LocalDateTime
+          # Los siguientes campos se agregan automáticamente:
+          # - createdAt: LocalDateTime
+          # - updatedAt: LocalDateTime
+          # - createdBy: String
+          # - updatedBy: String
+        relationships:
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+      
+      - name: OrderItem
+        tableName: order_items
+        audit:
+          enabled: true
+          trackUser: true    # Las entidades secundarias también soportan audit
+        fields:
+          - name: id
+            type: Long
+          - name: productId
+            type: String
+          - name: productName
+            type: String
+          - name: quantity
+            type: Integer
+          - name: unitPrice
+            type: BigDecimal
+          - name: subtotal
+            type: BigDecimal
+    
+    enums:
+      - name: OrderStatus
+        values:
+          - PENDING
+          - CONFIRMED
+          - PROCESSING
+          - SHIPPED
+          - DELIVERED
+          - CANCELLED
+
+  - name: Customer
+    entities:
+      - name: customer
+        isRoot: true
+        tableName: customers
+        audit:
+          enabled: true
+          trackUser: false   # Solo timestamps, sin seguimiento de usuario
+        fields:
+          - name: id
+            type: String
+          - name: firstName
+            type: String
+          - name: lastName
+            type: String
+          - name: email
+            type: String
+          - name: phoneNumber
+            type: String
+          - name: status
+            type: CustomerStatus
+          - name: registrationDate
+            type: LocalDateTime
+          # Solo se agregan automáticamente:
+          # - createdAt: LocalDateTime
+          # - updatedAt: LocalDateTime
+    
+    enums:
+      - name: CustomerStatus
+        values:
+          - ACTIVE
+          - INACTIVE
+          - SUSPENDED
+
+# USO EN APLICACIÓN:
+# 
+# 1. Con header X-User:
+#    curl -X POST http://localhost:8080/api/orders \
+#      -H "Content-Type: application/json" \
+#      -H "X-User: john.doe" \
+#      -d '{"orderNumber": "ORD-001", "customerId": "CUST-123", "totalAmount": 150.00}'
+#
+#    Resultado en BD:
+#    - created_at: 2026-02-11 10:30:00
+#    - updated_at: 2026-02-11 10:30:00
+#    - created_by: john.doe  ← Del header X-User
+#    - updated_by: john.doe
+#
+# 2. Sin header X-User:
+#    curl -X POST http://localhost:8080/api/orders \
+#      -H "Content-Type: application/json" \
+#      -d '{"orderNumber": "ORD-002", "customerId": "CUST-124", "totalAmount": 200.00}'
+#
+#    Resultado en BD:
+#    - created_by: system  ← Valor por defecto
+#    - updated_by: system
+#
+# 3. Customer (trackUser: false):
+#    Solo guarda timestamps, NO guarda createdBy/updatedBy
+#    - created_at: 2026-02-11 10:30:00
+#    - updated_at: 2026-02-11 10:30:00
+
+# INFRAESTRUCTURA GENERADA AUTOMÁTICAMENTE:
+# 
+# Cuando al menos una entidad tiene trackUser: true, eva4j genera:
+# 
+# 1. shared/domain/AuditableEntity.java
+#    - Campos: createdAt, updatedAt
+#    - Anotaciones: @CreatedDate, @LastModifiedDate
+#
+# 2. shared/domain/FullAuditableEntity.java
+#    - Extiende AuditableEntity
+#    - Agrega: createdBy, updatedBy
+#    - Anotaciones: @CreatedBy, @LastModifiedBy
+#
+# 3. shared/infrastructure/audit/UserContextHolder.java
+#    - ThreadLocal para almacenar el usuario actual
+#    - Métodos: setCurrentUser(), getCurrentUser(), clear()
+#
+# 4. shared/infrastructure/audit/AuditorAwareImpl.java
+#    - Implementa AuditorAware<String>
+#    - Lee el usuario de UserContextHolder
+#    - Retorna "system" si no hay usuario
+#
+# 5. shared/infrastructure/filters/UserContextFilter.java
+#    - OncePerRequestFilter
+#    - Lee header X-User
+#    - Almacena en UserContextHolder
+#    - Limpia en finally
+#
+# 6. Application.java actualizado:
+#    - @EnableJpaAuditing(auditorAwareRef = "auditorProvider")
+
+# TABLA GENERADA:
+#
+# CREATE TABLE orders (
+#     id VARCHAR(36) PRIMARY KEY,
+#     order_number VARCHAR(255),
+#     customer_id VARCHAR(36),
+#     status VARCHAR(50),
+#     total_amount DECIMAL(19,2),
+#     order_date TIMESTAMP,
+#     created_at TIMESTAMP NOT NULL,    -- De audit.enabled
+#     updated_at TIMESTAMP NOT NULL,    -- De audit.enabled
+#     created_by VARCHAR(100),          -- De audit.trackUser
+#     updated_by VARCHAR(100)           -- De audit.trackUser
+# );
+#
+# CREATE TABLE customers (
+#     id VARCHAR(36) PRIMARY KEY,
+#     first_name VARCHAR(255),
+#     last_name VARCHAR(255),
+#     email VARCHAR(255),
+#     phone_number VARCHAR(50),
+#     status VARCHAR(50),
+#     registration_date TIMESTAMP,
+#     created_at TIMESTAMP NOT NULL,    -- De audit.enabled
+#     updated_at TIMESTAMP NOT NULL     -- De audit.enabled
+#     -- NO tiene created_by/updated_by porque trackUser: false
+# );

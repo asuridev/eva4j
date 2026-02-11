@@ -1,0 +1,37 @@
+package <%= packageName %>.shared.domain;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.MappedSuperclass;
+import org.springframework.data.annotation.CreatedBy;
+import org.springframework.data.annotation.LastModifiedBy;
+
+/**
+ * Base class for entities that require full auditing (timestamps + user tracking)
+ * Extends AuditableEntity to inherit createdAt and updatedAt fields
+ * Adds createdBy and updatedBy fields for user tracking
+ * 
+ * Usage:
+ * - Apply to entities with: audit: { enabled: true, trackUser: true }
+ * - Requires X-User header in HTTP requests
+ * - User information is captured via UserContextFilter and AuditorAwareImpl
+ */
+@MappedSuperclass
+public abstract class FullAuditableEntity extends AuditableEntity {
+    
+    @CreatedBy
+    @Column(name = "created_by", updatable = false, length = 100)
+    private String createdBy;
+    
+    @LastModifiedBy
+    @Column(name = "updated_by", length = 100)
+    private String updatedBy;
+    
+    // Getters
+    public String getCreatedBy() {
+        return createdBy;
+    }
+    
+    public String getUpdatedBy() {
+        return updatedBy;
+    }
+}

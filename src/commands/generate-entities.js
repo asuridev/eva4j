@@ -152,16 +152,38 @@ async function generateEntitiesCommand(moduleName) {
     
     spinner.succeed(chalk.green(`Found ${aggregates.length} aggregate(s) and ${allEnums.length} enum(s)`));
     
-    // Check if any entity has auditable: true
+    // Check if any entity has auditable: true or audit.enabled
     const hasAuditableEntities = aggregates.some(agg => 
-      agg.rootEntity.auditable || agg.secondaryEntities.some(e => e.auditable)
+      agg.rootEntity.auditable || 
+      (agg.rootEntity.audit && agg.rootEntity.audit.enabled) ||
+      agg.secondaryEntities.some(e => e.auditable || (e.audit && e.audit.enabled))
     );
     
-    // Generate AuditableEntity if needed
-    if (hasAuditableEntities) {
+    // Check if any entity has trackUser enabled
+    const hasTrackUserEntities = aggregates.some(agg =>
+      (agg.rootEntity.audit && agg.rootEntity.audit.trackUser) ||
+      agg.secondaryEntities.some(e => e.audit && e.audit.trackUser)
+    );
+    
+    // Generate audit-related shared components if needed
+    if (hasAuditableEntities || hasTrackUserEntities) {
       const sharedBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, 'shared');
       const sharedGenerator = new SharedGenerator({ packageName, packagePath });
-      await sharedGenerator.generateAuditableEntity(sharedBasePath);
+      
+      // Always generate base AuditableEntity if any audit is enabled
+      if (hasAuditableEntities) {
+        await sharedGenerator.generateAuditableEntity(sharedBasePath);
+      }
+      
+      // Generate FullAuditableEntity and audit infrastructure if trackUser is enabled
+      if (hasTrackUserEntities) {
+        await sharedGenerator.generateFullAuditableEntity(sharedBasePath);
+        await sharedGenerator.generateAuditComponents(sharedBasePath);
+        await sharedGenerator.generateFilters(sharedBasePath, true); // Include UserContextFilter
+      } else if (hasAuditableEntities) {
+        // Just timestamp audit, no user context filter needed
+        await sharedGenerator.generateFilters(sharedBasePath, false);
+      }
     }
     
     console.log(chalk.blue('\n📦 Aggregates to generate:'));
@@ -235,7 +257,8 @@ async function generateEntitiesCommand(moduleName) {
         imports: generateEntityImports(rootEntity.fields, rootEntity.relationships, rootEntity.enums, allEnums, packageName, moduleName, false),
         valueObjects,
         enums: allEnums,
-        auditable: rootEntity.auditable
+        auditable: rootEntity.auditable,
+        audit: rootEntity.audit
       };
 
       await renderAndWrite(
@@ -277,7 +300,8 @@ async function generateEntitiesCommand(moduleName) {
           imports: generateEntityImports(entity.fields, entity.relationships, entity.enums, allEnums, packageName, moduleName, false),
           valueObjects,
           enums: allEnums,
-          auditable: entity.auditable
+          auditable: entity.auditable,
+          audit: entity.audit
         };
 
         await renderAndWrite(
@@ -579,6 +603,18 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const resourceNameCamel = toCamelCase(aggregateName);
   const resourceNameKebab = toKebabCase(aggregateName);
   
+  // Filter audit user fields from response DTOs
+  const responseFields = rootEntity.fields.filter(f => 
+    f.name !== 'createdBy' && f.name !== 'updatedBy'
+  );
+  
+  const responseSecondaryEntities = secondaryEntities.map(entity => ({
+    ...entity,
+    responseFields: entity.fields.filter(f => 
+      f.name !== 'createdBy' && f.name !== 'updatedBy'
+    )
+  }));
+  
   // Base context for all templates
   const baseContext = {
     packageName,
@@ -586,6 +622,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     aggregateName,
     rootEntity,
     secondaryEntities,
+    responseFields,
+    responseSecondaryEntities,
     idType,
     commandFields,
     oneToManyRelationships,
@@ -668,7 +706,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   // 5. Generate DTOs
   const responseDtoContext = {
     ...baseContext,
-    allFields: rootEntity.fields,
+    allFields: rootEntity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy'),
     relationships: rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse)
   };
   
@@ -693,7 +731,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       packageName,
       moduleName,
       entityName: entity.name,
-      fields: entity.fields,
+      fields: entity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy'),
       nestedRelationships,
       hasNestedRelationships: nestedRelationships.length > 0,
       hasValueObjects: entity.fields.some(f => f.isValueObject),
