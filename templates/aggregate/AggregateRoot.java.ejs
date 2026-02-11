@@ -32,10 +32,6 @@ public class <%= name %> {
   <% } %>
 <% }); %>
 
-    // Constructors
-    public <%= name %>() {
-    }
-
     // Full constructor (for reconstruction from persistence)
     public <%= name %>(<% let paramIdx = 0; %><% fields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %><% domainRelationships.forEach(rel => { %><% if (!rel.isCollection) { %><% if (paramIdx > 0) { %>, <% } %><%- rel.javaType %> <%= rel.fieldName %><% paramIdx++; %><% } %><% }); %>) {
 <% fields.forEach(field => { %>
