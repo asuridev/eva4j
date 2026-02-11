@@ -1,6 +1,6 @@
 {
   "name": "eva4j",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "A powerful Node.js CLI for generating Spring Boot projects with modular architecture that enables efficient monolith-first development with seamless transition to microservices",
   "main": "bin/eva4j.js",
   "bin": {
