@@ -78,7 +78,7 @@ function enrichRelationshipsRecursively(entity, secondaryEntities, depth = 0, vi
     }
     
     const targetFields = targetEntity.fields.filter(f => 
-      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
     );
     
     // Recursively enrich nested relationships
@@ -542,9 +542,9 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const idField = rootEntity.fields[0];
   const idType = idField.javaType;
   
-  // Filter command fields (exclude id, createdAt, updatedAt)
+  // Filter command fields (exclude id and audit fields)
   const commandFields = rootEntity.fields.filter(f => 
-    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
   );
   
   // Build enriched OneToMany relationships with recursive nested data
@@ -578,7 +578,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     }
     
     const targetFields = targetEntity.fields.filter(f => 
-      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
     );
     
     return {
@@ -811,7 +811,7 @@ async function generatePostmanCollection(
   const idType = idField.javaType;
   
   const commandFields = rootEntity.fields.filter(f => 
-    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
   );
   
   const oneToManyRelationships = enrichRelationshipsRecursively(

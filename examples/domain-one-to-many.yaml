@@ -35,6 +35,9 @@ aggregates:
       
       - name: OrderItem
         tableName: order_items
+        audit:
+          enabled: true      # Agrega createdAt, updatedAt
+          trackUser: true    # Agrega createdBy, updatedBy
         fields:
           - name: id
             type: Long
