@@ -752,7 +752,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   for (const entity of secondaryEntities) {
     console.log(`[DEBUG] Generating CreateItemDto for entity: ${entity.name}`);
     const createFields = entity.fields.filter(f => 
-      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt'
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
     );
     
     // Get nested relationships for this entity
