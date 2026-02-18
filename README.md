@@ -658,9 +658,9 @@ public interface MessageBroker {
     void publishUserCreatedEvent(UserCreatedEvent event);
 }
 
-// infrastructure/adapters/kafkaMessageBroker/KafkaMessageBroker.java
-@Component
-public class KafkaMessageBroker implements MessageBroker {
+// infrastructure/adapters/kafkaMessageBroker/UsersKafkaMessageBroker.java
+@Component("usersKafkaMessageBroker")
+public class UsersKafkaMessageBroker implements MessageBroker {
     public void publishUserCreatedEvent(UserCreatedEvent event) {
         kafkaTemplate.send("USER_CREATED", envelope);
     }

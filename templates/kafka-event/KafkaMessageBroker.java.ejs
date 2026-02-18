@@ -8,15 +8,15 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 import org.slf4j.MDC;
 
-@Component
-public class KafkaMessageBroker implements MessageBroker {
+@Component("<%= moduleCamelCase %>KafkaMessageBroker")
+public class <%= modulePascalCase %>KafkaMessageBroker implements MessageBroker {
 
   @Value("<%= topicSpringProperty %>")
   private String <%= topicNameKebab.replace(/-/g, '') %>Topic;
 
   private final KafkaTemplate<String, Object> kafkaTemplate;
 
-  public KafkaMessageBroker(KafkaTemplate<String, Object> kafkaTemplate) {
+  public <%= modulePascalCase %>KafkaMessageBroker(KafkaTemplate<String, Object> kafkaTemplate) {
     this.kafkaTemplate = kafkaTemplate;
   }
 

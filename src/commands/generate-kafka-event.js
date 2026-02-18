@@ -122,6 +122,9 @@ async function generateKafkaEventCommand(moduleName, eventName) {
     const context = {
       packageName,
       moduleName,
+      modulePascalCase: toPascalCase(moduleName),
+      moduleCamelCase: toCamelCase(moduleName),
+      kafkaMessageBrokerClassName: `${toPascalCase(moduleName)}KafkaMessageBroker`,
       eventClassName,
       topicNameSnake,
       topicNameKebab,
@@ -158,7 +161,7 @@ async function generateKafkaEventCommand(moduleName, eventName) {
     console.log(chalk.blue('\n📦 Generated/Updated components:'));
     console.log(chalk.gray(`  ├── ${moduleName}/application/events/${eventClassName}.java`));
     console.log(chalk.gray(`  ├── ${moduleName}/application/ports/MessageBroker.java`));
-    console.log(chalk.gray(`  ├── ${moduleName}/infrastructure/adapters/kafkaMessageBroker/KafkaMessageBroker.java`));
+    console.log(chalk.gray(`  ├── ${moduleName}/infrastructure/adapters/kafkaMessageBroker/${context.kafkaMessageBrokerClassName}.java`));
     console.log(chalk.gray(`  ├── shared/configurations/kafkaConfig/KafkaConfig.java`));
     console.log(chalk.gray('  └── parameters/*/kafka.yaml (all environments)'));
     
@@ -304,7 +307,7 @@ async function createOrUpdateMessageBroker(projectDir, packagePath, context) {
 async function createOrUpdateKafkaMessageBroker(projectDir, packagePath, context) {
   const adapterPath = path.join(
     projectDir, 'src', 'main', 'java', packagePath,
-    context.moduleName, 'infrastructure', 'adapters', 'kafkaMessageBroker', 'KafkaMessageBroker.java'
+    context.moduleName, 'infrastructure', 'adapters', 'kafkaMessageBroker', `${context.kafkaMessageBrokerClassName}.java`
   );
 
   const methodName = `publish${context.eventClassName}`;
@@ -385,7 +388,7 @@ async function createOrUpdateKafkaMessageBroker(projectDir, packagePath, context
                   content.slice(insertPos);
       } else {
         // Add after class declaration
-        const classPattern = /(public\s+class\s+KafkaMessageBroker\s+implements\s+MessageBroker\s*\{\s*\n)/;
+        const classPattern = /(public\s+class\s+\w+KafkaMessageBroker\s+implements\s+MessageBroker\s*\{\s*\n)/;
         const classMatch = content.match(classPattern);
         if (classMatch) {
           const insertPos = classMatch.index + classMatch[0].length;
@@ -403,7 +406,7 @@ async function createOrUpdateKafkaMessageBroker(projectDir, packagePath, context
     // Find the last closing brace and insert before it
     const lastBraceIndex = content.lastIndexOf('}');
     if (lastBraceIndex === -1) {
-      throw new Error('Could not find closing brace in KafkaMessageBroker class');
+      throw new Error(`Could not find closing brace in ${context.kafkaMessageBrokerClassName} class`);
     }
 
     content = content.slice(0, lastBraceIndex) + '\n' + methodImpl + '\n}\n';
