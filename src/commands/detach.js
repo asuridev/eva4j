@@ -353,6 +353,21 @@ function transformSharedFileContent(content, packageName, moduleName) {
   );
   transformed = transformed.replace(importInfraPattern, `${packageName}.${moduleName}.infrastructure.`);
   
+  // Replace package declaration for application files
+  // package com.example.shared.application -> package com.example.{moduleName}.application
+  const packageApplicationPattern = new RegExp(
+    `^package\\s+${packageName.replace(/\./g, '\\.')}\\.shared\\.application`,
+    'gm'
+  );
+  transformed = transformed.replace(packageApplicationPattern, `package ${packageName}.${moduleName}.application`);
+  
+  // Replace import statements for application
+  const importApplicationPattern = new RegExp(
+    `${packageName.replace(/\./g, '\\.')}\\.shared\\.application\\.`,
+    'g'
+  );
+  transformed = transformed.replace(importApplicationPattern, `${packageName}.${moduleName}.application.`);
+  
   return transformed;
 }
 
@@ -400,6 +415,31 @@ async function mergeSharedComponents(sharedDir, moduleDir, packageName, moduleNa
       } else if (stat.isFile() && entry.endsWith('.java')) {
         // Copy and transform individual .java files
         const destPath = path.join(moduleDir, 'infrastructure', entry);
+        if (!(await fs.pathExists(destPath))) {
+          const content = await fs.readFile(sourcePath, 'utf-8');
+          const transformed = transformSharedFileContent(content, packageName, moduleName);
+          await fs.ensureDir(path.dirname(destPath));
+          await fs.writeFile(destPath, transformed, 'utf-8');
+        }
+      }
+    }
+  }
+  
+  // Merge shared/application/* into module/application/
+  const sharedApplicationDir = path.join(sharedDir, 'application');
+  if (await fs.pathExists(sharedApplicationDir)) {
+    const applicationEntries = await fs.readdir(sharedApplicationDir);
+    for (const entry of applicationEntries) {
+      const sourcePath = path.join(sharedApplicationDir, entry);
+      const stat = await fs.stat(sourcePath);
+      
+      if (stat.isDirectory()) {
+        // Copy and transform subdirectories (dtos, events)
+        const destPath = path.join(moduleDir, 'application', entry);
+        await copyAndTransformDirectory(sourcePath, destPath, packageName, moduleName);
+      } else if (stat.isFile() && entry.endsWith('.java')) {
+        // Copy and transform individual .java files
+        const destPath = path.join(moduleDir, 'application', entry);
         if (!(await fs.pathExists(destPath))) {
           const content = await fs.readFile(sourcePath, 'utf-8');
           const transformed = transformSharedFileContent(content, packageName, moduleName);
@@ -479,6 +519,23 @@ async function updatePackageReferences(directory, packageName, moduleName) {
     const infraPattern = new RegExp(`${packageName.replace(/\./g, '\\.')}\\.shared\\.infrastructure\\.`, 'g');
     if (infraPattern.test(content)) {
       content = content.replace(infraPattern, `${packageName}.${moduleName}.infrastructure.`);
+      modified = true;
+    }
+    
+    // Replace package declarations for application
+    const packageApplicationPattern = new RegExp(
+      `^package\\s+${packageName.replace(/\./g, '\\.')}\\.shared\\.application`,
+      'gm'
+    );
+    if (packageApplicationPattern.test(content)) {
+      content = content.replace(packageApplicationPattern, `package ${packageName}.${moduleName}.application`);
+      modified = true;
+    }
+    
+    // Replace shared.application.* imports with moduleName.application.*
+    const applicationPattern = new RegExp(`${packageName.replace(/\./g, '\\.')}\\.shared\\.application\\.`, 'g');
+    if (applicationPattern.test(content)) {
+      content = content.replace(applicationPattern, `${packageName}.${moduleName}.application.`);
       modified = true;
     }
     

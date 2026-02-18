@@ -50,6 +50,21 @@ class SharedGenerator {
     
     // Generate filters
     await this.generateFilters(sharedBasePath);
+    
+    // Generate application layer directories for shared DTOs and events
+    await this.generateApplicationDirectories(sharedBasePath);
+  }
+
+  async generateApplicationDirectories(basePath) {
+    const applicationPath = path.join(basePath, 'application');
+    
+    // Create dtos directory
+    const dtosPath = path.join(applicationPath, 'dtos');
+    await fs.ensureDir(dtosPath);
+    
+    // Create events directory
+    const eventsPath = path.join(applicationPath, 'events');
+    await fs.ensureDir(eventsPath);
   }
 
   async generatePackageInfo(basePath) {
