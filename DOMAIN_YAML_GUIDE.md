@@ -396,6 +396,292 @@ fields:
 
 ---
 
+### Control de Visibilidad de Campos
+
+Eva4j permite controlar qué campos participan en constructores, DTOs de creación y DTOs de respuesta mediante dos flags opcionales: **`readOnly`** y **`hidden`**.
+
+#### 📋 Matriz de Comportamiento
+
+| Campo | Constructor Negocio | Constructor Completo | CreateDto | ResponseDto |
+|-------|---------------------|----------------------|-----------|-------------|
+| **Normal** | ✅ Incluido | ✅ Incluido | ✅ Incluido | ✅ Incluido |
+| **`readOnly: true`** | ❌ Excluido | ✅ Incluido | ❌ Excluido | ✅ Incluido |
+| **`hidden: true`** | ✅ Incluido | ✅ Incluido | ✅ Incluido | ❌ Excluido |
+| **Ambos flags** | ❌ Excluido | ✅ Incluido | ❌ Excluido | ❌ Excluido |
+
+#### 🔒 `readOnly: true` - Campos Calculados/Derivados
+
+Marca campos que **se calculan internamente** y no deben pasarse como parámetros en constructores o DTOs de creación.
+
+**Casos de uso típicos:**
+- Totales calculados (suma de items)
+- Contadores automáticos
+- Campos derivados de otros datos
+- Timestamps calculados
+
+**Sintaxis:**
+```yaml
+fields:
+  - name: totalAmount
+    type: BigDecimal
+    readOnly: true          # ✅ No en constructor ni CreateDto
+```
+
+**Ejemplo completo:**
+```yaml
+entities:
+  - name: order
+    isRoot: true
+    tableName: orders
+    audit:
+      enabled: true
+    fields:
+      - name: id
+        type: String
+      - name: orderNumber
+        type: String
+      - name: customerId
+        type: String
+      # Campo readOnly - calculado de los items
+      - name: totalAmount
+        type: BigDecimal
+        readOnly: true
+      # Campo readOnly - contador de items
+      - name: itemCount
+        type: Integer
+        readOnly: true
+```
+
+**Código generado:**
+```java
+// Constructor de negocio - SIN fields readOnly
+public Order(String orderNumber, String customerId) {
+    this.orderNumber = orderNumber;
+    this.customerId = customerId;
+    // totalAmount e itemCount NO están aquí
+}
+
+// Constructor completo - CON fields readOnly (reconstrucción desde DB)
+public Order(String id, String orderNumber, String customerId,
+             BigDecimal totalAmount, Integer itemCount, 
+             LocalDateTime createdAt, LocalDateTime updatedAt) {
+    // Todos los campos incluidos
+}
+
+// CreateDto - SIN fields readOnly
+public record CreateOrderDto(
+    String orderNumber,
+    String customerId
+    // totalAmount e itemCount NO están aquí
+) {}
+
+// ResponseDto - CON fields readOnly (mostrar valores calculados)
+public record OrderResponseDto(
+    String id,
+    String orderNumber,
+    String customerId,
+    BigDecimal totalAmount,    // ✅ Incluido
+    Integer itemCount,         // ✅ Incluido
+    LocalDateTime createdAt,
+    LocalDateTime updatedAt
+) {}
+```
+
+#### 🙈 `hidden: true` - Campos Sensibles/Internos
+
+Marca campos que **NO deben exponerse** en respuestas de API pero sí pueden recibirse en creación.
+
+**Casos de uso típicos:**
+- Passwords/hashes de seguridad
+- Tokens internos
+- Secrets y claves de API
+- Información sensible (SSN, datos privados)
+- Flags de control interno
+
+**Sintaxis:**
+```yaml
+fields:
+  - name: passwordHash
+    type: String
+    hidden: true           # ✅ No en ResponseDto
+```
+
+**Ejemplo completo:**
+```yaml
+entities:
+  - name: user
+    isRoot: true
+    tableName: users
+    audit:
+      enabled: true
+      trackUser: true
+    fields:
+      - name: id
+        type: String
+      - name: username
+        type: String
+      - name: email
+        type: String
+      # Campo hidden - NO en ResponseDto
+      - name: passwordHash
+        type: String
+        hidden: true
+      # Campo hidden - token interno
+      - name: resetPasswordToken
+        type: String
+        hidden: true
+```
+
+**Código generado:**
+```java
+// Constructor de negocio - CON fields hidden
+public User(String username, String email, 
+            String passwordHash, String resetPasswordToken) {
+    this.username = username;
+    this.email = email;
+    this.passwordHash = passwordHash;
+    this.resetPasswordToken = resetPasswordToken;
+}
+
+// CreateDto - CON fields hidden (para recibirlos en creación)
+public record CreateUserDto(
+    String username,
+    String email,
+    String passwordHash,         // ✅ Se puede recibir
+    String resetPasswordToken    // ✅ Se puede recibir
+) {}
+
+// ResponseDto - SIN fields hidden (proteger datos sensibles)
+public record UserResponseDto(
+    String id,
+    String username,
+    String email,
+    LocalDateTime createdAt,
+    LocalDateTime updatedAt
+    // passwordHash y resetPasswordToken NO están aquí
+) {}
+```
+
+#### 🔐 Combinando Ambos Flags
+
+Puedes combinar `readOnly` y `hidden` para campos que son **calculados internamente Y sensibles**.
+
+**Ejemplo:**
+```yaml
+fields:
+  - name: isLocked
+    type: Boolean
+    readOnly: true     # Calculado internamente
+    hidden: true       # NO exponer en API
+```
+
+**Resultado:**
+- ❌ NO en constructor de negocio (es readOnly)
+- ❌ NO en CreateDto (es readOnly)
+- ❌ NO en ResponseDto (es hidden)
+- ✅ SÍ en constructor completo (para reconstrucción desde DB)
+
+#### 📘 Ejemplo Completo: Sistema de Órdenes
+
+```yaml
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          
+          # Campos normales
+          - name: orderNumber
+            type: String
+          - name: customerId
+            type: String
+          - name: status
+            type: String
+          
+          # Campos readOnly (calculados)
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true               # Suma de items
+          - name: itemCount
+            type: Integer
+            readOnly: true               # Cuenta de items
+          
+          # Campo hidden (interno)
+          - name: processingToken
+            type: String
+            hidden: true                 # Token de procesamiento interno
+          
+          # Campo readOnly + hidden (calculado e interno)
+          - name: riskScore
+            type: Integer
+            readOnly: true
+            hidden: true                 # Puntaje de riesgo interno
+```
+
+**Constructor de negocio generado:**
+```java
+public Order(String orderNumber, String customerId, 
+             String status, String processingToken) {
+    // totalAmount, itemCount, riskScore NO están (readOnly)
+    // processingToken SÍ está (solo hidden, no readOnly)
+}
+```
+
+**CreateOrderDto generado:**
+```java
+public record CreateOrderDto(
+    String orderNumber,
+    String customerId,
+    String status,
+    String processingToken    // ✅ hidden pero SÍ en create
+    // totalAmount, itemCount, riskScore NO están (readOnly)
+) {}
+```
+
+**OrderResponseDto generado:**
+```java
+public record OrderResponseDto(
+    String id,
+    String orderNumber,
+    String customerId,
+    String status,
+    BigDecimal totalAmount,   // ✅ readOnly pero SÍ en response
+    Integer itemCount,        // ✅ readOnly pero SÍ en response
+    LocalDateTime createdAt,
+    LocalDateTime updatedAt
+    // processingToken NO está (hidden)
+    // riskScore NO está (hidden)
+) {}
+```
+
+#### ⚡ Comportamiento por Defecto
+
+Si no especificas `readOnly` ni `hidden`:
+- ✅ El comportamiento actual se mantiene sin cambios
+- ✅ Campos normales aparecen en todos lados
+- ✅ Solo los campos de auditoría (`createdBy`, `updatedBy`) se excluyen automáticamente de ResponseDto
+
+```yaml
+# Sin flags - comportamiento estándar
+fields:
+  - name: productName
+    type: String          # ✅ En constructor, CreateDto Y ResponseDto
+```
+
+#### 📚 Ver También
+
+- **Ejemplo completo:** [examples/domain-field-visibility.yaml](../examples/domain-field-visibility.yaml)
+- **Campos de auditoría:** Los campos `createdAt`, `updatedAt`, `createdBy`, `updatedBy` siguen su propio comportamiento especial definido en la sección de Auditoría
+
+---
+
 ### Auditoría Automática
 
 eva4j soporta dos niveles de auditoría automática de entidades:

@@ -543,6 +543,78 @@ public record UserResponseDto(
 | Instant | Instant | Timestamp UTC |
 | UUID | UUID | Identificador único |
 
+### Propiedades de Campo
+
+Los campos en domain.yaml soportan las siguientes propiedades:
+
+| Propiedad | Tipo | Default | Descripción |
+|-----------|------|---------|-------------|
+| `name` | String | - | Nombre del campo (obligatorio) |
+| `type` | String | - | Tipo de dato Java (obligatorio) |
+| `annotations` | Array | `[]` | Anotaciones JPA personalizadas |
+| `isValueObject` | Boolean | `false` | Marca explícita de Value Object |
+| `isEmbedded` | Boolean | `false` | Marca explícita de @Embedded |
+| `enumValues` | Array | `[]` | Valores inline de enum |
+| **`readOnly`** | Boolean | `false` | **Excluye del constructor de negocio y CreateDto** |
+| **`hidden`** | Boolean | `false` | **Excluye del ResponseDto** |
+
+#### Flags de Visibilidad: `readOnly` y `hidden`
+
+**`readOnly: true`** - Campos calculados/derivados
+- ❌ Excluido de: Constructor de negocio, CreateDto
+- ✅ Incluido en: Constructor completo, ResponseDto
+- **Uso:** Totales calculados, contadores, campos derivados
+
+```yaml
+fields:
+  - name: totalAmount
+    type: BigDecimal
+    readOnly: true        # Calculado de la suma de items
+```
+
+**`hidden: true`** - Campos sensibles/internos
+- ❌ Excluido de: ResponseDto
+- ✅ Incluido en: Constructor de negocio, CreateDto
+- **Uso:** Passwords, tokens, secrets, información sensible
+
+```yaml
+fields:
+  - name: passwordHash
+    type: String
+    hidden: true          # No exponer en API
+```
+
+**Matriz de comportamiento:**
+
+| Campo | Constructor Negocio | CreateDto | ResponseDto |
+|-------|---------------------|-----------|-------------|
+| Normal | ✅ | ✅ | ✅ |
+| `readOnly: true` | ❌ | ❌ | ✅ |
+| `hidden: true` | ✅ | ✅ | ❌ |
+| Ambos flags | ❌ | ❌ | ❌ |
+
+**Ejemplo práctico:**
+```yaml
+entities:
+  - name: order
+    fields:
+      - name: orderNumber
+        type: String                # ✅ Normal - en todos lados
+      
+      - name: totalAmount
+        type: BigDecimal
+        readOnly: true              # ⚙️ Calculado - no en constructor
+      
+      - name: processingToken
+        type: String
+        hidden: true                # 🔒 Sensible - no en respuesta
+      
+      - name: internalFlag
+        type: Boolean
+        readOnly: true              # 🔐 Calculado Y sensible
+        hidden: true
+```
+
 ### Tipos de Relaciones
 
 - `OneToOne` - Relación uno a uno
@@ -572,15 +644,18 @@ public record UserResponseDto(
 ### Al Generar Mappers
 
 1. **NUNCA** mapear campos de auditoría (createdAt, updatedAt, createdBy, updatedBy)
-2. **SIEMPRE** filtrar campos antes de usar `.builder()`
-3. **SIEMPRE** mapear bidireccionalidad en relaciones
+2. **NUNCA** mapear campos readOnly en métodos de creación (fromCommand, fromDto)
+3. **NUNCA** mapear campos hidden en métodos de respuesta (toDto, toResponseDto)
+4. **SIEMPRE** filtrar campos antes de usar `.builder()`
+5. **SIEMPRE** mapear bidireccionalidad en relaciones
 
 ### Al Generar DTOs
 
 1. **NUNCA** exponer `createdBy` y `updatedBy` en respuestas
-2. **SIEMPRE** exponer `createdAt` y `updatedAt`
-3. **SIEMPRE** usar Java Records para DTOs
-4. **SIEMPRE** filtrar campos al crear contextos de template
+2. **NUNCA** incluir campos `readOnly` en CreateDto
+3. **NUNCA** incluir campos `hidden` en ResponseDto
+4. **SIEMPRE** usar Java Records para DTOs
+5. **SIEMPRE** filtrar campos según flags de visibilidad
 
 ---
 
@@ -677,13 +752,17 @@ Al generar o modificar código, verificar:
 - [ ] Métodos de negocio con **validaciones explícitas**
 - [ ] Entidades JPA con **Lombok y herencia correcta**
 - [ ] Mappers **excluyen campos de auditoría**
+- [ ] Mappers **excluyen campos readOnly en creación**
+- [ ] Mappers **excluyen campos hidden en respuestas**
 - [ ] DTOs de respuesta **sin createdBy/updatedBy**
+- [ ] DTOs de respuesta **sin campos hidden**
+- [ ] DTOs de creación **sin campos readOnly**
 - [ ] Relaciones bidireccionales con métodos `assign*()`
 - [ ] Value Objects **inmutables**
 - [ ] Configuración de auditoría cuando `trackUser: true`
 
 ---
 
-**Última actualización:** 2026-02-11  
+**Última actualización:** 2026-02-19  
 **Versión de eva4j:** 1.x  
 **Estado:** Documento de referencia para agentes IA

@@ -65,6 +65,11 @@ function parseAggregate(aggregateData) {
   // Generate aggregate methods based on relationships
   const aggregateMethods = generateAggregateMethods(parsedRoot, secondaryEntities);
   
+  // Merge imports from aggregate method parameters into root entity
+  const methodImports = generateAggregateMethodImports(aggregateMethods);
+  const allRootImports = new Set([...parsedRoot.imports, ...methodImports]);
+  parsedRoot.imports = Array.from(allRootImports).sort();
+  
   return {
     name: toPascalCase(name),
     packageName: aggregateData.package || '',
@@ -202,7 +207,7 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
  * @returns {Object} Parsed property
  */
 function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
-  const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues } = propData;
+  const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues, readOnly = false, hidden = false } = propData;
   
   const javaType = mapYamlTypeToJava(type, enumValues);
   const fieldName = toCamelCase(name);
@@ -239,7 +244,9 @@ function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
     isEnum: !!enumValues || isEnumType,
     isCollection,
     collectionElementType,
-    columnAnnotations: extractColumnAnnotations(annotations)
+    columnAnnotations: extractColumnAnnotations(annotations),
+    readOnly: readOnly,
+    hidden: hidden
   };
 }
 
@@ -644,6 +651,49 @@ function generateEntityImports(fields, relationships, enums = [], aggregateEnums
 }
 
 /**
+ * Generate imports from aggregate method parameters
+ * @param {Array} aggregateMethods - Array of aggregate methods
+ * @returns {Array} Import statements for parameter types
+ */
+function generateAggregateMethodImports(aggregateMethods) {
+  const imports = new Set();
+  
+  if (!aggregateMethods || aggregateMethods.length === 0) {
+    return [];
+  }
+  
+  aggregateMethods.forEach(method => {
+    if (method.parameters && method.parameters.length > 0) {
+      method.parameters.forEach(param => {
+        // Check for date/time types
+        if (param.type.includes('LocalDate') && !param.type.includes('LocalDateTime')) {
+          imports.add('import java.time.LocalDate;');
+        }
+        if (param.type.includes('LocalDateTime')) {
+          imports.add('import java.time.LocalDateTime;');
+        }
+        if (param.type.includes('LocalTime')) {
+          imports.add('import java.time.LocalTime;');
+        }
+        if (param.type.includes('Instant')) {
+          imports.add('import java.time.Instant;');
+        }
+        // Check for numeric types
+        if (param.type.includes('BigDecimal')) {
+          imports.add('import java.math.BigDecimal;');
+        }
+        // Check for UUID
+        if (param.type.includes('UUID')) {
+          imports.add('import java.util.UUID;');
+        }
+      });
+    }
+  });
+  
+  return Array.from(imports).sort();
+}
+
+/**
  * Generate imports for value object
  * @param {Array} fields - Value object fields
  * @param {Array} methods - Value object methods
@@ -732,5 +782,6 @@ module.exports = {
   parseEntity,
   parseValueObject,
   generateAggregateMethods,
-  generateEntityImports
+  generateEntityImports,
+  generateAggregateMethodImports
 };

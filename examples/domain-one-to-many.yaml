@@ -40,7 +40,7 @@ aggregates:
           trackUser: true    # Agrega createdBy, updatedBy
         fields:
           - name: id
-            type: Long
+            type: String
           - name: productId
             type: String
           - name: productName

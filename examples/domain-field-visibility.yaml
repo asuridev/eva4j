@@ -1,0 +1,235 @@
+# Domain YAML Example: Field Visibility Control
+# This example demonstrates the use of readOnly and hidden flags
+# to control field visibility in constructors and DTOs
+
+aggregates:
+  # User Management Aggregate
+  - name: User
+    entities:
+      - name: user
+        isRoot: true
+        tableName: users
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          
+          # Normal fields - appear everywhere
+          - name: username
+            type: String
+          
+          - name: email
+            type: String
+          
+          # Hidden field - NOT in ResponseDto
+          # Use case: Sensitive data like password hashes
+          - name: passwordHash
+            type: String
+            hidden: true
+          
+          # Hidden field - NOT in ResponseDto
+          # Use case: Internal security tokens
+          - name: resetPasswordToken
+            type: String
+            hidden: true
+          
+          # Readonly field - NOT in constructor or CreateDto
+          # Use case: Auto-calculated field (login count)
+          - name: loginCount
+            type: Integer
+            readOnly: true
+          
+          # Readonly field - NOT in constructor or CreateDto
+          # Use case: Calculated timestamp
+          - name: lastLoginAt
+            type: LocalDateTime
+            readOnly: true
+          
+          # Both hidden AND readonly
+          # Use case: Internal calculated sensitive flag
+          - name: isLocked
+            type: Boolean
+            hidden: true
+            readOnly: true
+
+  # Order Management Aggregate
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          
+          - name: orderNumber
+            type: String
+          
+          - name: customerId
+            type: String
+          
+          - name: status
+            type: String
+          
+          # Readonly field - calculated from order items
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+          
+          # Readonly field - count of items
+          - name: itemCount
+            type: Integer
+            readOnly: true
+          
+          # Hidden field - internal processing flag
+          - name: processingToken
+            type: String
+            hidden: true
+        
+        relationships:
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+      
+      - name: orderItem
+        tableName: order_items
+        fields:
+          - name: id
+            type: String
+          
+          - name: productId
+            type: String
+          
+          - name: quantity
+            type: Integer
+          
+          - name: unitPrice
+            type: BigDecimal
+          
+          # Readonly field - calculated from quantity * unitPrice
+          - name: subtotal
+            type: BigDecimal
+            readOnly: true
+        
+        relationships:
+          - type: ManyToOne
+            target: Order
+            isInverse: true
+
+  # Product Catalog Aggregate
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        tableName: products
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          
+          - name: name
+            type: String
+          
+          - name: description
+            type: String
+          
+          - name: price
+            type: BigDecimal
+          
+          # Readonly field - calculated from inventory movements
+          - name: stockLevel
+            type: Integer
+            readOnly: true
+          
+          # Readonly field - last updated stock timestamp
+          - name: stockUpdatedAt
+            type: LocalDateTime
+            readOnly: true
+          
+          # Hidden field - internal cost (not exposed to customers)
+          - name: internalCost
+            type: BigDecimal
+            hidden: true
+          
+          # Hidden field - supplier information (internal only)
+          - name: supplierCode
+            type: String
+            hidden: true
+
+  # Session Management Aggregate
+  - name: Session
+    entities:
+      - name: session
+        isRoot: true
+        tableName: sessions
+        fields:
+          - name: id
+            type: String
+          
+          - name: userId
+            type: String
+          
+          # Hidden field - session token should never be exposed
+          - name: token
+            type: String
+            hidden: true
+          
+          # Readonly field - calculated expiration time
+          - name: expiresAt
+            type: LocalDateTime
+            readOnly: true
+          
+          # Both hidden AND readonly - internal security check
+          - name: isRevoked
+            type: Boolean
+            hidden: true
+            readOnly: true
+          
+          - name: createdAt
+            type: LocalDateTime
+          
+          - name: lastAccessedAt
+            type: LocalDateTime
+            readOnly: true
+
+# Expected Generated Code Behavior:
+#
+# 1. User Entity - Creation Constructor:
+#    public User(String username, String email, String passwordHash, String resetPasswordToken)
+#    // Excludes: id (auto), audit fields (auto), loginCount (readOnly), lastLoginAt (readOnly), isLocked (readOnly)
+#
+# 2. CreateUserDto:
+#    public record CreateUserDto(String username, String email, String passwordHash, String resetPasswordToken)
+#    // Excludes: id (auto), audit fields (auto), loginCount (readOnly), lastLoginAt (readOnly), isLocked (readOnly)
+#
+# 3. UserResponseDto:
+#    public record UserResponseDto(String id, String username, String email, Integer loginCount, 
+#                                  LocalDateTime lastLoginAt, LocalDateTime createdAt, LocalDateTime updatedAt)
+#    // Excludes: passwordHash (hidden), resetPasswordToken (hidden), isLocked (hidden), 
+#    //           createdBy (audit), updatedBy (audit)
+#
+# 4. Order Entity - Creation Constructor:
+#    public Order(String orderNumber, String customerId, String status, String processingToken)
+#    // Excludes: id (auto), audit fields (auto), totalAmount (readOnly), itemCount (readOnly)
+#
+# 5. OrderResponseDto:
+#    public record OrderResponseDto(String id, String orderNumber, String customerId, String status,
+#                                   BigDecimal totalAmount, Integer itemCount, 
+#                                   LocalDateTime createdAt, LocalDateTime updatedAt)
+#    // Excludes: processingToken (hidden), createdBy (audit), updatedBy (audit)
+#
+# 6. Session Entity - Creation Constructor:
+#    public Session(String userId, String token)
+#    // Excludes: id (auto), expiresAt (readOnly), isRevoked (readOnly), lastAccessedAt (readOnly)
+#
+# 7. SessionResponseDto:
+#    public record SessionResponseDto(String id, String userId, LocalDateTime expiresAt,
+#                                     LocalDateTime createdAt, LocalDateTime lastAccessedAt)
+#    // Excludes: token (hidden), isRevoked (hidden)

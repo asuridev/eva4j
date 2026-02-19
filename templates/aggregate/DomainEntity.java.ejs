@@ -35,9 +35,9 @@ public class <%= name %> {
 <% }); %>
     }
 
-<% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'); %>
+<% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly); %>
 <% if (creationFields.length > 0) { %>
-    // Constructor for new entity creation (without id and audit fields)
+    // Constructor for new entity creation (without id, audit fields, and readOnly fields)
     public <%= name %>(<% let paramIdx = 0; %><% creationFields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %>) {
 <% creationFields.forEach(field => { %>
         this.<%= field.name %> = <%= field.name %>;

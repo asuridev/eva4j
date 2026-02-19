@@ -542,9 +542,9 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const idField = rootEntity.fields[0];
   const idType = idField.javaType;
   
-  // Filter command fields (exclude id and audit fields)
+  // Filter command fields (exclude id, audit fields, and readOnly fields)
   const commandFields = rootEntity.fields.filter(f => 
-    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
   );
   
   // Build enriched OneToMany relationships with recursive nested data
@@ -603,15 +603,15 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const resourceNameCamel = toCamelCase(aggregateName);
   const resourceNameKebab = toKebabCase(aggregateName);
   
-  // Filter audit user fields from response DTOs
+  // Filter audit user fields and hidden fields from response DTOs
   const responseFields = rootEntity.fields.filter(f => 
-    f.name !== 'createdBy' && f.name !== 'updatedBy'
+    f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden
   );
   
   const responseSecondaryEntities = secondaryEntities.map(entity => ({
     ...entity,
     responseFields: entity.fields.filter(f => 
-      f.name !== 'createdBy' && f.name !== 'updatedBy'
+      f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden
     )
   }));
   
@@ -706,7 +706,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   // 5. Generate DTOs
   const responseDtoContext = {
     ...baseContext,
-    allFields: rootEntity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy'),
+    allFields: rootEntity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden),
     relationships: rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse)
   };
   
@@ -731,7 +731,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       packageName,
       moduleName,
       entityName: entity.name,
-      fields: entity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy'),
+      fields: entity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden),
       nestedRelationships,
       hasNestedRelationships: nestedRelationships.length > 0,
       hasValueObjects: entity.fields.some(f => f.isValueObject),
@@ -752,7 +752,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   for (const entity of secondaryEntities) {
     console.log(`[DEBUG] Generating CreateItemDto for entity: ${entity.name}`);
     const createFields = entity.fields.filter(f => 
-      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
     );
     
     // Get nested relationships for this entity
@@ -811,7 +811,7 @@ async function generatePostmanCollection(
   const idType = idField.javaType;
   
   const commandFields = rootEntity.fields.filter(f => 
-    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
   );
   
   const oneToManyRelationships = enrichRelationshipsRecursively(
