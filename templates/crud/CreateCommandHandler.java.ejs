@@ -30,10 +30,49 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
     public void handle(Create<%= aggregateName %>Command command) {
         log.info("Handling Create<%= aggregateName %>Command: {}", command);
         
-        // Build <%= aggregateName %> aggregate from command using mapper
-        <%= aggregateName %> entity = mapper.fromCommand(command);
+        // Create root entity with main fields only
+        <%= aggregateName %> entity = new <%= aggregateName %>(
+<% if (commandFields) { %>
+<% commandFields.forEach((field, idx) => { %>
+            command.<%= field.name %>()<%= idx < commandFields.length - 1 ? ',' : '' %>
+<% }); %>
+<% } %>
+        );
         
-        // Save aggregate
+<% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
+<% oneToManyRelationships.forEach(rel => { %>
+        // Add <%= rel.fieldName %> using aggregate method (executes business validations)
+        if (command.<%= rel.fieldName %>() != null) {
+            command.<%= rel.fieldName %>().forEach(itemDto -> {
+  <% if (!rel.hasNestedRelationships) { %>
+                entity.add<%= rel.targetEntityName %>(
+<% rel.fields.forEach((field, idx) => { %>
+                    itemDto.<%= field.name %>()<%= idx < rel.fields.length - 1 ? ',' : '' %>
+<% }); %>
+                );
+  <% } else { %>
+                // Complex nested relationships - use mapper helper
+                entity.add<%= rel.targetEntityName %>(mapper.fromDto<%= rel.targetEntityName %>(itemDto));
+  <% } %>
+            });
+        }
+        
+<% }); %>
+<% } %>
+<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
+<% oneToOneRelationships.forEach(rel => { %>
+        // Assign <%= rel.fieldName %> using aggregate method (executes business validations)
+        if (command.<%= rel.fieldName %>() != null) {
+            entity.assign<%= rel.targetEntityName %>(
+<% rel.fields.forEach((field, idx) => { %>
+                command.<%= rel.fieldName %>().<%= field.name %>()<%= idx < rel.fields.length - 1 ? ',' : '' %>
+<% }); %>
+            );
+        }
+        
+<% }); %>
+<% } %>
+        // Persist aggregate
         <%= aggregateName %> saved = repository.save(entity);
         log.info("<%= aggregateName %> created successfully with id: {}", saved.getId());
     }

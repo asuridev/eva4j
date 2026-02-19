@@ -44,10 +44,20 @@ public class <%= aggregateName %>ApplicationMapper {
         // Map <%= rel.fieldName %> collection
         if (command.<%= rel.fieldName %>() != null) {
             command.<%= rel.fieldName %>().forEach(itemDto -> {
+  <% if (!rel.hasNestedRelationships) { %>
+                // Direct call to factory method with parameters
+                entity.add<%= rel.targetEntityName %>(
+<% rel.fields.forEach((field, idx) => { %>
+                    itemDto.<%= field.name %>()<%= idx < rel.fields.length - 1 ? ',' : '' %>
+<% }); %>
+                );
+  <% } else { %>
+                // Complex nested relationships - use helper method
                 <%= rel.targetEntityName %> item = fromDto<%= rel.targetEntityName %>(itemDto);
                 if (item != null) {
                     entity.add<%= rel.targetEntityName %>(item);
                 }
+  <% } %>
             });
         }
         
@@ -57,8 +67,12 @@ public class <%= aggregateName %>ApplicationMapper {
 <% oneToOneRelationships.forEach(rel => { %>
         // Map <%= rel.fieldName %> OneToOne relationship
         if (command.<%= rel.fieldName %>() != null) {
-            <%= rel.targetEntityName %> item = fromDto<%= rel.targetEntityName %>(command.<%= rel.fieldName %>());
-            entity.assign<%= rel.targetEntityName %>(item);
+            // Call factory method with parameters
+            entity.assign<%= rel.targetEntityName %>(
+<% rel.fields.forEach((field, idx) => { %>
+                command.<%= rel.fieldName %>().<%= field.name %>()<%= idx < rel.fields.length - 1 ? ',' : '' %>
+<% }); %>
+            );
         }
         
 <% }); %>
@@ -70,8 +84,9 @@ public class <%= aggregateName %>ApplicationMapper {
     
     /**
      * Convert Create<%= rel.targetEntityName %>Dto to <%= rel.targetEntityName %> domain entity
+     * Public for use by CommandHandler when needed
      */
-    private <%= rel.targetEntityName %> fromDto<%= rel.targetEntityName %>(Create<%= rel.targetEntityName %>Dto dto) {
+    public <%= rel.targetEntityName %> fromDto<%= rel.targetEntityName %>(Create<%= rel.targetEntityName %>Dto dto) {
         if (dto == null) return null;
         
         <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>(
@@ -103,8 +118,9 @@ public class <%= aggregateName %>ApplicationMapper {
     
     /**
      * Convert Create<%= rel.targetEntityName %>Dto to <%= rel.targetEntityName %> domain entity
+     * Public for use by CommandHandler when needed
      */
-    private <%= rel.targetEntityName %> fromDto<%= rel.targetEntityName %>(Create<%= rel.targetEntityName %>Dto dto) {
+    public <%= rel.targetEntityName %> fromDto<%= rel.targetEntityName %>(Create<%= rel.targetEntityName %>Dto dto) {
         if (dto == null) return null;
         
         <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>(

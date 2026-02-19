@@ -86,11 +86,32 @@ public class <%= name %> {
   <% } %>
 <% }); %>
 
-    // Aggregate business methods
-<% aggregateMethods.forEach(method => { %>
+    // Aggregate business methods (factory methods for creating entities)
+<% aggregateMethods.filter(m => !m.isOverload).forEach(method => { %>
     
     /**
      * <%= method.name %>
+     <% if (method.isFactory) { %>
+     * Creates entity internally and adds it to the aggregate
+     * Add your business validation rules here before entity creation
+     <% } %>
+     */
+    public <%- method.returnType %> <%= method.name %>(<% method.parameters.forEach((param, idx) => { %><%- param.type %> <%= param.name %><%= idx < method.parameters.length - 1 ? ', ' : '' %><% }); %>) {
+        <%- method.body %>
+    }
+<% }); %>
+
+    // Overloaded methods (alternative signatures)
+<% aggregateMethods.filter(m => m.isOverload).forEach(method => { %>
+    
+    /**
+     * <%= method.name %> - Overload
+     <% if (method.isFactory) { %>
+     * Creates entity internally and assigns/adds it to the aggregate
+     * Add your business validation rules here before entity creation
+     <% } else { %>
+     * Adds an existing entity (for complex mapping scenarios)
+     <% } %>
      */
     public <%- method.returnType %> <%= method.name %>(<% method.parameters.forEach((param, idx) => { %><%- param.type %> <%= param.name %><%= idx < method.parameters.length - 1 ? ', ' : '' %><% }); %>) {
         <%- method.body %>

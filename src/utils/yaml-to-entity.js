@@ -384,16 +384,77 @@ function generateAggregateMethods(root, secondaryEntities) {
       const singularName = pluralize.singular(rel.fieldName);
       const entityName = rel.target;
       
-      // add method
-      methods.push({
-        name: `add${toPascalCase(singularName)}`,
-        returnType: 'void',
-        parameters: [{
-          name: toCamelCase(singularName),
-          type: entityName
-        }],
-        body: `this.${rel.fieldName}.add(${toCamelCase(singularName)});`
-      });
+      // Find secondary entity to extract its fields
+      const secondaryEntity = secondaryEntities.find(e => e.name === entityName);
+      
+      if (secondaryEntity) {
+        // Extract fields for parameters (exclude id, audit fields, inverse relationships)
+        const paramFields = secondaryEntity.fields.filter(f => 
+          f.name !== 'id' && 
+          f.name !== 'createdAt' && 
+          f.name !== 'updatedAt' && 
+          f.name !== 'createdBy' && 
+          f.name !== 'updatedBy'
+        );
+        
+        // Filter out inverse relationships
+        const paramRelationships = (secondaryEntity.relationships || []).filter(r => !r.isInverse);
+        
+        // Generate parameters array
+        const parameters = paramFields.map(f => ({
+          name: f.name,
+          type: f.javaType
+        }));
+        
+        // Add non-inverse relationships as parameters
+        paramRelationships.forEach(r => {
+          if (!r.isCollection) {
+            parameters.push({
+              name: r.fieldName,
+              type: r.javaType
+            });
+          }
+        });
+        
+        // Generate constructor arguments string
+        const constructorArgs = parameters.map(p => p.name).join(', ');
+        
+        // Generate method body that creates entity and adds it
+        const methodBody = `${entityName} entity = new ${entityName}(${constructorArgs});
+        this.${rel.fieldName}.add(entity);`;
+        
+        // add method with parameters (factory method)
+        methods.push({
+          name: `add${toPascalCase(singularName)}`,
+          returnType: 'void',
+          parameters: parameters,
+          body: methodBody,
+          isFactory: true
+        });
+        
+        // add method with entity (for complex cases and mappers)
+        methods.push({
+          name: `add${toPascalCase(singularName)}`,
+          returnType: 'void',
+          parameters: [{
+            name: toCamelCase(singularName),
+            type: entityName
+          }],
+          body: `this.${rel.fieldName}.add(${toCamelCase(singularName)});`,
+          isOverload: true
+        });
+      } else {
+        // Fallback to old behavior if entity not found
+        methods.push({
+          name: `add${toPascalCase(singularName)}`,
+          returnType: 'void',
+          parameters: [{
+            name: toCamelCase(singularName),
+            type: entityName
+          }],
+          body: `this.${rel.fieldName}.add(${toCamelCase(singularName)});`
+        });
+      }
       
       // remove method
       methods.push({
@@ -413,6 +474,64 @@ function generateAggregateMethods(root, secondaryEntities) {
         parameters: [],
         body: `return Collections.unmodifiableList(this.${rel.fieldName});`
       });
+    });
+  
+  // For each OneToOne relationship, generate assign method with overload
+  root.relationships
+    .filter(rel => rel.type === 'OneToOne' && rel.mappedBy)
+    .forEach(rel => {
+      const entityName = rel.target;
+      const fieldName = rel.fieldName;
+      
+      // Find secondary entity to extract its fields
+      const secondaryEntity = secondaryEntities.find(e => e.name === entityName);
+      
+      if (secondaryEntity) {
+        // Extract fields for parameters (exclude id, audit fields, inverse relationships)
+        const paramFields = secondaryEntity.fields.filter(f => 
+          f.name !== 'id' && 
+          f.name !== 'createdAt' && 
+          f.name !== 'updatedAt' && 
+          f.name !== 'createdBy' && 
+          f.name !== 'updatedBy'
+        );
+        
+        // Filter out inverse relationships
+        const paramRelationships = (secondaryEntity.relationships || []).filter(r => !r.isInverse);
+        
+        // Generate parameters array
+        const parameters = paramFields.map(f => ({
+          name: f.name,
+          type: f.javaType
+        }));
+        
+        // Add non-inverse relationships as parameters
+        paramRelationships.forEach(r => {
+          if (!r.isCollection) {
+            parameters.push({
+              name: r.fieldName,
+              type: r.javaType
+            });
+          }
+        });
+        
+        // Generate constructor arguments string
+        const constructorArgs = parameters.map(p => p.name).join(', ');
+        
+        // Generate method body that creates entity and assigns it
+        const methodBody = `${entityName} entity = new ${entityName}(${constructorArgs});
+        assign${toPascalCase(fieldName)}(entity);`;
+        
+        // assign method overload with parameters (factory method)
+        methods.push({
+          name: `assign${toPascalCase(fieldName)}`,
+          returnType: 'void',
+          parameters: parameters,
+          body: methodBody,
+          isFactory: true,
+          isOverload: true
+        });
+      }
     });
   
   return methods;
