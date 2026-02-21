@@ -7,7 +7,7 @@ const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath, toCamelCase, toKebabCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
-const { parseDomainYaml, generateEntityImports } = require('../utils/yaml-to-entity');
+const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
 const SharedGenerator = require('../generators/shared-generator');
 
 // Maximum depth for recursive relationship traversal
@@ -532,10 +532,39 @@ async function generateEntitiesCommand(moduleName) {
 }
 
 /**
+ * Replace domain VO types with Create<Vo>Dto for validated VOs.
+ * Adds originalVoType marker and prepends @Valid.
+ */
+function transformFieldsForApp(fields, validatedVoNames) {
+  return fields.map(f => {
+    if (f.isValueObject && validatedVoNames.has(f.javaType)) {
+      return {
+        ...f,
+        originalVoType: f.javaType,
+        javaType: `Create${f.javaType}Dto`,
+        validationAnnotations: ['@Valid', ...(f.validationAnnotations || [])]
+      };
+    }
+    return f;
+  });
+}
+
+/**
+ * Recursively transform rel.fields for app-layer contexts.
+ */
+function transformRelsForApp(rels, validatedVoNames) {
+  return (rels || []).map(rel => ({
+    ...rel,
+    fields: transformFieldsForApp(rel.fields || [], validatedVoNames),
+    nestedRelationships: transformRelsForApp(rel.nestedRelationships, validatedVoNames)
+  }));
+}
+
+/**
  * Generate CRUD resources for an aggregate root
  */
 async function generateCrudResources(aggregate, moduleName, moduleBasePath, packageName, apiVersion, generatedFiles) {
-  const { name: aggregateName, rootEntity, secondaryEntities } = aggregate;
+  const { name: aggregateName, rootEntity, secondaryEntities, valueObjects = [] } = aggregate;
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'crud');
   
   // Get ID field and type
@@ -546,6 +575,12 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const commandFields = rootEntity.fields.filter(f => 
     f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
   );
+
+  // Validated VOs: VOs where any field has validation annotations
+  const validatedVos = valueObjects.filter(vo =>
+    vo.fields.some(f => f.validationAnnotations && f.validationAnnotations.length > 0)
+  );
+  const validatedVoNames = new Set(validatedVos.map(vo => vo.name));
   
   // Build enriched OneToMany relationships with recursive nested data
   const oneToManyRelationships = enrichRelationshipsRecursively(
@@ -615,6 +650,14 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     )
   }));
   
+  // Apply app-layer field transformation (VO fields become Create<Vo>Dto types)
+  const commandFieldsApp = transformFieldsForApp(commandFields, validatedVoNames);
+  const oneToOneRelationshipsApp = oneToOneRelationships.map(rel => ({
+    ...rel,
+    fields: transformFieldsForApp(rel.fields || [], validatedVoNames)
+  }));
+  const oneToManyRelationshipsApp = transformRelsForApp(oneToManyRelationships, validatedVoNames);
+
   // Base context for all templates
   const baseContext = {
     packageName,
@@ -625,7 +668,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     responseFields,
     responseSecondaryEntities,
     idType,
-    commandFields,
+    commandFields: commandFieldsApp,
     oneToManyRelationships,
     oneToOneRelationships,
     hasValueObjects,
@@ -635,20 +678,53 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     resourceNameCamel,
     resourceNameKebab
   };
-  
-  // 1. Generate ApplicationMapper
+
+  // 0. Generate Create<VoName>Dto for validated Value Objects
+  for (const vo of validatedVos) {
+    const voDtoContext = {
+      packageName,
+      moduleName,
+      voName: vo.name,
+      fields: vo.fields,
+      hasEnums: (vo.imports || []).some(i => i.includes('.enums.')),
+      imports: [...(vo.imports || []), ...generateValidationImports(vo.fields)]
+    };
+    await renderAndWrite(
+      path.join(templatesDir, 'CreateValueObjectDto.java.ejs'),
+      path.join(moduleBasePath, 'application', 'dtos', `Create${vo.name}Dto.java`),
+      voDtoContext
+    );
+    generatedFiles.push({ type: 'DTO', name: `Create${vo.name}Dto`, path: `${moduleName}/application/dtos/Create${vo.name}Dto.java` });
+  }
+
+  // 1. Generate ApplicationMapper (uses transformed rels + validatedVos for helper methods)
   await renderAndWrite(
     path.join(templatesDir, 'ApplicationMapper.java.ejs'),
     path.join(moduleBasePath, 'application', 'mappers', `${aggregateName}ApplicationMapper.java`),
-    baseContext
+    {
+      ...baseContext,
+      commandFields: commandFieldsApp,
+      oneToOneRelationships: oneToOneRelationshipsApp,
+      oneToManyRelationships: oneToManyRelationshipsApp,
+      validatedVos
+    }
   );
   generatedFiles.push({ type: 'Application Mapper', name: `${aggregateName}ApplicationMapper`, path: `${moduleName}/application/mappers/${aggregateName}ApplicationMapper.java` });
   
   // 2. Generate Commands
+  const commandVoDtoImports = validatedVos
+    .filter(vo => commandFieldsApp.some(f => f.originalVoType === vo.name))
+    .map(vo => `import ${packageName}.${moduleName}.application.dtos.Create${vo.name}Dto;`);
+  const commandAppImports = [...new Set([
+    ...(rootEntity.imports || []),
+    ...generateValidationImports(commandFieldsApp),
+    ...commandVoDtoImports,
+    ...(commandFieldsApp.some(f => f.originalVoType) ? ['import jakarta.validation.Valid;'] : [])
+  ])];
   await renderAndWrite(
     path.join(templatesDir, 'CreateCommand.java.ejs'),
     path.join(moduleBasePath, 'application', 'commands', `Create${aggregateName}Command.java`),
-    baseContext
+    { ...baseContext, imports: commandAppImports }
   );
   generatedFiles.push({ type: 'Command', name: `Create${aggregateName}Command`, path: `${moduleName}/application/commands/Create${aggregateName}Command.java` });
   
@@ -678,7 +754,13 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   await renderAndWrite(
     path.join(templatesDir, 'CreateCommandHandler.java.ejs'),
     path.join(moduleBasePath, 'application', 'usecases', `Create${aggregateName}CommandHandler.java`),
-    baseContext
+    {
+      ...baseContext,
+      commandFields: commandFieldsApp,
+      oneToOneRelationships: oneToOneRelationshipsApp,
+      oneToManyRelationships: oneToManyRelationshipsApp,
+      validatedVos
+    }
   );
   generatedFiles.push({ type: 'Handler', name: `Create${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Create${aggregateName}CommandHandler.java` });
   
@@ -763,16 +845,26 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       new Set()
     );
     
+    const createFieldsApp = transformFieldsForApp(createFields, validatedVoNames);
+    const dtoVoDtoImports = validatedVos
+      .filter(vo => createFieldsApp.some(f => f.originalVoType === vo.name))
+      .map(vo => `import ${packageName}.${moduleName}.application.dtos.Create${vo.name}Dto;`);
+    const createDtoImports = [...new Set([
+      ...(entity.imports || []),
+      ...generateValidationImports(createFieldsApp),
+      ...dtoVoDtoImports,
+      ...(createFieldsApp.some(f => f.originalVoType) ? ['import jakarta.validation.Valid;'] : [])
+    ])];
     const createItemDtoContext = {
       packageName,
       moduleName,
       entityName: entity.name,
-      fields: createFields,
+      fields: createFieldsApp,
       nestedRelationships,
       hasNestedRelationships: nestedRelationships.length > 0,
       hasValueObjects: entity.fields.some(f => f.isValueObject),
       hasEnums: entity.enums && entity.enums.length > 0,
-      imports: entity.imports
+      imports: createDtoImports
     };
     
     await renderAndWrite(

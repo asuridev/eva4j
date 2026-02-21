@@ -493,11 +493,11 @@ public abstract class SoftDeletableEntity {
 
 ## Validaciones JSR-303
 
-### Descripción
+### Estado: ✅ IMPLEMENTADO
 
-Generación automática de validaciones Bean Validation en DTOs y entidades.
+Generación automática de anotaciones Bean Validation (JSR-303) en comandos de la capa de aplicación. Las validaciones **solo se aplican en el command** (`Create<Aggregate>Command`) y en los DTOs de creación (`Create<Entity>Dto`), **nunca en entidades de dominio** ni en campos con `readOnly: true`.
 
-### Sintaxis Propuesta
+### Sintaxis
 
 ```yaml
 fields:
@@ -538,7 +538,7 @@ private Integer age;
 | Auditoría de tiempo (`audit.enabled: true`) | ✅ Alta | 🟢 Baja | Ninguna | ✅ **IMPLEMENTADO** |
 | Auditoría de usuario (`audit.trackUser: true`) | ✅ Alta | 🟡 Media | Header X-User | ✅ **IMPLEMENTADO** |
 | Soft Delete | 🚧 Media | 🟢 Baja | Ninguna | 📋 Pendiente |
-| Validaciones JSR-303 | 📋 Baja | 🟡 Media | Hibernate Validator |
+| Validaciones JSR-303 | ✅ Alta | 🟡 Media | Hibernate Validator | ✅ **IMPLEMENTADO** |
 
 ---
 
@@ -551,6 +551,6 @@ private Integer age;
 
 ---
 
-**Última actualización:** 2026-02-03  
+**Última actualización:** 2026-02-21  
 **Versión de eva4j:** 1.x  
 **Estado:** Documento de planificación

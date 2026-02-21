@@ -5,7 +5,7 @@
 aggregates:
   - name: Invoice
     entities:
-      - name: invoice
+      - name: Invoice
         isRoot: true
         tableName: invoices
         auditable: true
@@ -49,7 +49,7 @@ aggregates:
             cascade: [ALL]
             fetch: LAZY
 
-      - name: invoiceItem
+      - name: InvoiceItem
         tableName: invoice_items
         fields:
           - name: id
@@ -68,7 +68,7 @@ aggregates:
             type: String
 
 
-      - name: payment
+      - name: Payment
         tableName: payments
         auditable: true
         fields:
@@ -86,7 +86,7 @@ aggregates:
             type: PaymentStatus
 
 
-      - name: invoiceNote
+      - name: InvoiceNote
         tableName: invoice_notes
         auditable: true
         fields:

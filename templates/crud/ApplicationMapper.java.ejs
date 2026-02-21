@@ -10,6 +10,12 @@ import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregate
 <% secondaryEntities.forEach(entity => { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= entity.name %>;
 <% }); %>
+<% if (validatedVos && validatedVos.length > 0) { %>
+<% validatedVos.forEach(vo => { %>
+import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= vo.name %>Dto;
+import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.<%= vo.name %>;
+<% }); %>
+<% } %>
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -34,7 +40,7 @@ public class <%= aggregateName %>ApplicationMapper {
         <%= aggregateName %> entity = new <%= aggregateName %>(
 <% if (commandFields) { %>
 <% commandFields.forEach((field, idx) => { %>
-            command.<%= field.name %>()<% if (idx < commandFields.length - 1) { %>,<% } %>
+            <% if (field.originalVoType) { %>to<%= field.originalVoType %>(command.<%= field.name %>())<% } else { %>command.<%= field.name %>()<% } %><% if (idx < commandFields.length - 1) { %>,<% } %>
 <% }); %>
 <% } %>
         );
@@ -48,7 +54,7 @@ public class <%= aggregateName %>ApplicationMapper {
                 // Direct call to factory method with parameters
                 entity.add<%= rel.targetEntityName %>(
 <% rel.fields.forEach((field, idx) => { %>
-                    itemDto.<%= field.name %>()<%= idx < rel.fields.length - 1 ? ',' : '' %>
+                    <% if (field.originalVoType) { %>to<%= field.originalVoType %>(itemDto.<%= field.name %>())<% } else { %>itemDto.<%= field.name %>()<% } %><%= idx < rel.fields.length - 1 ? ',' : '' %>
 <% }); %>
                 );
   <% } else { %>
@@ -70,7 +76,7 @@ public class <%= aggregateName %>ApplicationMapper {
             // Call factory method with parameters
             entity.assign<%= rel.targetEntityName %>(
 <% rel.fields.forEach((field, idx) => { %>
-                command.<%= rel.fieldName %>().<%= field.name %>()<%= idx < rel.fields.length - 1 ? ',' : '' %>
+                <% if (field.originalVoType) { %>to<%= field.originalVoType %>(command.<%= rel.fieldName %>().<%= field.name %>())<% } else { %>command.<%= rel.fieldName %>().<%= field.name %>()<% } %><%= idx < rel.fields.length - 1 ? ',' : '' %>
 <% }); %>
             );
         }
@@ -91,7 +97,7 @@ public class <%= aggregateName %>ApplicationMapper {
         
         <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>(
 <% rel.fields.forEach((field, idx) => { %>
-            dto.<%= field.name %>()<% if (idx < rel.fields.length - 1) { %>,<% } %>
+            <% if (field.originalVoType) { %>to<%= field.originalVoType %>(dto.<%= field.name %>())<% } else { %>dto.<%= field.name %>()<% } %><% if (idx < rel.fields.length - 1) { %>,<% } %>
 <% }); %>
         );
 <% if (rel.hasNestedRelationships && rel.nestedRelationships) { %>
@@ -125,11 +131,21 @@ public class <%= aggregateName %>ApplicationMapper {
         
         <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>(
 <% rel.fields.forEach((field, idx) => { %>
-            dto.<%= field.name %>()<% if (idx < rel.fields.length - 1) { %>,<% } %>
+            <% if (field.originalVoType) { %>to<%= field.originalVoType %>(dto.<%= field.name %>())<% } else { %>dto.<%= field.name %>()<% } %><% if (idx < rel.fields.length - 1) { %>,<% } %>
 <% }); %>
         );
         
         return entity;
+    }
+<% }); %>
+<% } %>
+<% if (validatedVos && validatedVos.length > 0) { %>
+
+    // ========== Value Object Conversion Helpers ==========
+<% validatedVos.forEach(vo => { %>
+    public <%= vo.name %> to<%= vo.name %>(Create<%= vo.name %>Dto dto) {
+        if (dto == null) return null;
+        return new <%= vo.name %>(<% vo.fields.forEach((f, idx) => { %>dto.<%= f.name %>()<%= idx < vo.fields.length - 1 ? ', ' : '' %><% }); %>);
     }
 <% }); %>
 <% } %>

@@ -5,7 +5,7 @@
 aggregates:
   - name: User
     entities:
-      - name: user
+      - name: User
         isRoot: true
         tableName: users
         audit:
@@ -29,11 +29,11 @@ aggregates:
         relationships:
           - type: OneToOne
             target: UserProfile
-            mappedBy: user
+            mappedBy: User
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
       
-      - name: userProfile
+      - name: UserProfile
         tableName: user_profiles
         audit:
           enabled: true      # Agrega createdAt, updatedAt
@@ -65,6 +65,9 @@ aggregates:
         fields:
           - name: street
             type: String
+            validations:
+              - type: NotBlank
+                message: "Street cannot be blank"
           - name: city
             type: String
           - name: state

@@ -10,6 +10,7 @@
 - [Entidades](#entidades)
 - [Value Objects](#value-objects)
 - [Enums](#enums)
+- [Validaciones JSR-303](#validaciones-jsr-303)
 - [Relaciones](#relaciones)
 - [Tipos de Datos](#tipos-de-datos)
 - [Ejemplos Completos](#ejemplos-completos)
@@ -679,6 +680,112 @@ fields:
 
 - **Ejemplo completo:** [examples/domain-field-visibility.yaml](../examples/domain-field-visibility.yaml)
 - **Campos de auditoría:** Los campos `createdAt`, `updatedAt`, `createdBy`, `updatedBy` siguen su propio comportamiento especial definido en la sección de Auditoría
+
+---
+
+### Validaciones JSR-303
+
+Eva4j soporta anotaciones Bean Validation (JSR-303/Jakarta Validation) en campos del `domain.yaml`. Las validaciones se generan **únicamente en la capa de aplicación**: en el `Create<Aggregate>Command` y en los `Create<Entity>Dto` de entidades secundarias. **No se aplican a entidades de dominio** ni a campos con `readOnly: true`.
+
+El import `jakarta.validation.constraints.*` se agrega automáticamente cuando se detecta al menos una validación en los campos del comando.
+
+#### Sintaxis
+
+```yaml
+fields:
+  - name: email
+    type: String
+    validations:
+      - type: NotBlank
+        message: "Email es requerido"
+      - type: Email
+        message: "Email inválido"
+
+  - name: age
+    type: Integer
+    validations:
+      - type: Min
+        value: 18
+        message: "Edad mínima 18 años"
+      - type: Max
+        value: 120
+
+  - name: username
+    type: String
+    validations:
+      - type: Size
+        min: 3
+        max: 50
+        message: "Username entre 3 y 50 caracteres"
+
+  - name: code
+    type: String
+    validations:
+      - type: Pattern
+        regexp: "^[A-Z]{3}-[0-9]{4}$"
+        message: "Formato inválido"
+
+  - name: price
+    type: BigDecimal
+    validations:
+      - type: Digits
+        integer: 10
+        fraction: 2
+```
+
+#### Propiedades por Tipo
+
+| Propiedad | Tipos que la usan | Descripción |
+|-----------|-------------------|-------------|
+| `type` | Todos | Nombre de la anotación (`NotNull`, `NotBlank`, `Email`, `Min`, `Max`, `Size`, `Pattern`, `Digits`, `Positive`, `Negative`, `Past`, `Future`, etc.) |
+| `message` | Todos (opcional) | Mensaje de error personalizado |
+| `value` | `Min`, `Max` | Valor límite numérico |
+| `min` | `Size` | Tamaño mínimo |
+| `max` | `Size` | Tamaño máximo |
+| `regexp` | `Pattern` | Expresión regular |
+| `integer` | `Digits` | Máximo de dígitos enteros |
+| `fraction` | `Digits` | Máximo de dígitos decimales |
+| `inclusive` | `DecimalMin`, `DecimalMax` | Si el límite es inclusivo |
+
+#### Anotaciones sin parámetros (solo `type` requerido)
+
+`NotNull`, `NotBlank`, `NotEmpty`, `Email`, `Positive`, `PositiveOrZero`, `Negative`, `NegativeOrZero`, `Past`, `PastOrPresent`, `Future`, `FutureOrPresent`, `AssertTrue`, `AssertFalse`
+
+#### Código generado
+
+Para un campo con validaciones:
+
+```yaml
+- name: email
+  type: String
+  validations:
+    - type: Email
+      message: "Email inválido"
+    - type: NotBlank
+      message: "Email es requerido"
+```
+
+Se genera en `CreateUserCommand.java`:
+
+```java
+import jakarta.validation.constraints.*;
+
+public record CreateUserCommand(
+    @Email(message = "Email inválido")
+    @NotBlank(message = "Email es requerido")
+    String email,
+    ...
+) implements Command {
+}
+```
+
+#### Reglas de aplicación
+
+- ✅ **Sí** se aplican en `Create<Aggregate>Command`
+- ✅ **Sí** se aplican en `Create<Entity>Dto` (entidades secundarias)
+- ❌ **No** se aplican a entidades de dominio (`Order.java`, etc.)
+- ❌ **No** se aplican a campos con `readOnly: true` (ya están excluidos del command)
+- ❌ **No** se aplican a campos con `hidden: true` si también son `readOnly: true`
 
 ---
 

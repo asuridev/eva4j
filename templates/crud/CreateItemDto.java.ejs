@@ -15,6 +15,9 @@ import java.util.List;
 
 public record Create<%= entityName %>Dto(
 <% fields.forEach((field, idx) => { %>
+<% (field.validationAnnotations || []).forEach(annotation => { %>
+    <%- annotation %>
+<% }); %>
     <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1 || hasNestedRelationships) { %>,<% } %>
 <% }); %>
 <% if (hasNestedRelationships) { %>

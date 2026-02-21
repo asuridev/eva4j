@@ -66,7 +66,7 @@ function parseAggregate(aggregateData) {
   const aggregateMethods = generateAggregateMethods(parsedRoot, secondaryEntities);
   
   // Merge imports from aggregate method parameters into root entity
-  const methodImports = generateAggregateMethodImports(aggregateMethods);
+  const methodImports = generateAggregateMethodImports(aggregateMethods, aggregateEnums, packageName, moduleName);
   const allRootImports = new Set([...parsedRoot.imports, ...methodImports]);
   parsedRoot.imports = Array.from(allRootImports).sort();
   
@@ -206,8 +206,30 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
  * @param {Array} aggregateEnums - Enums from the aggregate
  * @returns {Object} Parsed property
  */
+/**
+ * Build a JSR-303 annotation string from a validation descriptor object.
+ * Supported keys: type, message, value, min, max, regexp, integer, fraction, inclusive.
+ * @param {Object} validation - e.g. { type: 'Email', message: 'Invalid email' }
+ * @returns {string} - e.g. '@Email(message = "Invalid email")'
+ */
+function buildAnnotationString(validation) {
+  const { type, message, value, min, max, regexp, integer, fraction, inclusive } = validation;
+  const params = [];
+
+  if (value !== undefined)     params.push(`value = ${value}`);
+  if (min !== undefined)       params.push(`min = ${min}`);
+  if (max !== undefined)       params.push(`max = ${max}`);
+  if (regexp !== undefined)    params.push(`regexp = "${regexp}"`);
+  if (integer !== undefined)   params.push(`integer = ${integer}`);
+  if (fraction !== undefined)  params.push(`fraction = ${fraction}`);
+  if (inclusive !== undefined) params.push(`inclusive = ${inclusive}`);
+  if (message !== undefined)   params.push(`message = "${message}"`);
+
+  return params.length === 0 ? `@${type}` : `@${type}(${params.join(', ')})`;
+}
+
 function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
-  const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues, readOnly = false, hidden = false } = propData;
+  const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues, readOnly = false, hidden = false, validations = [] } = propData;
   
   const javaType = mapYamlTypeToJava(type, enumValues);
   const fieldName = toCamelCase(name);
@@ -246,7 +268,8 @@ function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
     collectionElementType,
     columnAnnotations: extractColumnAnnotations(annotations),
     readOnly: readOnly,
-    hidden: hidden
+    hidden: hidden,
+    validationAnnotations: validations.map(v => buildAnnotationString(v))
   };
 }
 
@@ -651,11 +674,24 @@ function generateEntityImports(fields, relationships, enums = [], aggregateEnums
 }
 
 /**
+ * Generate validation constraint imports for fields that have validations declared.
+ * Returns a single wildcard import when any field has validation annotations.
+ * Designed for application-layer command/DTO contexts only.
+ * @param {Array} fields - Filtered field list (e.g. commandFields or createFields)
+ * @returns {Array} Import statements
+ */
+function generateValidationImports(fields) {
+  const hasValidations = fields.some(f => f.validationAnnotations && f.validationAnnotations.length > 0);
+  if (!hasValidations) return [];
+  return ['import jakarta.validation.constraints.*;'];
+}
+
+/**
  * Generate imports from aggregate method parameters
  * @param {Array} aggregateMethods - Array of aggregate methods
  * @returns {Array} Import statements for parameter types
  */
-function generateAggregateMethodImports(aggregateMethods) {
+function generateAggregateMethodImports(aggregateMethods, aggregateEnums = [], packageName = '', moduleName = '') {
   const imports = new Set();
   
   if (!aggregateMethods || aggregateMethods.length === 0) {
@@ -685,6 +721,14 @@ function generateAggregateMethodImports(aggregateMethods) {
         // Check for UUID
         if (param.type.includes('UUID')) {
           imports.add('import java.util.UUID;');
+        }
+        // Check for enum types from aggregate
+        if (packageName && moduleName && aggregateEnums.length > 0) {
+          const baseType = param.type.replace('List<', '').replace('>', '');
+          const matchingEnum = aggregateEnums.find(e => e.name === baseType);
+          if (matchingEnum) {
+            imports.add(`import ${packageName}.${moduleName}.domain.models.enums.${matchingEnum.name};`);
+          }
         }
       });
     }
@@ -783,5 +827,6 @@ module.exports = {
   parseValueObject,
   generateAggregateMethods,
   generateEntityImports,
+  generateValidationImports,
   generateAggregateMethodImports
 };

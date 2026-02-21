@@ -1,0 +1,18 @@
+package <%= packageName %>.<%= moduleName %>.application.dtos;
+
+<% if (hasEnums) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
+<% } %>
+<% imports.forEach(imp => { %>
+<%- imp %>
+<% }); %>
+
+public record Create<%= voName %>Dto(
+<% fields.forEach((field, idx) => { %>
+<% (field.validationAnnotations || []).forEach(annotation => { %>
+    <%- annotation %>
+<% }); %>
+    <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1) { %>,<% } %>
+<% }); %>
+) {
+}

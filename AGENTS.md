@@ -557,6 +557,7 @@ Los campos en domain.yaml soportan las siguientes propiedades:
 | `enumValues` | Array | `[]` | Valores inline de enum |
 | **`readOnly`** | Boolean | `false` | **Excluye del constructor de negocio y CreateDto** |
 | **`hidden`** | Boolean | `false` | **Excluye del ResponseDto** |
+| **`validations`** | Array | `[]` | **Anotaciones JSR-303 en el Command y CreateDto** |
 
 #### Flags de Visibilidad: `readOnly` y `hidden`
 
@@ -760,9 +761,10 @@ Al generar o modificar código, verificar:
 - [ ] Relaciones bidireccionales con métodos `assign*()`
 - [ ] Value Objects **inmutables**
 - [ ] Configuración de auditoría cuando `trackUser: true`
+- [ ] Validaciones JSR-303 **solo en Command y CreateDto, nunca en dominio**
 
 ---
 
-**Última actualización:** 2026-02-19  
+**Última actualización:** 2026-02-21  
 **Versión de eva4j:** 1.x  
 **Estado:** Documento de referencia para agentes IA

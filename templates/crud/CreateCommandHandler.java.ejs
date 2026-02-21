@@ -34,7 +34,7 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
         <%= aggregateName %> entity = new <%= aggregateName %>(
 <% if (commandFields) { %>
 <% commandFields.forEach((field, idx) => { %>
-            command.<%= field.name %>()<%= idx < commandFields.length - 1 ? ',' : '' %>
+            <% if (field.originalVoType) { %>mapper.to<%= field.originalVoType %>(command.<%= field.name %>())<% } else { %>command.<%= field.name %>()<% } %><%= idx < commandFields.length - 1 ? ',' : '' %>
 <% }); %>
 <% } %>
         );
@@ -47,7 +47,7 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
   <% if (!rel.hasNestedRelationships) { %>
                 entity.add<%= rel.targetEntityName %>(
 <% rel.fields.forEach((field, idx) => { %>
-                    itemDto.<%= field.name %>()<%= idx < rel.fields.length - 1 ? ',' : '' %>
+                    <% if (field.originalVoType) { %>mapper.to<%= field.originalVoType %>(itemDto.<%= field.name %>())<% } else { %>itemDto.<%= field.name %>()<% } %><%= idx < rel.fields.length - 1 ? ',' : '' %>
 <% }); %>
                 );
   <% } else { %>
@@ -65,7 +65,7 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
         if (command.<%= rel.fieldName %>() != null) {
             entity.assign<%= rel.targetEntityName %>(
 <% rel.fields.forEach((field, idx) => { %>
-                command.<%= rel.fieldName %>().<%= field.name %>()<%= idx < rel.fields.length - 1 ? ',' : '' %>
+                <% if (field.originalVoType) { %>mapper.to<%= field.originalVoType %>(command.<%= rel.fieldName %>().<%= field.name %>())<% } else { %>command.<%= rel.fieldName %>().<%= field.name %>()<% } %><%= idx < rel.fields.length - 1 ? ',' : '' %>
 <% }); %>
             );
         }
