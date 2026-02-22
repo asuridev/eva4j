@@ -5,7 +5,7 @@ const fs = require('fs-extra');
 const inquirer = require('inquirer');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toPackagePath, toCamelCase, toKebabCase } = require('../utils/naming');
+const { toPackagePath, toCamelCase, toKebabCase, getApplicationClassName } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
 const SharedGenerator = require('../generators/shared-generator');
@@ -204,6 +204,27 @@ async function generateEntitiesCommand(moduleName) {
         await sharedGenerator.generateFilters(sharedBasePath, false);
       }
     }
+
+    // Regenerate Application.java to sync auditorAwareRef with current domain.yaml
+    const applicationClassName = getApplicationClassName(artifactId);
+    const applicationJavaPath = path.join(
+      projectDir, 'src', 'main', 'java', packagePath,
+      `${applicationClassName}.java`
+    );
+    const applicationTemplatePath = path.join(__dirname, '../../templates/base/application/Application.java.ejs');
+    await renderAndWrite(applicationTemplatePath, applicationJavaPath, {
+      packageName,
+      projectName: projectConfig.projectName || artifactId,
+      author: projectConfig.author || 'eva4j',
+      version: projectConfig.version || '1.0.0',
+      createdDate: projectConfig.createdAt ? projectConfig.createdAt.split('T')[0] : new Date().toISOString().split('T')[0],
+      applicationClassName,
+      hasTrackUser: hasTrackUserEntities,
+      features: {
+        enableScheduling: projectConfig.features?.enableScheduling || false,
+        enableAsync: projectConfig.features?.enableAsync || false
+      }
+    });
     
     console.log(chalk.blue('\n📦 Aggregates to generate:'));
     aggregates.forEach(agg => {

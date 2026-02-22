@@ -16,7 +16,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
  */
 @SpringBootApplication
 @EnableFeignClients
-@EnableJpaAuditing(auditorAwareRef = "auditorProvider")
+<% if (hasTrackUser) { %>@EnableJpaAuditing(auditorAwareRef = "auditorProvider")<% } else { %>@EnableJpaAuditing<% } %>
 <% if (features.enableScheduling) { %>@EnableScheduling
 <% } %><% if (features.enableAsync) { %>@EnableAsync
 <% } %>public class <%= applicationClassName %> {

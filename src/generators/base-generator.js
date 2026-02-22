@@ -74,7 +74,8 @@ class BaseGenerator {
       `${this.context.applicationClassName}.java`
     );
     
-    await renderAndWrite(templatePath, destPath, this.context);
+    // hasTrackUser defaults to false at creation time — g entities will update it when needed
+    await renderAndWrite(templatePath, destPath, { ...this.context, hasTrackUser: false });
   }
 
   async generateGradleFiles() {
