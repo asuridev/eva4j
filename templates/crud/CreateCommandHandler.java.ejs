@@ -44,14 +44,27 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
         // Add <%= rel.fieldName %> using aggregate method (executes business validations)
         if (command.<%= rel.fieldName %>() != null) {
             command.<%= rel.fieldName %>().forEach(itemDto -> {
-  <% if (!rel.hasNestedRelationships) { %>
+  <% if (!rel.hasNestedRelationships && !(rel.nestedOneToOneRelationships && rel.nestedOneToOneRelationships.length > 0)) { %>
                 entity.add<%= rel.targetEntityName %>(
 <% rel.fields.forEach((field, idx) => { %>
                     <% if (field.originalVoType) { %>mapper.to<%= field.originalVoType %>(itemDto.<%= field.name %>())<% } else { %>itemDto.<%= field.name %>()<% } %><%= idx < rel.fields.length - 1 ? ',' : '' %>
 <% }); %>
                 );
+  <% } else if (!rel.hasNestedRelationships && rel.nestedOneToOneRelationships && rel.nestedOneToOneRelationships.length > 0) { %>
+                // Flattened factory call (DDD: aggregate root controls all sub-entity creation)
+                entity.add<%= rel.targetEntityName %>(
+<% rel.fields.forEach(field => { %>
+                    <% if (field.originalVoType) { %>mapper.to<%= field.originalVoType %>(itemDto.<%= field.name %>())<% } else { %>itemDto.<%= field.name %>()<% } %>,
+<% }); %>
+<% rel.nestedOneToOneRelationships.forEach((otoRel, otoIdx) => { %>
+<% otoRel.fields.forEach((field, fIdx) => { %>
+<% const isLastParam = otoIdx === rel.nestedOneToOneRelationships.length - 1 && fIdx === otoRel.fields.length - 1; %>
+                    itemDto.<%= otoRel.fieldName %>() != null ? <% if (field.originalVoType) { %>mapper.to<%= field.originalVoType %>(itemDto.<%= otoRel.fieldName %>().<%= field.name %>())<% } else { %>itemDto.<%= otoRel.fieldName %>().<%= field.name %>()<% } %> : null<%= isLastParam ? '' : ',' %>
+<% }); %>
+<% }); %>
+                );
   <% } else { %>
-                // Complex nested relationships - use mapper helper
+                // Complex nested collections — use mapper helper
                 entity.add<%= rel.targetEntityName %>(mapper.fromDto<%= rel.targetEntityName %>(itemDto));
   <% } %>
             });

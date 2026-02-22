@@ -418,51 +418,74 @@ function generateAggregateMethods(root, secondaryEntities) {
       const secondaryEntity = secondaryEntities.find(e => e.name === entityName);
       
       if (secondaryEntity) {
-        // Extract fields for parameters (exclude id, audit fields, inverse relationships)
+        // Extract fields for parameters (exclude id, audit fields, readOnly, and inverse relationships)
         const paramFields = secondaryEntity.fields.filter(f => 
           f.name !== 'id' && 
           f.name !== 'createdAt' && 
           f.name !== 'updatedAt' && 
           f.name !== 'createdBy' && 
-          f.name !== 'updatedBy'
+          f.name !== 'updatedBy' &&
+          !f.readOnly
         );
         
-        // Filter out inverse relationships
-        const paramRelationships = (secondaryEntity.relationships || []).filter(r => !r.isInverse);
-        
-        // Generate parameters array
+        // Generate parameters array (scalar fields only — matches creation constructor)
         const parameters = paramFields.map(f => ({
           name: f.name,
           type: f.javaType
         }));
         
-        // Add non-inverse relationships as parameters
-        paramRelationships.forEach(r => {
-          if (!r.isCollection) {
-            parameters.push({
-              name: r.fieldName,
-              type: r.javaType
-            });
-          }
-        });
-        
-        // Generate constructor arguments string
+        // Constructor arguments match the creation constructor (scalar fields only)
         const constructorArgs = parameters.map(p => p.name).join(', ');
         
-        // Generate method body that creates entity and adds it
-        const methodBody = `${entityName} entity = new ${entityName}(${constructorArgs});
-        this.${rel.fieldName}.add(entity);`;
+        // Detect forward OneToOne rels on the secondary entity → flattened params
+        const forwardOtoRels = (secondaryEntity.relationships || []).filter(r => !r.isInverse && r.type === 'OneToOne');
+        const otoParamGroups = forwardOtoRels.map(otoRel => {
+          const otoEntity = secondaryEntities.find(e => e.name === otoRel.target);
+          if (!otoEntity) return null;
+          const otoFields = otoEntity.fields.filter(f =>
+            f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' &&
+            f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
+          );
+          return {
+            entityName: otoRel.target,
+            fieldName: otoRel.fieldName,
+            assignMethod: `assign${toPascalCase(otoRel.fieldName)}`,
+            params: otoFields.map(f => ({
+              name: toCamelCase(otoRel.fieldName) + toPascalCase(f.name), // prefixed: returnRequestReason
+              type: f.javaType
+            }))
+          };
+        }).filter(Boolean);
         
-        // add method with parameters (factory method)
+        // Build full parameter list: entity params + prefixed sub-entity params
+        const allParameters = [
+          ...parameters,
+          ...otoParamGroups.flatMap(g => g.params)
+        ];
+        
+        // Build method body: create entity, create + assign each sub-entity, add to list
+        let methodBody;
+        if (otoParamGroups.length > 0) {
+          const otoLines = otoParamGroups.map(g => {
+            const ctorArgs = g.params.map(p => p.name).join(', ');
+            const varName = toCamelCase(g.fieldName);
+            return `${g.entityName} ${varName} = new ${g.entityName}(${ctorArgs});\n        entity.${g.assignMethod}(${varName});`;
+          }).join('\n        ');
+          methodBody = `${entityName} entity = new ${entityName}(${constructorArgs});\n        ${otoLines}\n        this.${rel.fieldName}.add(entity);`;
+        } else {
+          methodBody = `${entityName} entity = new ${entityName}(${constructorArgs});\n        this.${rel.fieldName}.add(entity);`;
+        }
+        
+        // add method with parameters (factory method — root controls all sub-entity creation)
         methods.push({
           name: `add${toPascalCase(singularName)}`,
           returnType: 'void',
-          parameters: parameters,
+          parameters: allParameters,
           body: methodBody,
           isFactory: true
         });
         
-        // add method with entity (for complex cases and mappers)
+        // add method with entity (overload — for complex/test scenarios)
         methods.push({
           name: `add${toPascalCase(singularName)}`,
           returnType: 'void',
@@ -517,35 +540,26 @@ function generateAggregateMethods(root, secondaryEntities) {
       const secondaryEntity = secondaryEntities.find(e => e.name === entityName);
       
       if (secondaryEntity) {
-        // Extract fields for parameters (exclude id, audit fields, inverse relationships)
+        // Extract fields for parameters (exclude id, audit fields, readOnly, and inverse relationships)
         const paramFields = secondaryEntity.fields.filter(f => 
           f.name !== 'id' && 
           f.name !== 'createdAt' && 
           f.name !== 'updatedAt' && 
           f.name !== 'createdBy' && 
-          f.name !== 'updatedBy'
+          f.name !== 'updatedBy' &&
+          !f.readOnly
         );
         
         // Filter out inverse relationships
         const paramRelationships = (secondaryEntity.relationships || []).filter(r => !r.isInverse);
         
-        // Generate parameters array
+        // Generate parameters array (scalar fields only — matches creation constructor)
         const parameters = paramFields.map(f => ({
           name: f.name,
           type: f.javaType
         }));
         
-        // Add non-inverse relationships as parameters
-        paramRelationships.forEach(r => {
-          if (!r.isCollection) {
-            parameters.push({
-              name: r.fieldName,
-              type: r.javaType
-            });
-          }
-        });
-        
-        // Generate constructor arguments string
+        // Constructor arguments match the creation constructor (scalar fields only)
         const constructorArgs = parameters.map(p => p.name).join(', ');
         
         // Generate method body that creates entity and assigns it

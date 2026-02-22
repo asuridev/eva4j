@@ -1,0 +1,106 @@
+# EJEMPLO: ENTIDAD SECUNDARIA CON SU PROPIA RELACION ONETOMANY
+# Cadena de 3 niveles: Project → Sprint → Task
+# Ideal para: Validar que una entidad secundaria puede tener su propio OneToMany
+#
+# Lo que este ejemplo valida:
+#   ✅ Sprint (secundaria) tiene su propio OneToMany hacia Task (nivel 3)
+#   ✅ SprintJpa.java genera @OneToMany(mappedBy = "sprint", ...)
+#   ✅ ApplicationMapper genera fromDtoTask() como método independiente
+#   ✅ toSprintDto() incluye tasks como List<TaskDto> en la respuesta
+
+aggregates:
+  - name: Project
+    entities:
+      - name: project
+        isRoot: true
+        tableName: projects
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+          - name: description
+            type: String
+          - name: ownerId
+            type: String
+          - name: status
+            type: ProjectStatus
+          - name: startDate
+            type: LocalDate
+          - name: endDate
+            type: LocalDate
+        relationships:
+          - type: OneToMany
+            target: Sprint
+            mappedBy: project
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+
+      - name: Sprint
+        tableName: sprints
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+          - name: goal
+            type: String
+          - name: startDate
+            type: LocalDate
+          - name: endDate
+            type: LocalDate
+          - name: status
+            type: SprintStatus
+        relationships:
+          # ← RELACION EN ENTIDAD SECUNDARIA: Sprint tiene su propio OneToMany
+          - type: OneToMany
+            target: Task
+            mappedBy: sprint
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+
+      - name: Task
+        tableName: tasks
+        fields:
+          - name: id
+            type: String
+          - name: title
+            type: String
+          - name: description
+            type: String
+          - name: assigneeId
+            type: String
+          - name: priority
+            type: TaskPriority
+          - name: estimatedHours
+            type: Integer
+          - name: completedAt
+            type: LocalDateTime
+            readOnly: true
+
+    enums:
+      - name: ProjectStatus
+        values:
+          - PLANNING
+          - ACTIVE
+          - ON_HOLD
+          - COMPLETED
+          - CANCELLED
+
+      - name: SprintStatus
+        values:
+          - PLANNED
+          - ACTIVE
+          - COMPLETED
+          - CANCELLED
+
+      - name: TaskPriority
+        values:
+          - LOW
+          - MEDIUM
+          - HIGH
+          - CRITICAL

@@ -50,15 +50,28 @@ public class <%= aggregateName %>ApplicationMapper {
         // Map <%= rel.fieldName %> collection
         if (command.<%= rel.fieldName %>() != null) {
             command.<%= rel.fieldName %>().forEach(itemDto -> {
-  <% if (!rel.hasNestedRelationships) { %>
+  <% if (!rel.hasNestedRelationships && !(rel.nestedOneToOneRelationships && rel.nestedOneToOneRelationships.length > 0)) { %>
                 // Direct call to factory method with parameters
                 entity.add<%= rel.targetEntityName %>(
 <% rel.fields.forEach((field, idx) => { %>
                     <% if (field.originalVoType) { %>to<%= field.originalVoType %>(itemDto.<%= field.name %>())<% } else { %>itemDto.<%= field.name %>()<% } %><%= idx < rel.fields.length - 1 ? ',' : '' %>
 <% }); %>
                 );
+  <% } else if (!rel.hasNestedRelationships && rel.nestedOneToOneRelationships && rel.nestedOneToOneRelationships.length > 0) { %>
+                // Flattened factory call (DDD: aggregate root controls all sub-entity creation)
+                entity.add<%= rel.targetEntityName %>(
+<% rel.fields.forEach(field => { %>
+                    <% if (field.originalVoType) { %>to<%= field.originalVoType %>(itemDto.<%= field.name %>())<% } else { %>itemDto.<%= field.name %>()<% } %>,
+<% }); %>
+<% rel.nestedOneToOneRelationships.forEach((otoRel, otoIdx) => { %>
+<% otoRel.fields.forEach((field, fIdx) => { %>
+<% const isLastParam = otoIdx === rel.nestedOneToOneRelationships.length - 1 && fIdx === otoRel.fields.length - 1; %>
+                    itemDto.<%= otoRel.fieldName %>() != null ? <% if (field.originalVoType) { %>to<%= field.originalVoType %>(itemDto.<%= otoRel.fieldName %>().<%= field.name %>())<% } else { %>itemDto.<%= otoRel.fieldName %>().<%= field.name %>()<% } %> : null<%= isLastParam ? '' : ',' %>
+<% }); %>
+<% }); %>
+                );
   <% } else { %>
-                // Complex nested relationships - use helper method
+                // Complex nested collections — use helper method
                 <%= rel.targetEntityName %> item = fromDto<%= rel.targetEntityName %>(itemDto);
                 if (item != null) {
                     entity.add<%= rel.targetEntityName %>(item);
@@ -114,11 +127,98 @@ public class <%= aggregateName %>ApplicationMapper {
         }
 <% }); %>
 <% } %>
+<% if (rel.nestedOneToOneRelationships && rel.nestedOneToOneRelationships.length > 0) { %>
+<% rel.nestedOneToOneRelationships.forEach(otoRel => { %>
+        
+        // Map nested OneToOne <%= otoRel.fieldName %>
+        if (dto.<%= otoRel.fieldName %>() != null) {
+            entity.assign<%= otoRel.fieldName.charAt(0).toUpperCase() + otoRel.fieldName.slice(1) %>(fromDto<%= otoRel.targetEntityName %>(dto.<%= otoRel.fieldName %>()));
+        }
+<% }); %>
+<% } %>
         
         return entity;
     }
 <% }); %>
 <% } %>
+<%
+// Collect all nested (grandchild) entities that need their own fromDto* method.
+// A grandchild fromDto* is needed when a direct child has nestedRelationships.
+const generatedFromDtoNames = new Set(
+  (oneToManyRelationships || []).map(r => r.targetEntityName)
+);
+const grandchildRels = [];
+(oneToManyRelationships || []).forEach(rel => {
+  if (rel.hasNestedRelationships && rel.nestedRelationships) {
+    rel.nestedRelationships.forEach(nested => {
+      if (!generatedFromDtoNames.has(nested.targetEntityName)) {
+        generatedFromDtoNames.add(nested.targetEntityName);
+        grandchildRels.push(nested);
+      }
+    });
+  }
+});
+%>
+<% grandchildRels.forEach(rel => { %>
+
+    /**
+     * Convert Create<%= rel.targetEntityName %>Dto to <%= rel.targetEntityName %> domain entity
+     * Generated for nested (grandchild) entity
+     */
+    public <%= rel.targetEntityName %> fromDto<%= rel.targetEntityName %>(Create<%= rel.targetEntityName %>Dto dto) {
+        if (dto == null) return null;
+
+        <%= rel.targetEntityName %> entity = new <%= rel.targetEntityName %>(
+<% rel.fields.forEach((field, idx) => { %>
+            <% if (field.originalVoType) { %>to<%= field.originalVoType %>(dto.<%= field.name %>())<% } else { %>dto.<%= field.name %>()<% } %><% if (idx < rel.fields.length - 1) { %>,<% } %>
+<% }); %>
+        );
+<% if (rel.hasNestedRelationships && rel.nestedRelationships) { %>
+<% rel.nestedRelationships.forEach(nestedRel => { %>
+        if (dto.<%= nestedRel.fieldName %>() != null) {
+            dto.<%= nestedRel.fieldName %>().forEach(nestedDto -> {
+                <%= nestedRel.targetEntityName %> nestedItem = fromDto<%= nestedRel.targetEntityName %>(nestedDto);
+                if (nestedItem != null) {
+                    entity.add<%= nestedRel.targetEntityName %>(nestedItem);
+                }
+            });
+        }
+<% }); %>
+<% } %>
+        return entity;
+    }
+<% }); %>
+<%
+// Collect all unique nestedOneToOneRelationships targets that haven't had fromDto generated yet
+const nestedOtoNames = new Set([
+  ...Array.from(generatedFromDtoNames)
+]);
+const nestedOneToOneTargets = [];
+(oneToManyRelationships || []).forEach(rel => {
+  (rel.nestedOneToOneRelationships || []).forEach(otoRel => {
+    if (!nestedOtoNames.has(otoRel.targetEntityName)) {
+      nestedOtoNames.add(otoRel.targetEntityName);
+      nestedOneToOneTargets.push(otoRel);
+    }
+  });
+});
+%>
+<% nestedOneToOneTargets.forEach(rel => { %>
+
+    /**
+     * Convert Create<%= rel.targetEntityName %>Dto to <%= rel.targetEntityName %> domain entity
+     * Generated for nested OneToOne sub-entity
+     */
+    public <%= rel.targetEntityName %> fromDto<%= rel.targetEntityName %>(Create<%= rel.targetEntityName %>Dto dto) {
+        if (dto == null) return null;
+
+        return new <%= rel.targetEntityName %>(
+<% rel.fields.forEach((field, idx) => { %>
+            <% if (field.originalVoType) { %>to<%= field.originalVoType %>(dto.<%= field.name %>())<% } else { %>dto.<%= field.name %>()<% } %><% if (idx < rel.fields.length - 1) { %>,<% } %>
+<% }); %>
+        );
+    }
+<% }); %>
 <% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
 <% oneToOneRelationships.forEach(rel => { %>
     
@@ -185,11 +285,13 @@ public class <%= aggregateName %>ApplicationMapper {
             return new ArrayList<>();
         }
         return entities.stream()
-            .map(this::toDto)
+            .map(entity -> toDto(entity))
             .collect(Collectors.toList());
     }
     
 <% responseSecondaryEntities.forEach(entity => { %>
+<% const entityNestedRels = (entity.nestedRelationships || []).filter(r => !r.isInverse); %>
+<% const entityForwardOtoRels = (entity.forwardOneToOneRels || []); %>
     /**
      * Map <%= entity.name %> to <%= entity.name %>Dto
      */
@@ -200,7 +302,20 @@ public class <%= aggregateName %>ApplicationMapper {
         
         return new <%= entity.name %>Dto(
 <% entity.responseFields.forEach((field, idx) => { %>
-            domainEntity.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% if (idx < entity.responseFields.length - 1) { %>,<% } %>
+            domainEntity.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<% if (idx < entity.responseFields.length - 1 || entityNestedRels.length > 0 || entityForwardOtoRels.length > 0) { %>,<% } %>
+<% }); %>
+<% entityNestedRels.forEach((rel, idx) => { %>
+  <% if (rel.type === 'OneToMany') { %>
+            domainEntity.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>() != null ?
+                domainEntity.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>().stream()
+                    .map(item -> to<%= rel.targetEntityName %>Dto(item))
+                    .collect(Collectors.toList()) : null<% if (idx < entityNestedRels.length - 1 || entityForwardOtoRels.length > 0) { %>,<% } %>
+  <% } else if (rel.type === 'OneToOne') { %>
+            to<%= rel.targetEntityName %>Dto(domainEntity.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>())<% if (idx < entityNestedRels.length - 1 || entityForwardOtoRels.length > 0) { %>,<% } %>
+  <% } %>
+<% }); %>
+<% entityForwardOtoRels.forEach((rel, idx) => { %>
+            to<%= rel.targetEntityName %>Dto(domainEntity.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>())<% if (idx < entityForwardOtoRels.length - 1) { %>,<% } %>
 <% }); %>
         );
     }

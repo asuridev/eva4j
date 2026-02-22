@@ -10,6 +10,68 @@ function getExampleId() {
   return idExamples[idType] || '1';
 }
 
+// Apply validation-aware overrides to a base dummy value
+function applyValidationOverrides(field, baseValue) {
+  const annotations = field.validationAnnotations || [];
+  if (annotations.length === 0) return baseValue;
+
+  let value = baseValue;
+
+  for (const ann of annotations) {
+    if (/@Email/i.test(ann)) {
+      value = 'user@example.com';
+      break;
+    }
+    if (/@Future/i.test(ann)) {
+      value = '2027-01-01T10:00:00';
+      break;
+    }
+    if (/@Past/i.test(ann)) {
+      value = '2020-01-01T10:00:00';
+      break;
+    }
+    if (/@PositiveOrZero/i.test(ann)) {
+      value = typeof baseValue === 'string' ? '0.00' : 0;
+      break;
+    }
+    if (/@Positive/i.test(ann)) {
+      value = typeof baseValue === 'string' ? '1.00' : 1;
+      break;
+    }
+    const minMatch = ann.match(/@Min\s*\(\s*(?:value\s*=\s*)?(\d+)/);
+    if (minMatch) {
+      const min = parseInt(minMatch[1], 10);
+      value = typeof baseValue === 'string' ? String(min) : min;
+      break;
+    }
+    const maxMatch = ann.match(/@Max\s*\(\s*(?:value\s*=\s*)?(\d+)/);
+    if (maxMatch) {
+      const max = parseInt(maxMatch[1], 10);
+      value = typeof baseValue === 'string' ? String(max) : max;
+      break;
+    }
+    const sizeMatch = ann.match(/@Size\s*\(.*?min\s*=\s*(\d+)/);
+    if (sizeMatch) {
+      const min = parseInt(sizeMatch[1], 10);
+      value = 'a'.repeat(Math.max(min, 1));
+      break;
+    }
+    if (/@NotBlank|@NotEmpty/i.test(ann) && (value === null || value === '')) {
+      value = `example_${field.name}`;
+      break;
+    }
+    const patternMatch = ann.match(/@Pattern\s*\(.*?regexp\s*=\s*"([^"]+)"/);
+    if (patternMatch) {
+      const re = patternMatch[1];
+      if (/^\^\[0-9\]|^\^\\d/.test(re)) value = '12345';
+      else if (/^\^\[A-Z\]/.test(re)) value = 'Example';
+      break;
+    }
+  }
+
+  return value;
+}
+
 // Generate dummy value based on field type
 function generateDummyValue(field, depth = 0) {
   const MAX_DEPTH = 3;
@@ -30,13 +92,13 @@ function generateDummyValue(field, depth = 0) {
     'UUID': '550e8400-e29b-41d4-a716-446655440000'
   };
   
-  if (basicTypes[field.javaType]) {
-    return basicTypes[field.javaType];
+  if (basicTypes[field.javaType] !== undefined) {
+    return applyValidationOverrides(field, basicTypes[field.javaType]);
   }
   
-  // Handle enums
-  if (field.isEnum && rootEntity.enums) {
-    const enumDef = rootEntity.enums.find(e => e.name === field.javaType);
+  // Handle enums — search allEnums (covers root + secondary entity enums)
+  if (field.isEnum) {
+    const enumDef = allEnums.find(e => e.name === field.javaType);
     if (enumDef && enumDef.values && enumDef.values.length > 0) {
       return enumDef.values[0];
     }
@@ -47,34 +109,18 @@ function generateDummyValue(field, depth = 0) {
   if (field.isValueObject) {
     const voName = field.javaType.toLowerCase();
     if (voName.includes('money') || voName.includes('price') || voName.includes('amount')) {
-      return {
-        amount: '99.99',
-        currency: 'USD'
-      };
+      return { amount: '99.99', currency: 'USD' };
     }
     if (voName.includes('address')) {
-      return {
-        street: '123 Main St',
-        city: 'New York',
-        state: 'NY',
-        zipCode: '10001',
-        country: 'USA'
-      };
+      return { street: '123 Main St', city: 'New York', state: 'NY', zipCode: '10001', country: 'USA' };
     }
     if (voName.includes('email')) {
-      return {
-        value: 'example@email.com'
-      };
+      return { value: 'example@email.com' };
     }
     if (voName.includes('phone')) {
-      return {
-        value: '+1-555-0123'
-      };
+      return { value: '+1-555-0123' };
     }
-    // Generic value object
-    return {
-      value: `example_${field.name}`
-    };
+    return { value: `example_${field.name}` };
   }
   
   // Handle collections
@@ -82,7 +128,7 @@ function generateDummyValue(field, depth = 0) {
     return [`example_item_1`, `example_item_2`];
   }
   
-  return `example_${field.name}`;
+  return applyValidationOverrides(field, `example_${field.name}`);
 }
 
 // Generate nested relationship object
@@ -93,20 +139,31 @@ function generateNestedObject(rel, depth = 0) {
   
   const obj = {};
   
-  // Add fields from the relationship entity
+  // Add fields (exclude readOnly and id — server-generated)
   if (rel.fields && rel.fields.length > 0) {
-    rel.fields.forEach(field => {
+    rel.fields.filter(f => !f.readOnly && f.name !== 'id').forEach(field => {
       obj[field.name] = generateDummyValue(field, depth + 1);
     });
   }
   
-  // Add nested relationships recursively
+  // Add nested OneToMany relationships recursively
   if (rel.hasNestedRelationships && rel.nestedRelationships) {
     rel.nestedRelationships.forEach(nestedRel => {
       const nestedObj = generateNestedObject(nestedRel, depth + 1);
       if (nestedObj) {
         obj[nestedRel.fieldName] = [nestedObj];
       }
+    });
+  }
+
+  // Add forward OneToOne sub-entities (flattened as single object, not array)
+  if (rel.nestedOneToOneRelationships && rel.nestedOneToOneRelationships.length > 0) {
+    rel.nestedOneToOneRelationships.forEach(otoRel => {
+      const otoObj = {};
+      (otoRel.fields || []).filter(f => !f.readOnly && f.name !== 'id').forEach(field => {
+        otoObj[field.name] = generateDummyValue(field, depth + 1);
+      });
+      obj[otoRel.fieldName] = otoObj;
     });
   }
   
@@ -117,7 +174,7 @@ function generateNestedObject(rel, depth = 0) {
 function generateCreateBody() {
   const body = {};
   
-  // Add regular fields
+  // Add regular fields (readOnly and id already excluded via commandFields)
   commandFields.forEach(field => {
     body[field.name] = generateDummyValue(field);
   });
@@ -152,7 +209,11 @@ function generateCreateBody() {
           {
             "key": "Content-Type",
             "value": "application/json"
-          }
+          }<% if (trackUser) { %>,
+          {
+            "key": "X-User",
+            "value": "system"
+          }<% } %>
         ],
         "url": {
           "raw": "http://localhost:<%= port %>/api/<%= apiVersion %>/<%= resourceNameKebab %>",
@@ -207,7 +268,7 @@ function generateCreateBody() {
       "name": "Delete <%= aggregateName %>",
       "request": {
         "method": "DELETE",
-        "header": [],
+        "header": [<% if (trackUser) { %>{ "key": "X-User", "value": "system" }<% } %>],
         "url": {
           "raw": "http://localhost:<%= port %>/api/<%= apiVersion %>/<%= resourceNameKebab %>/<%= getExampleId() %>",
           "protocol": "http",

@@ -1,6 +1,17 @@
 const ejs = require('ejs');
 const fs = require('fs-extra');
 const path = require('path');
+const prettier = require('prettier');
+const javaPlugin = require('prettier-plugin-java').default;
+
+const PRETTIER_JAVA_OPTIONS = {
+  parser: 'java',
+  plugins: [javaPlugin],
+  tabWidth: 4,
+  printWidth: 120,
+  trailingComma: 'none',
+  endOfLine: 'lf',
+};
 
 /**
  * Render a template file with given context
@@ -20,7 +31,15 @@ async function renderTemplate(templatePath, context) {
  * @param {object} context - Template variables
  */
 async function renderAndWrite(templatePath, destPath, context) {
-  const content = await renderTemplate(templatePath, context);
+  let content = await renderTemplate(templatePath, context);
+  if (destPath.endsWith('.java')) {
+    try {
+      content = await prettier.format(content, PRETTIER_JAVA_OPTIONS);
+    } catch (e) {
+      // Fail-safe: write unformatted content if the formatter encounters a parse error
+      console.warn(`[prettier] Could not format ${path.basename(destPath)}: ${e.message}`);
+    }
+  }
   await fs.ensureDir(path.dirname(destPath));
   await fs.writeFile(destPath, content, 'utf-8');
 }

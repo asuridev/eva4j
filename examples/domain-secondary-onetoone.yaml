@@ -1,0 +1,98 @@
+# EJEMPLO: ENTIDAD SECUNDARIA CON SU PROPIA RELACION ONETOONE
+# Cadena: Order → OrderItem (secondary con OneToOne hacia ReturnRequest)
+# Ideal para: Validar que una entidad secundaria puede tener su propio OneToOne
+#
+# Lo que este ejemplo valida:
+#   ✅ OrderItem (secundaria) tiene su propio OneToOne hacia ReturnRequest
+#   ✅ OrderItemJpa.java genera @OneToOne(mappedBy = "orderItem", ...)
+#   ✅ ApplicationMapper genera fromDtoReturnRequest() como método independiente
+#   ✅ toOrderItemDto() incluye returnRequest como ReturnRequestDto en la respuesta
+
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+          - name: customerId
+            type: String
+          - name: status
+            type: OrderStatus
+          - name: totalAmount
+            type: BigDecimal
+          - name: orderDate
+            type: LocalDateTime
+        relationships:
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+
+      - name: OrderItem
+        tableName: order_items
+        fields:
+          - name: id
+            type: String
+          - name: productId
+            type: String
+          - name: productName
+            type: String
+          - name: quantity
+            type: Integer
+          - name: unitPrice
+            type: BigDecimal
+          - name: lineTotal
+            type: BigDecimal
+            readOnly: true
+        relationships:
+          # ← RELACION EN ENTIDAD SECUNDARIA: OrderItem tiene su propio OneToOne
+          - type: OneToOne
+            target: ReturnRequest
+            mappedBy: orderItem
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+
+      - name: ReturnRequest
+        tableName: return_requests
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: reason
+            type: String
+          - name: status
+            type: ReturnStatus
+          - name: requestedAt
+            type: LocalDateTime
+          - name: approvedAt
+            type: LocalDateTime
+            readOnly: true
+          - name: refundAmount
+            type: BigDecimal
+            readOnly: true
+
+    enums:
+      - name: OrderStatus
+        values:
+          - PENDING
+          - CONFIRMED
+          - SHIPPED
+          - DELIVERED
+          - CANCELLED
+
+      - name: ReturnStatus
+        values:
+          - REQUESTED
+          - APPROVED
+          - REJECTED
+          - REFUNDED

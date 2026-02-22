@@ -18,11 +18,16 @@ public record Create<%= entityName %>Dto(
 <% (field.validationAnnotations || []).forEach(annotation => { %>
     <%- annotation %>
 <% }); %>
-    <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1 || hasNestedRelationships) { %>,<% } %>
+    <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1 || hasNestedRelationships || (forwardOneToOneRels && forwardOneToOneRels.length > 0)) { %>,<% } %>
 <% }); %>
 <% if (hasNestedRelationships) { %>
 <% nestedRelationships.forEach((rel, idx) => { %>
-    List<Create<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < nestedRelationships.length - 1) { %>,<% } %>
+    List<Create<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < nestedRelationships.length - 1 || (forwardOneToOneRels && forwardOneToOneRels.length > 0)) { %>,<% } %>
+<% }); %>
+<% } %>
+<% if (forwardOneToOneRels && forwardOneToOneRels.length > 0) { %>
+<% forwardOneToOneRels.forEach((rel, idx) => { %>
+    Create<%= rel.targetEntityName %>Dto <%= rel.fieldName %><% if (idx < forwardOneToOneRels.length - 1) { %>,<% } %>
 <% }); %>
 <% } %>
 ) {

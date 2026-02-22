@@ -6,6 +6,10 @@ package <%= packageName %>.<%= moduleName %>.domain.models.entities;
 <% if (valueObjects && valueObjects.length > 0) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
 <% } %>
+<% const forwardOneToManyRels = relationships.filter(rel => !rel.isInverse && rel.type === 'OneToMany'); %>
+<% if (forwardOneToManyRels.length > 0) { %>
+import java.util.Collections;
+<% } %>
 
 /**
  * <%= name %> - Domain Entity
@@ -22,11 +26,15 @@ public class <%= name %> {
 <% }); %>
 
 <% relationships.forEach(rel => { %>
+  <% if (rel.isCollection) { %>
+    private <%- rel.javaType %> <%= rel.fieldName %> = new ArrayList<>();
+  <% } else { %>
     private <%- rel.javaType %> <%= rel.fieldName %>;
+  <% } %>
 <% }); %>
 
     // Full constructor (for reconstruction from persistence)
-    public <%= name %>(<% let paramIdx = 0; %><% fields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %><% const nonInverseRels = relationships.filter(rel => !rel.isInverse); %><% nonInverseRels.forEach(rel => { %><% if (paramIdx > 0) { %>, <% } %><%- rel.javaType %> <%= rel.fieldName %><% paramIdx++; %><% }); %>) {
+    public <%= name %>(<% let paramIdx = 0; %><% fields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %><% const nonInverseRels = relationships.filter(rel => !rel.isInverse && !rel.isCollection); %><% nonInverseRels.forEach(rel => { %><% if (paramIdx > 0) { %>, <% } %><%- rel.javaType %> <%= rel.fieldName %><% paramIdx++; %><% }); %>) {
 <% fields.forEach(field => { %>
         this.<%= field.name %> = <%= field.name %>;
 <% }); %>
@@ -53,9 +61,15 @@ public class <%= name %> {
 <% }); %>
 
 <% relationships.forEach(rel => { %>
+  <% if (!rel.isInverse && rel.type === 'OneToMany') { %>
+    public <%- rel.javaType %> get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>() {
+        return Collections.unmodifiableList(<%= rel.fieldName %>);
+    }
+  <% } else { %>
     public <%- rel.javaType %> get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>() {
         return <%= rel.fieldName %>;
     }
+  <% } %>
 <% }); %>
 
     // Business methods for inverse relationships (package-private for aggregate control)
@@ -71,4 +85,38 @@ public class <%= name %> {
     }
   <% } %>
 <% }); %>
+<% const forwardOneToOneRels = relationships.filter(rel => !rel.isInverse && rel.type === 'OneToOne'); %>
+<% if (forwardOneToOneRels.length > 0) { %>
+    // Business methods for forward OneToOne relationships
+<% forwardOneToOneRels.forEach(rel => { %>
+
+    /**
+     * Assigns <%= rel.fieldName %>
+     */
+    public void assign<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%- rel.javaType %> <%= rel.fieldName %>) {
+        this.<%= rel.fieldName %> = <%= rel.fieldName %>;
+    }
+<% }); %>
+<% } %>
+<% if (forwardOneToManyRels.length > 0) { %>
+    // Business methods for forward OneToMany relationships
+<% forwardOneToManyRels.forEach(rel => { %>
+
+    /**
+     * Adds a <%= rel.target %> to this entity
+     */
+    public void add<%= rel.target %>(<%= rel.target %> item) {
+        if (item != null) {
+            this.<%= rel.fieldName %>.add(item);
+        }
+    }
+
+    /**
+     * Removes a <%= rel.target %> from this entity
+     */
+    public void remove<%= rel.target %>(<%= rel.target %> item) {
+        this.<%= rel.fieldName %>.remove(item);
+    }
+<% }); %>
+<% } %>
 }

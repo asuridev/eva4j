@@ -78,16 +78,34 @@ function enrichRelationshipsRecursively(entity, secondaryEntities, depth = 0, vi
     }
     
     const targetFields = targetEntity.fields.filter(f => 
-      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy'
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
     );
     
-    // Recursively enrich nested relationships
+    // Recursively enrich nested OneToMany relationships
     const nestedRels = enrichRelationshipsRecursively(
       targetEntity, 
       secondaryEntities, 
       depth + 1, 
       newVisited
     );
+
+    // Collect forward OneToOne relationships of this target entity (non-inverse)
+    const oneToOneRelsOfTarget = (targetEntity.relationships || []).filter(r =>
+      r.type === 'OneToOne' && !r.isInverse
+    );
+    const nestedOneToOneRelationships = oneToOneRelsOfTarget.map(otoRel => {
+      const otoTarget = secondaryEntities.find(e => e.name === otoRel.target);
+      const otoFields = otoTarget ? otoTarget.fields.filter(f =>
+        f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
+      ) : [];
+      return {
+        targetEntityName: otoRel.target,
+        fieldName: otoRel.fieldName,
+        type: 'OneToOne',
+        fields: otoFields,
+        entity: otoTarget
+      };
+    });
     
     return {
       targetEntityName: rel.target,
@@ -97,7 +115,8 @@ function enrichRelationshipsRecursively(entity, secondaryEntities, depth = 0, vi
       fields: targetFields,
       entity: targetEntity,
       hasNestedRelationships: nestedRels.length > 0,
-      nestedRelationships: nestedRels
+      nestedRelationships: nestedRels,
+      nestedOneToOneRelationships
     };
   });
 }
@@ -474,7 +493,8 @@ async function generateEntitiesCommand(moduleName) {
           projectDir,
           packageName,
           apiVersion,
-          projectConfig
+          projectConfig,
+          allEnums
         );
         postmanCollections.push({
           name: aggregate.name,
@@ -556,7 +576,11 @@ function transformRelsForApp(rels, validatedVoNames) {
   return (rels || []).map(rel => ({
     ...rel,
     fields: transformFieldsForApp(rel.fields || [], validatedVoNames),
-    nestedRelationships: transformRelsForApp(rel.nestedRelationships, validatedVoNames)
+    nestedRelationships: transformRelsForApp(rel.nestedRelationships, validatedVoNames),
+    nestedOneToOneRelationships: (rel.nestedOneToOneRelationships || []).map(otoRel => ({
+      ...otoRel,
+      fields: transformFieldsForApp(otoRel.fields || [], validatedVoNames)
+    }))
   }));
 }
 
@@ -647,7 +671,11 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     ...entity,
     responseFields: entity.fields.filter(f => 
       f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden
-    )
+    ),
+    nestedRelationships: enrichRelationshipsRecursively(entity, secondaryEntities, 0, new Set()),
+    forwardOneToOneRels: (entity.relationships || [])
+      .filter(r => r.type === 'OneToOne' && !r.isInverse)
+      .map(r => ({ targetEntityName: r.target, fieldName: r.fieldName }))
   }));
   
   // Apply app-layer field transformation (VO fields become Create<Vo>Dto types)
@@ -809,6 +837,10 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       new Set()
     );
     
+    const forwardOneToOneRelsDtoResp = (entity.relationships || [])
+      .filter(r => r.type === 'OneToOne' && !r.isInverse)
+      .map(r => ({ targetEntityName: r.target, fieldName: r.fieldName }));
+    
     const entityDtoContext = {
       packageName,
       moduleName,
@@ -816,6 +848,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       fields: entity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden),
       nestedRelationships,
       hasNestedRelationships: nestedRelationships.length > 0,
+      forwardOneToOneRels: forwardOneToOneRelsDtoResp,
       hasValueObjects: entity.fields.some(f => f.isValueObject),
       hasEnums: entity.enums && entity.enums.length > 0,
       imports: entity.imports
@@ -855,6 +888,15 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       ...dtoVoDtoImports,
       ...(createFieldsApp.some(f => f.originalVoType) ? ['import jakarta.validation.Valid;'] : [])
     ])];
+    
+    // Collect forward OneToOne relationships (not inverse) for nested DTO fields
+    const forwardOneToOneRels = (entity.relationships || [])
+      .filter(r => r.type === 'OneToOne' && !r.isInverse)
+      .map(r => ({
+        targetEntityName: r.target,
+        fieldName: r.fieldName
+      }));
+    
     const createItemDtoContext = {
       packageName,
       moduleName,
@@ -862,6 +904,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       fields: createFieldsApp,
       nestedRelationships,
       hasNestedRelationships: nestedRelationships.length > 0,
+      forwardOneToOneRels,
       hasValueObjects: entity.fields.some(f => f.isValueObject),
       hasEnums: entity.enums && entity.enums.length > 0,
       imports: createDtoImports
@@ -888,13 +931,14 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
  * Generate Postman Collection for CRUD testing
  */
 async function generatePostmanCollection(
-  aggregate, 
-  moduleName, 
+  aggregate,
+  moduleName,
   moduleBasePath,
   projectDir,
-  packageName, 
-  apiVersion, 
-  projectConfig
+  packageName,
+  apiVersion,
+  projectConfig,
+  allEnums = []
 ) {
   const { name: aggregateName, rootEntity, secondaryEntities } = aggregate;
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'postman');
@@ -931,7 +975,9 @@ async function generatePostmanCollection(
     oneToManyRelationships,
     secondaryEntities,
     rootEntity,
-    collectionId
+    collectionId,
+    trackUser: rootEntity.audit?.trackUser === true,
+    allEnums
   };
   
   // Output to module root

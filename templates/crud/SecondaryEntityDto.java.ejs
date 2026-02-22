@@ -15,11 +15,16 @@ import java.util.List;
 
 public record <%= entityName %>Dto(
 <% fields.forEach((field, idx) => { %>
-    <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1 || hasNestedRelationships) { %>,<% } %>
+    <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1 || hasNestedRelationships || (forwardOneToOneRels && forwardOneToOneRels.length > 0)) { %>,<% } %>
 <% }); %>
 <% if (hasNestedRelationships) { %>
 <% nestedRelationships.forEach((rel, idx) => { %>
-    List<<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < nestedRelationships.length - 1) { %>,<% } %>
+    List<<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < nestedRelationships.length - 1 || (forwardOneToOneRels && forwardOneToOneRels.length > 0)) { %>,<% } %>
+<% }); %>
+<% } %>
+<% if (forwardOneToOneRels && forwardOneToOneRels.length > 0) { %>
+<% forwardOneToOneRels.forEach((rel, idx) => { %>
+    <%= rel.targetEntityName %>Dto <%= rel.fieldName %><% if (idx < forwardOneToOneRels.length - 1) { %>,<% } %>
 <% }); %>
 <% } %>
 ) {
