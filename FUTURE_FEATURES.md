@@ -15,7 +15,7 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 - [Paginación en Queries](#4-paginación-en-queries)
 - [Optimistic Locking](#5-optimistic-locking)
 - [Read Models Separados](#6-read-models-separados-proyecciones)
-- [Enums con Comportamiento y Transiciones](#7-enums-con-comportamiento-y-transiciones)
+- [Enums con Comportamiento y Transiciones](#7-enums-con-comportamiento-y-transiciones) ✅
 - [Políticas y Especificaciones](#8-políticas-y-especificaciones)
 
 ### � Tooling y Calidad
@@ -512,7 +512,7 @@ Page<OrderSummaryProjection> findOrderSummaries(Pageable pageable);
 
 ---
 
-## 7. Enums con Comportamiento y Transiciones
+## 7. Enums con Comportamiento y Transiciones ✅
 
 ### Descripción
 
@@ -952,7 +952,7 @@ private Integer age;
 | 4 | Paginación en Queries | � Media | � Media | � Pendiente |
 | 5 | Optimistic Locking | � Media | � Baja | � Pendiente |
 | 6 | Read Models / Proyecciones | � Media | � Alta | � Pendiente |
-| 7 | Enums con Transiciones | � Media | � Baja | � Pendiente |
+| 7 | Enums con Transiciones | Impl. | -- | ✅ Implementado |
 | 8 | Specifications Pattern | � Media | � Media | � Pendiente |
 | 9 | JSON Schema para domain.yaml | � Tooling | � Media | � Pendiente |
 | 10 | Generacion Incremental | � Tooling | � Alta | � Pendiente |
@@ -963,6 +963,6 @@ private Integer age;
 
 ---
 
-**Ultima actualizacion:** 2026-02-21
+**Ultima actualizacion:** 2026-02-22
 **Version de eva4j:** 1.x
 **Estado:** Documento de planificacion y referencia
