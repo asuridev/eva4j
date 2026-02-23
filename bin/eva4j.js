@@ -75,6 +75,7 @@ program
   .command('generate <type> [module] [name]')
   .alias('g')
   .description('Generate components (usecase, http-exchange, kafka-event, kafka-listener, resource, record)')
+  .option('--force', 'Overwrite files even if they were manually modified (bypasses safe mode)')
   .action(async (type, module, name, options) => {
     if (type === 'usecase') {
       if (!module) {

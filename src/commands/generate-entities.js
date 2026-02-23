@@ -9,6 +9,7 @@ const { toPackagePath, toCamelCase, toKebabCase, getApplicationClassName } = req
 const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
 const SharedGenerator = require('../generators/shared-generator');
+const ChecksumManager = require('../utils/checksum-manager');
 
 // Maximum depth for recursive relationship traversal
 const MAX_DEPTH = 5;
@@ -121,7 +122,7 @@ function enrichRelationshipsRecursively(entity, secondaryEntities, depth = 0, vi
   });
 }
 
-async function generateEntitiesCommand(moduleName) {
+async function generateEntitiesCommand(moduleName, options = {}) {
   const projectDir = process.cwd();
   
   // Validate we're in an eva4j project
@@ -162,6 +163,11 @@ async function generateEntitiesCommand(moduleName) {
     console.error(chalk.gray('\nCreate a domain.yaml file in the module root with your aggregate definitions'));
     process.exit(1);
   }
+
+  // Initialise checksum manager (safe mode by default — --force to overwrite)
+  const checksumManager = new ChecksumManager(moduleBasePath);
+  await checksumManager.load();
+  const writeOptions = { force: options.force || false, checksumManager };
 
   const spinner = ora('Parsing domain.yaml...').start();
 
@@ -224,7 +230,7 @@ async function generateEntitiesCommand(moduleName) {
         enableScheduling: projectConfig.features?.enableScheduling || false,
         enableAsync: projectConfig.features?.enableAsync || false
       }
-    });
+    }, writeOptions);
     
     console.log(chalk.blue('\n📦 Aggregates to generate:'));
     aggregates.forEach(agg => {
@@ -260,7 +266,7 @@ async function generateEntitiesCommand(moduleName) {
         `${enumDef.name}.java`
       );
 
-      await renderAndWrite(templatePath, outputPath, context);
+      await renderAndWrite(templatePath, outputPath, context, writeOptions);
       generatedFiles.push({ type: 'Enum', name: enumDef.name, path: path.relative(projectDir, outputPath) });
     }
 
@@ -284,7 +290,8 @@ async function generateEntitiesCommand(moduleName) {
       await renderAndWrite(
         path.join(__dirname, '..', '..', 'templates', 'aggregate', 'AggregateRoot.java.ejs'),
         path.join(moduleBasePath, 'domain', 'models', 'entities', `${rootEntity.name}.java`),
-        rootDomainContext
+        rootDomainContext,
+        writeOptions
       );
       generatedFiles.push({ type: 'Domain Entity', name: rootEntity.name, path: `${moduleName}/domain/models/entities/${rootEntity.name}.java` });
 
@@ -306,7 +313,8 @@ async function generateEntitiesCommand(moduleName) {
       await renderAndWrite(
         path.join(__dirname, '..', '..', 'templates', 'aggregate', 'JpaAggregateRoot.java.ejs'),
         path.join(moduleBasePath, 'infrastructure', 'database', 'entities', `${rootEntity.name}Jpa.java`),
-        rootJpaContext
+        rootJpaContext,
+        writeOptions
       );
       generatedFiles.push({ type: 'JPA Entity', name: `${rootEntity.name}Jpa`, path: `${moduleName}/infrastructure/database/entities/${rootEntity.name}Jpa.java` });
 
@@ -327,7 +335,8 @@ async function generateEntitiesCommand(moduleName) {
         await renderAndWrite(
           path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainEntity.java.ejs'),
           path.join(moduleBasePath, 'domain', 'models', 'entities', `${entity.name}.java`),
-          entityDomainContext
+          entityDomainContext,
+          writeOptions
         );
         generatedFiles.push({ type: 'Domain Entity', name: entity.name, path: `${moduleName}/domain/models/entities/${entity.name}.java` });
 
@@ -349,7 +358,8 @@ async function generateEntitiesCommand(moduleName) {
         await renderAndWrite(
           path.join(__dirname, '..', '..', 'templates', 'aggregate', 'JpaEntity.java.ejs'),
           path.join(moduleBasePath, 'infrastructure', 'database', 'entities', `${entity.name}Jpa.java`),
-          entityJpaContext
+          entityJpaContext,
+          writeOptions
         );
         generatedFiles.push({ type: 'JPA Entity', name: `${entity.name}Jpa`, path: `${moduleName}/infrastructure/database/entities/${entity.name}Jpa.java` });
       }
@@ -369,7 +379,8 @@ async function generateEntitiesCommand(moduleName) {
         await renderAndWrite(
           path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainValueObject.java.ejs'),
           path.join(moduleBasePath, 'domain', 'models', 'valueObjects', `${vo.name}.java`),
-          voDomainContext
+          voDomainContext,
+          writeOptions
         );
         generatedFiles.push({ type: 'Domain VO', name: vo.name, path: `${moduleName}/domain/models/valueObjects/${vo.name}.java` });
 
@@ -385,7 +396,8 @@ async function generateEntitiesCommand(moduleName) {
         await renderAndWrite(
           path.join(__dirname, '..', '..', 'templates', 'aggregate', 'JpaValueObject.java.ejs'),
           path.join(moduleBasePath, 'infrastructure', 'database', 'valueObjects', `${vo.name}Jpa.java`),
-          voJpaContext
+          voJpaContext,
+          writeOptions
         );
         generatedFiles.push({ type: 'JPA VO', name: `${vo.name}Jpa`, path: `${moduleName}/infrastructure/database/valueObjects/${vo.name}Jpa.java` });
       }
@@ -403,7 +415,8 @@ async function generateEntitiesCommand(moduleName) {
       await renderAndWrite(
         path.join(__dirname, '..', '..', 'templates', 'aggregate', 'AggregateMapper.java.ejs'),
         path.join(moduleBasePath, 'infrastructure', 'database', 'mappers', `${aggregateName}Mapper.java`),
-        mapperContext
+        mapperContext,
+        writeOptions
       );
       generatedFiles.push({ type: 'Mapper', name: `${aggregateName}Mapper`, path: `${moduleName}/infrastructure/database/mappers/${aggregateName}Mapper.java` });
 
@@ -417,7 +430,8 @@ async function generateEntitiesCommand(moduleName) {
       await renderAndWrite(
         path.join(__dirname, '..', '..', 'templates', 'aggregate', 'AggregateRepository.java.ejs'),
         path.join(moduleBasePath, 'domain', 'repositories', `${rootEntity.name}Repository.java`),
-        repoContext
+        repoContext,
+        writeOptions
       );
       generatedFiles.push({ type: 'Repository', name: `${rootEntity.name}Repository`, path: `${moduleName}/domain/repositories/${rootEntity.name}Repository.java` });
 
@@ -425,7 +439,8 @@ async function generateEntitiesCommand(moduleName) {
       await renderAndWrite(
         path.join(__dirname, '..', '..', 'templates', 'aggregate', 'JpaRepository.java.ejs'),
         path.join(moduleBasePath, 'infrastructure', 'database', 'repositories', `${rootEntity.name}JpaRepository.java`),
-        repoContext
+        repoContext,
+        writeOptions
       );
       generatedFiles.push({ type: 'JPA Repository', name: `${rootEntity.name}JpaRepository`, path: `${moduleName}/infrastructure/database/repositories/${rootEntity.name}JpaRepository.java` });
 
@@ -440,7 +455,8 @@ async function generateEntitiesCommand(moduleName) {
       await renderAndWrite(
         path.join(__dirname, '..', '..', 'templates', 'aggregate', 'AggregateRepositoryImpl.java.ejs'),
         path.join(moduleBasePath, 'infrastructure', 'database', 'repositories', `${rootEntity.name}RepositoryImpl.java`),
-        repoImplContext
+        repoImplContext,
+        writeOptions
       );
       generatedFiles.push({ type: 'Repository Impl', name: `${rootEntity.name}RepositoryImpl`, path: `${moduleName}/infrastructure/database/repositories/${rootEntity.name}RepositoryImpl.java` });
     }
@@ -466,6 +482,9 @@ async function generateEntitiesCommand(moduleName) {
     console.log(chalk.white(`   Aggregates: ${aggregates.length}`));
     console.log(chalk.white(`   Total files: ${generatedFiles.length}`));
     console.log();
+
+    // Persist checksums to disk before asking about CRUD
+    await checksumManager.save();
 
     // Ask user if they want to generate CRUD resources
     const { generateCrud } = await inquirer.prompt([
@@ -505,7 +524,8 @@ async function generateEntitiesCommand(moduleName) {
           moduleBasePath,
           packageName,
           apiVersion,
-          generatedFiles
+          generatedFiles,
+          writeOptions
         );
         
         // Generate Postman Collection for this aggregate
@@ -517,7 +537,8 @@ async function generateEntitiesCommand(moduleName) {
           packageName,
           apiVersion,
           projectConfig,
-          allEnums
+          allEnums,
+          writeOptions
         );
         postmanCollections.push({
           name: aggregate.name,
@@ -560,6 +581,9 @@ async function generateEntitiesCommand(moduleName) {
         });
         console.log(chalk.cyan('\n💡 Import these collections into Postman to test your API endpoints!'));
       }
+
+      // Save updated checksums after CRUD generation
+      await checksumManager.save();
     }
 
     console.log();
@@ -610,7 +634,7 @@ function transformRelsForApp(rels, validatedVoNames) {
 /**
  * Generate CRUD resources for an aggregate root
  */
-async function generateCrudResources(aggregate, moduleName, moduleBasePath, packageName, apiVersion, generatedFiles) {
+async function generateCrudResources(aggregate, moduleName, moduleBasePath, packageName, apiVersion, generatedFiles, writeOptions = {}) {
   const { name: aggregateName, rootEntity, secondaryEntities, valueObjects = [] } = aggregate;
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'crud');
   
@@ -743,7 +767,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     await renderAndWrite(
       path.join(templatesDir, 'CreateValueObjectDto.java.ejs'),
       path.join(moduleBasePath, 'application', 'dtos', `Create${vo.name}Dto.java`),
-      voDtoContext
+      voDtoContext,
+      writeOptions
     );
     generatedFiles.push({ type: 'DTO', name: `Create${vo.name}Dto`, path: `${moduleName}/application/dtos/Create${vo.name}Dto.java` });
   }
@@ -758,7 +783,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       oneToOneRelationships: oneToOneRelationshipsApp,
       oneToManyRelationships: oneToManyRelationshipsApp,
       validatedVos
-    }
+    },
+    writeOptions
   );
   generatedFiles.push({ type: 'Application Mapper', name: `${aggregateName}ApplicationMapper`, path: `${moduleName}/application/mappers/${aggregateName}ApplicationMapper.java` });
   
@@ -775,14 +801,16 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   await renderAndWrite(
     path.join(templatesDir, 'CreateCommand.java.ejs'),
     path.join(moduleBasePath, 'application', 'commands', `Create${aggregateName}Command.java`),
-    { ...baseContext, imports: commandAppImports }
+    { ...baseContext, imports: commandAppImports },
+    writeOptions
   );
   generatedFiles.push({ type: 'Command', name: `Create${aggregateName}Command`, path: `${moduleName}/application/commands/Create${aggregateName}Command.java` });
   
   await renderAndWrite(
     path.join(templatesDir, 'DeleteCommand.java.ejs'),
     path.join(moduleBasePath, 'application', 'commands', `Delete${aggregateName}Command.java`),
-    baseContext
+    baseContext,
+    writeOptions
   );
   generatedFiles.push({ type: 'Command', name: `Delete${aggregateName}Command`, path: `${moduleName}/application/commands/Delete${aggregateName}Command.java` });
   
@@ -790,14 +818,16 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   await renderAndWrite(
     path.join(templatesDir, 'GetQuery.java.ejs'),
     path.join(moduleBasePath, 'application', 'queries', `Get${aggregateName}Query.java`),
-    baseContext
+    baseContext,
+    writeOptions
   );
   generatedFiles.push({ type: 'Query', name: `Get${aggregateName}Query`, path: `${moduleName}/application/queries/Get${aggregateName}Query.java` });
   
   await renderAndWrite(
     path.join(templatesDir, 'ListQuery.java.ejs'),
     path.join(moduleBasePath, 'application', 'queries', `FindAll${aggregateName}sQuery.java`),
-    baseContext
+    baseContext,
+    writeOptions
   );
   generatedFiles.push({ type: 'Query', name: `FindAll${aggregateName}sQuery`, path: `${moduleName}/application/queries/FindAll${aggregateName}sQuery.java` });
   
@@ -811,28 +841,32 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       oneToOneRelationships: oneToOneRelationshipsApp,
       oneToManyRelationships: oneToManyRelationshipsApp,
       validatedVos
-    }
+    },
+    writeOptions
   );
   generatedFiles.push({ type: 'Handler', name: `Create${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Create${aggregateName}CommandHandler.java` });
   
   await renderAndWrite(
     path.join(templatesDir, 'GetQueryHandler.java.ejs'),
     path.join(moduleBasePath, 'application', 'usecases', `Get${aggregateName}QueryHandler.java`),
-    baseContext
+    baseContext,
+    writeOptions
   );
   generatedFiles.push({ type: 'Handler', name: `Get${aggregateName}QueryHandler`, path: `${moduleName}/application/usecases/Get${aggregateName}QueryHandler.java` });
   
   await renderAndWrite(
     path.join(templatesDir, 'ListQueryHandler.java.ejs'),
     path.join(moduleBasePath, 'application', 'usecases', `FindAll${aggregateName}sQueryHandler.java`),
-    baseContext
+    baseContext,
+    writeOptions
   );
   generatedFiles.push({ type: 'Handler', name: `FindAll${aggregateName}sQueryHandler`, path: `${moduleName}/application/usecases/FindAll${aggregateName}sQueryHandler.java` });
   
   await renderAndWrite(
     path.join(templatesDir, 'DeleteCommandHandler.java.ejs'),
     path.join(moduleBasePath, 'application', 'usecases', `Delete${aggregateName}CommandHandler.java`),
-    baseContext
+    baseContext,
+    writeOptions
   );
   generatedFiles.push({ type: 'Handler', name: `Delete${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Delete${aggregateName}CommandHandler.java` });
   
@@ -846,7 +880,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   await renderAndWrite(
     path.join(templatesDir, 'ResponseDto.java.ejs'),
     path.join(moduleBasePath, 'application', 'dtos', `${aggregateName}ResponseDto.java`),
-    responseDtoContext
+    responseDtoContext,
+    writeOptions
   );
   generatedFiles.push({ type: 'DTO', name: `${aggregateName}ResponseDto`, path: `${moduleName}/application/dtos/${aggregateName}ResponseDto.java` });
   
@@ -880,7 +915,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     await renderAndWrite(
       path.join(templatesDir, 'SecondaryEntityDto.java.ejs'),
       path.join(moduleBasePath, 'application', 'dtos', `${entity.name}Dto.java`),
-      entityDtoContext
+      entityDtoContext,
+      writeOptions
     );
     generatedFiles.push({ type: 'DTO', name: `${entity.name}Dto`, path: `${moduleName}/application/dtos/${entity.name}Dto.java` });
   }
@@ -936,7 +972,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     await renderAndWrite(
       path.join(templatesDir, 'CreateItemDto.java.ejs'),
       path.join(moduleBasePath, 'application', 'dtos', `Create${entity.name}Dto.java`),
-      createItemDtoContext
+      createItemDtoContext,
+      writeOptions
     );
     generatedFiles.push({ type: 'DTO', name: `Create${entity.name}Dto`, path: `${moduleName}/application/dtos/Create${entity.name}Dto.java` });
   }
@@ -945,7 +982,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   await renderAndWrite(
     path.join(templatesDir, 'Controller.java.ejs'),
     path.join(moduleBasePath, 'infrastructure', 'rest', 'controllers', resourceNameCamel, apiVersion, `${aggregateName}Controller.java`),
-    baseContext
+    baseContext,
+    writeOptions
   );
   generatedFiles.push({ type: 'Controller', name: `${aggregateName}Controller`, path: `${moduleName}/infrastructure/rest/controllers/${resourceNameCamel}/${apiVersion}/${aggregateName}Controller.java` });
 }
@@ -961,7 +999,8 @@ async function generatePostmanCollection(
   packageName,
   apiVersion,
   projectConfig,
-  allEnums = []
+  allEnums = [],
+  writeOptions = {}
 ) {
   const { name: aggregateName, rootEntity, secondaryEntities } = aggregate;
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'postman');
@@ -1009,7 +1048,8 @@ async function generatePostmanCollection(
   await renderAndWrite(
     path.join(templatesDir, 'Collection.json.ejs'),
     outputPath,
-    context
+    context,
+    writeOptions
   );
   
   return outputPath;

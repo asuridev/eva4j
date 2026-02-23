@@ -7,12 +7,14 @@ const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath, toPascalCase, pluralizeWord, toKebabCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
+const ChecksumManager = require('../utils/checksum-manager');
 
 /**
  * Generate REST resource with CRUD operations and corresponding use cases
  * @param {string} moduleName - Name of the module
+ * @param {object} options - CLI options (e.g. { force: true })
  */
-async function generateResourceCommand(moduleName) {
+async function generateResourceCommand(moduleName, options = {}) {
   const projectDir = process.cwd();
 
   // Validate eva4j project
@@ -77,6 +79,12 @@ async function generateResourceCommand(moduleName) {
     }
   ]);
 
+  // Initialise checksum manager for the module (safe mode by default — --force to overwrite)
+  const moduleBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName);
+  const checksumManager = new ChecksumManager(moduleBasePath);
+  await checksumManager.load();
+  const writeOptions = { force: options.force || false, checksumManager };
+
   const spinner = ora('Generating resource...').start();
 
   try {
@@ -84,7 +92,6 @@ async function generateResourceCommand(moduleName) {
     const resourceNameCamel = resourceName.charAt(0).toLowerCase() + resourceName.slice(1);
     const resourceNamePlural = pluralizeWord(resourceName);
 
-    // Check if controller already exists
     const controllerPath = path.join(
       projectDir,
       'src',
@@ -99,13 +106,6 @@ async function generateResourceCommand(moduleName) {
       apiVersion,
       `${resourceName}Controller.java`
     );
-
-    if (await fs.pathExists(controllerPath)) {
-      spinner.fail(chalk.red('Resource already exists'));
-      console.error(chalk.red(`\n❌ Resource already exists at:`));
-      console.error(chalk.gray(`   ${moduleName}/infrastructure/rest/controllers/${resourceNameCamel}/${apiVersion}/${resourceName}Controller.java`));
-      process.exit(1);
-    }
 
     // Define use cases to generate
     const useCases = [
@@ -141,20 +141,16 @@ async function generateResourceCommand(moduleName) {
       }
     ];
 
-    const moduleBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName);
-
     // Generate single ResponseDto for the resource
     spinner.text = 'Generating Response DTO...';
     const dtoPath = path.join(moduleBasePath, 'application', 'dtos', `${resourceName}ResponseDto.java`);
-    if (!fs.existsSync(dtoPath)) {
-      const dtoContext = {
-        packageName,
-        moduleName,
-        resourceName
-      };
-      const dtoTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'ResponseDto.java.ejs');
-      await renderAndWrite(dtoTemplatePath, dtoPath, dtoContext);
-    }
+    const dtoContext = {
+      packageName,
+      moduleName,
+      resourceName
+    };
+    const dtoTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'ResponseDto.java.ejs');
+    await renderAndWrite(dtoTemplatePath, dtoPath, dtoContext, writeOptions);
 
     // Generate use cases
     for (const useCase of useCases) {
@@ -173,23 +169,23 @@ async function generateResourceCommand(moduleName) {
         // Generate Command
         const commandPath = path.join(moduleBasePath, 'application', 'commands', `${useCase.name}Command.java`);
         const commandTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'Command.java.ejs');
-        await renderAndWrite(commandTemplatePath, commandPath, context);
+        await renderAndWrite(commandTemplatePath, commandPath, context, writeOptions);
 
         // Generate CommandHandler
         const handlerPath = path.join(moduleBasePath, 'application', 'usecases', `${useCase.name}CommandHandler.java`);
         const handlerTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'CommandHandler.java.ejs');
-        await renderAndWrite(handlerTemplatePath, handlerPath, context);
+        await renderAndWrite(handlerTemplatePath, handlerPath, context, writeOptions);
 
       } else if (useCase.type === 'query') {
         // Generate Query
         const queryPath = path.join(moduleBasePath, 'application', 'queries', `${useCase.name}Query.java`);
         const queryTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'Query.java.ejs');
-        await renderAndWrite(queryTemplatePath, queryPath, context);
+        await renderAndWrite(queryTemplatePath, queryPath, context, writeOptions);
 
         // Generate QueryHandler
         const handlerPath = path.join(moduleBasePath, 'application', 'usecases', `${useCase.name}QueryHandler.java`);
         const handlerTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'QueryHandler.java.ejs');
-        await renderAndWrite(handlerTemplatePath, handlerPath, context);
+        await renderAndWrite(handlerTemplatePath, handlerPath, context, writeOptions);
       }
     }
 
@@ -206,8 +202,9 @@ async function generateResourceCommand(moduleName) {
     };
 
     const controllerTemplatePath = path.join(__dirname, '..', '..', 'templates', 'resource', 'Controller.java.ejs');
-    await renderAndWrite(controllerTemplatePath, controllerPath, controllerContext);
+    await renderAndWrite(controllerTemplatePath, controllerPath, controllerContext, writeOptions);
 
+    await checksumManager.save();
     spinner.succeed(chalk.green('✨ Resource generated successfully!'));
 
     // Display generated components

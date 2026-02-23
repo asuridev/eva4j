@@ -7,8 +7,9 @@ const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject, moduleExists } = require('../utils/validator');
 const { toPackagePath, toPascalCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
+const ChecksumManager = require('../utils/checksum-manager');
 
-async function generateUsecaseCommand(moduleName, usecaseName) {
+async function generateUsecaseCommand(moduleName, usecaseName, options = {}) {
   const projectDir = process.cwd();
   
   // Validate we're in an eva4j project
@@ -79,37 +80,10 @@ async function generateUsecaseCommand(moduleName, usecaseName) {
 
   const moduleBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName);
 
-  // Check if files already exist
-  if (usecaseType === 'command') {
-    const commandPath = path.join(moduleBasePath, 'application', 'commands', `${normalizedUsecaseName}Command.java`);
-    const handlerPath = path.join(moduleBasePath, 'application', 'usecases', `${normalizedUsecaseName}CommandHandler.java`);
-    
-    if (await fs.pathExists(commandPath)) {
-      console.error(chalk.red(`❌ Command already exists: ${normalizedUsecaseName}Command.java`));
-      process.exit(1);
-    }
-    if (await fs.pathExists(handlerPath)) {
-      console.error(chalk.red(`❌ Handler already exists: ${normalizedUsecaseName}CommandHandler.java`));
-      process.exit(1);
-    }
-  } else {
-    const dtoPath = path.join(moduleBasePath, 'application', 'dtos', `${normalizedUsecaseName}ResponseDto.java`);
-    const queryPath = path.join(moduleBasePath, 'application', 'queries', `${normalizedUsecaseName}Query.java`);
-    const handlerPath = path.join(moduleBasePath, 'application', 'usecases', `${normalizedUsecaseName}QueryHandler.java`);
-    
-    if (await fs.pathExists(dtoPath)) {
-      console.error(chalk.red(`❌ Response DTO already exists: ${normalizedUsecaseName}ResponseDto.java`));
-      process.exit(1);
-    }
-    if (await fs.pathExists(queryPath)) {
-      console.error(chalk.red(`❌ Query already exists: ${normalizedUsecaseName}Query.java`));
-      process.exit(1);
-    }
-    if (await fs.pathExists(handlerPath)) {
-      console.error(chalk.red(`❌ Handler already exists: ${normalizedUsecaseName}QueryHandler.java`));
-      process.exit(1);
-    }
-  }
+  // Initialise checksum manager (safe mode by default — --force to overwrite)
+  const checksumManager = new ChecksumManager(moduleBasePath);
+  await checksumManager.load();
+  const writeOptions = { force: options.force || false, checksumManager };
 
   const spinner = ora(`Generating ${usecaseType} use case...`).start();
 
@@ -122,7 +96,7 @@ async function generateUsecaseCommand(moduleName, usecaseName) {
     };
 
     if (usecaseType === 'command') {
-      await generateCommand(projectDir, moduleBasePath, context);
+      await generateCommand(projectDir, moduleBasePath, context, writeOptions);
       
       spinner.succeed(chalk.green('Command use case generated successfully! ✨'));
       
@@ -130,7 +104,7 @@ async function generateUsecaseCommand(moduleName, usecaseName) {
       console.log(chalk.gray(`  ├── application/commands/${normalizedUsecaseName}Command.java`));
       console.log(chalk.gray(`  └── application/usecases/${normalizedUsecaseName}CommandHandler.java`));
     } else {
-      await generateQuery(projectDir, moduleBasePath, context);
+      await generateQuery(projectDir, moduleBasePath, context, writeOptions);
       
       spinner.succeed(chalk.green('Query use case generated successfully! ✨'));
       
@@ -146,6 +120,8 @@ async function generateUsecaseCommand(moduleName, usecaseName) {
     console.log(chalk.white(`   Name: ${normalizedUsecaseName}`));
     console.log();
 
+    await checksumManager.save();
+
   } catch (error) {
     spinner.fail(chalk.red('Failed to generate use case'));
     console.error(chalk.red('\n❌ Error:'), error.message);
@@ -159,40 +135,40 @@ async function generateUsecaseCommand(moduleName, usecaseName) {
 /**
  * Generate Command files (record and handler)
  */
-async function generateCommand(projectDir, moduleBasePath, context) {
+async function generateCommand(projectDir, moduleBasePath, context, writeOptions = {}) {
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'usecase', 'command');
   
   // Generate Command record
   const commandTemplate = path.join(templatesDir, 'Command.java.ejs');
   const commandOutput = path.join(moduleBasePath, 'application', 'commands', `${context.usecaseName}Command.java`);
-  await renderAndWrite(commandTemplate, commandOutput, context);
+  await renderAndWrite(commandTemplate, commandOutput, context, writeOptions);
 
   // Generate CommandHandler class
   const handlerTemplate = path.join(templatesDir, 'CommandHandler.java.ejs');
   const handlerOutput = path.join(moduleBasePath, 'application', 'usecases', `${context.usecaseName}CommandHandler.java`);
-  await renderAndWrite(handlerTemplate, handlerOutput, context);
+  await renderAndWrite(handlerTemplate, handlerOutput, context, writeOptions);
 }
 
 /**
  * Generate Query files (DTO, record, and handler)
  */
-async function generateQuery(projectDir, moduleBasePath, context) {
+async function generateQuery(projectDir, moduleBasePath, context, writeOptions = {}) {
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'usecase', 'query');
   
   // Generate Response DTO
   const dtoTemplate = path.join(templatesDir, 'ResponseDto.java.ejs');
   const dtoOutput = path.join(moduleBasePath, 'application', 'dtos', `${context.usecaseName}ResponseDto.java`);
-  await renderAndWrite(dtoTemplate, dtoOutput, context);
+  await renderAndWrite(dtoTemplate, dtoOutput, context, writeOptions);
 
   // Generate Query record
   const queryTemplate = path.join(templatesDir, 'Query.java.ejs');
   const queryOutput = path.join(moduleBasePath, 'application', 'queries', `${context.usecaseName}Query.java`);
-  await renderAndWrite(queryTemplate, queryOutput, context);
+  await renderAndWrite(queryTemplate, queryOutput, context, writeOptions);
 
   // Generate QueryHandler class
   const handlerTemplate = path.join(templatesDir, 'QueryHandler.java.ejs');
   const handlerOutput = path.join(moduleBasePath, 'application', 'usecases', `${context.usecaseName}QueryHandler.java`);
-  await renderAndWrite(handlerTemplate, handlerOutput, context);
+  await renderAndWrite(handlerTemplate, handlerOutput, context, writeOptions);
 }
 
 module.exports = generateUsecaseCommand;

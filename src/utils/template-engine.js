@@ -3,6 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const prettier = require('prettier');
 const javaPlugin = require('prettier-plugin-java').default;
+const chalk = require('chalk');
 
 const PRETTIER_JAVA_OPTIONS = {
   parser: 'java',
@@ -25,12 +26,22 @@ async function renderTemplate(templatePath, context) {
 }
 
 /**
- * Render and write template to destination
+ * Render and write template to destination.
+ *
+ * When a ChecksumManager is supplied the function operates in safe mode by
+ * default: if the target file exists AND its current content differs from the
+ * checksum recorded the last time eva4j wrote it, the file is considered
+ * "manually modified" and is **skipped** unless `force` is true.
+ *
  * @param {string} templatePath - Path to template file
- * @param {string} destPath - Destination file path
- * @param {object} context - Template variables
+ * @param {string} destPath     - Destination file path
+ * @param {object} context      - Template variables
+ * @param {{force?: boolean, checksumManager?: import('./checksum-manager')}} [writeOptions]
+ * @returns {Promise<'written'|'skipped'>}
  */
-async function renderAndWrite(templatePath, destPath, context) {
+async function renderAndWrite(templatePath, destPath, context, writeOptions = {}) {
+  const { force = false, checksumManager = null } = writeOptions;
+
   let content = await renderTemplate(templatePath, context);
   if (destPath.endsWith('.java')) {
     try {
@@ -40,8 +51,36 @@ async function renderAndWrite(templatePath, destPath, context) {
       console.warn(`[prettier] Could not format ${path.basename(destPath)}: ${e.message}`);
     }
   }
+
+  // ── Incremental / safe-mode logic ────────────────────────────────────────
+  if (checksumManager) {
+    const fileExists = await fs.pathExists(destPath);
+
+    if (fileExists) {
+      const modified = await checksumManager.wasModified(destPath, content);
+
+      if (modified && !force) {
+        const rel = path.relative(process.cwd(), destPath);
+        console.log(chalk.yellow(`  SKIP  ${rel}`) + chalk.gray(' (modified manually — use --force to overwrite)'));
+        return 'skipped';
+      }
+
+      if (modified && force) {
+        const rel = path.relative(process.cwd(), destPath);
+        console.log(chalk.magenta(`  OVERWRITE  ${rel}`));
+      }
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   await fs.ensureDir(path.dirname(destPath));
   await fs.writeFile(destPath, content, 'utf-8');
+
+  if (checksumManager) {
+    checksumManager.recordWrite(destPath, content);
+  }
+
+  return 'written';
 }
 
 /**
