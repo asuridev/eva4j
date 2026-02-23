@@ -1,10 +1,58 @@
 package <%= packageName %>.<%= moduleName %>.domain.models.enums;
+<% if (transitions && transitions.length > 0) { %>
+import <%= packageName %>.shared.domain.customExceptions.InvalidStateTransitionException;
+import java.util.Map;
+import java.util.Set;
+<% } %>
 
 /**
  * <%= name %> enum
  */
 public enum <%= name %> {
 <% values.forEach((value, index) => { %>
-    <%= value %><%= index < values.length - 1 ? ',' : '' %>
+    <%= value %><%= index < values.length - 1 ? ',' : ';' %>
 <% }); %>
+<% if (transitions && transitions.length > 0) { %>
+<%
+    // Build transition map: { STATE: [ALLOWED_TARGETS, ...] }
+    const transitionMap = {};
+    values.forEach(v => { transitionMap[v] = []; });
+    transitions.forEach(t => {
+        const froms = Array.isArray(t.from) ? t.from : [t.from];
+        froms.forEach(f => {
+            if (!transitionMap[f]) transitionMap[f] = [];
+            if (!transitionMap[f].includes(t.to)) transitionMap[f].push(t.to);
+        });
+    });
+    const entries = Object.entries(transitionMap);
+%>
+
+    private static final Map<<%= name %>, Set<<%= name %>>> VALID_TRANSITIONS;
+
+    static {
+        VALID_TRANSITIONS = Map.ofEntries(
+<% entries.forEach(([state, targets], idx) => { %>
+            Map.entry(<%= name %>.<%= state %>, Set.of(<%= targets.length > 0 ? targets.map(t => `${name}.${t}`).join(', ') : '' %>))<%= idx < entries.length - 1 ? ',' : '' %>
+<% }); %>
+        );
+    }
+
+    /**
+     * Returns true if transition to the target state is valid from the current state.
+     */
+    public boolean canTransitionTo(<%= name %> target) {
+        return VALID_TRANSITIONS.getOrDefault(this, Set.of()).contains(target);
+    }
+
+    /**
+     * Performs the transition to the target state.
+     * Throws {@link InvalidStateTransitionException} if the transition is not allowed.
+     */
+    public <%= name %> transitionTo(<%= name %> target) {
+        if (!canTransitionTo(target)) {
+            throw new InvalidStateTransitionException(this.name(), target.name());
+        }
+        return target;
+    }
+<% } %>
 }

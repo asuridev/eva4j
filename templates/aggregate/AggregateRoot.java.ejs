@@ -6,6 +6,12 @@ package <%= packageName %>.<%= moduleName %>.domain.models.entities;
 <% if (valueObjects.length > 0) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
 <% } %>
+<% if (fields.some(f => f.transitionMeta)) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
+<% } %>
+<% if (fields.some(f => f.transitionMeta && f.transitionMeta.transitions.some(t => t.guard))) { %>
+import <%= packageName %>.shared.domain.customExceptions.BusinessException;
+<% } %>
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -44,12 +50,16 @@ public class <%= name %> {
 <% }); %>
     }
 
-<% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly); %>
-<% if (creationFields.length > 0) { %>
-    // Constructor for new entity creation (without id, audit fields, and readOnly fields)
+<% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly && !f.autoInit); %>
+<% const autoInitFields = fields.filter(f => f.autoInit); %>
+<% if (creationFields.length > 0 || autoInitFields.length > 0) { %>
+    // Constructor for new entity creation (without id, audit fields, readOnly and auto-initialized fields)
     public <%= name %>(<% let paramIdx = 0; %><% creationFields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %>) {
 <% creationFields.forEach(field => { %>
         this.<%= field.name %> = <%= field.name %>;
+<% }); %>
+<% autoInitFields.forEach(field => { %>
+        this.<%= field.name %> = <%- field.javaType %>.<%= field.autoInitValue %>;
 <% }); %>
     }
 <% } %>
@@ -117,4 +127,43 @@ public class <%= name %> {
         <%- method.body %>
     }
 <% }); %>
+<% const transitionFields = fields.filter(f => f.transitionMeta); %>
+<% if (transitionFields.length > 0) { %>
+
+    // ─── State Transition Methods ────────────────────────────────────────────
+<% transitionFields.forEach(field => { %>
+<%     const meta = field.transitionMeta; %>
+<%     const methodMap = new Map(); %>
+<%     meta.transitions.forEach(t => { if (!methodMap.has(t.method)) methodMap.set(t.method, t); }); %>
+<%     methodMap.forEach((transition, methodName) => { %>
+<%         const froms = Array.isArray(transition.from) ? transition.from : [transition.from]; %>
+
+    /**
+     * Transitions [<%= field.name %>] from [<%= froms.join(', ') %>] to <%= transition.to %>
+     */
+    public void <%= methodName %>() {
+<% if (transition.guard) { %>
+        if (<%= transition.guard %>) {
+            throw new BusinessException("Cannot execute '<%= methodName %>': business rule violated");
+        }
+<% } %>
+        this.<%= field.name %> = this.<%= field.name %>.transitionTo(<%- field.javaType %>.<%= transition.to %>);
+    }
+<%     }); %>
+
+    // ─── State Query Helpers ─────────────────────────────────────────────────
+<%     meta.enumValues.forEach(value => { %>
+    public boolean is<%= value.charAt(0) + value.slice(1).toLowerCase() %>() {
+        return this.<%= field.name %> == <%- field.javaType %>.<%= value %>;
+    }
+<%     }); %>
+
+    // ─── Transition Readiness Helpers ────────────────────────────────────────
+<%     methodMap.forEach((transition, methodName) => { %>
+    public boolean can<%= methodName.charAt(0).toUpperCase() + methodName.slice(1) %>() {
+        return this.<%= field.name %>.canTransitionTo(<%- field.javaType %>.<%= transition.to %>);
+    }
+<%     }); %>
+<% }); %>
+<% } %>
 }

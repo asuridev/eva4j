@@ -248,7 +248,9 @@ async function generateEntitiesCommand(moduleName) {
         packageName,
         moduleName,
         name: enumDef.name,
-        values: enumDef.values
+        values: enumDef.values,
+        transitions: enumDef.transitions || null,
+        initialValue: enumDef.initialValue || null
       };
 
       const templatePath = path.join(__dirname, '..', '..', 'templates', 'aggregate', 'Enum.java.ejs');

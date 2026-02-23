@@ -129,6 +129,22 @@ public class HandlerExceptions {
     return new FullErrorMessage(List.of(ex.getMessage()), "Conflict", HttpStatus.CONFLICT.value());
   }
 
+  @ResponseStatus(HttpStatus.CONFLICT)
+  @ExceptionHandler(InvalidStateTransitionException.class)
+  @ResponseBody
+  public ErrorMessage onInvalidStateTransitionException(InvalidStateTransitionException ex) {
+    if (ex.getMessage() == null) return new ShortErrorMessage("Invalid State Transition", HttpStatus.CONFLICT.value());
+    return new FullErrorMessage(List.of(ex.getMessage()), "Invalid State Transition", HttpStatus.CONFLICT.value());
+  }
+
+  @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+  @ExceptionHandler(BusinessException.class)
+  @ResponseBody
+  public ErrorMessage onBusinessException(BusinessException ex) {
+    if (ex.getMessage() == null) return new ShortErrorMessage("Business Rule Violation", HttpStatus.UNPROCESSABLE_ENTITY.value());
+    return new FullErrorMessage(List.of(ex.getMessage()), "Business Rule Violation", HttpStatus.UNPROCESSABLE_ENTITY.value());
+  }
+
   //error de feign client
   @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
   @ExceptionHandler(RetryableException.class)

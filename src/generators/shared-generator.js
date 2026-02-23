@@ -130,8 +130,11 @@ class SharedGenerator {
 
   async generateCustomExceptions(basePath) {
     const exceptionsPath = path.join(basePath, 'domain', 'customExceptions');
-    const files = ['BadRequestException', 'ConflictException', 'ForbiddenException', 
-                   'ImportFileException', 'NotFoundException', 'UnauthorizedException', 'ValidationException'];
+    const files = [
+      'BadRequestException', 'BusinessException', 'ConflictException', 'ForbiddenException',
+      'ImportFileException', 'InvalidStateTransitionException', 'NotFoundException',
+      'UnauthorizedException', 'ValidationException'
+    ];
     
     for (const file of files) {
       await this.generateFile(`customExceptions/${file}.java.ejs`, 

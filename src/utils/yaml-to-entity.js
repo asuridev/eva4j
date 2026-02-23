@@ -47,7 +47,9 @@ function parseAggregate(aggregateData) {
   // Parse aggregate-level enums
   const aggregateEnums = enums.map(e => ({
     name: toPascalCase(e.name),
-    values: e.values
+    values: e.values,
+    transitions: e.transitions || null,
+    initialValue: e.initialValue || null
   }));
   
   // Parse value objects FIRST to get their names
@@ -251,7 +253,19 @@ function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
   
   // Check if field type matches any aggregate enum
   const isEnumType = aggregateEnums.some(e => e.name === javaType);
-  
+
+  // Build transition metadata if this field references an enum with transitions
+  const matchingEnum = isEnumType ? aggregateEnums.find(e => e.name === javaType) : null;
+  const hasTransitions = !!(matchingEnum && matchingEnum.transitions && matchingEnum.transitions.length > 0);
+  const transitionMeta = hasTransitions ? {
+    transitions: matchingEnum.transitions,
+    initialValue: matchingEnum.initialValue || null,
+    transitionMap: buildTransitionMap(matchingEnum.transitions, matchingEnum.values),
+    enumValues: matchingEnum.values
+  } : null;
+  const autoInit = !!(hasTransitions && matchingEnum.initialValue);
+  const autoInitValue = autoInit ? matchingEnum.initialValue : null;
+
   return {
     name: fieldName,
     originalName: name,
@@ -267,9 +281,12 @@ function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
     isCollection,
     collectionElementType,
     columnAnnotations: extractColumnAnnotations(annotations),
-    readOnly: readOnly,
+    readOnly: readOnly || autoInit,  // autoInit (enum initialValue present) implies readOnly
     hidden: hidden,
-    validationAnnotations: validations.map(v => buildAnnotationString(v))
+    validationAnnotations: validations.map(v => buildAnnotationString(v)),
+    transitionMeta,
+    autoInit,
+    autoInitValue
   };
 }
 
@@ -793,7 +810,26 @@ function generateValueObjectImports(fields, methods, aggregateEnums = [], packag
 }
 
 /**
- * Extract all enums from aggregates
+ * Build a map of valid transitions per state.
+ * @param {Array} transitions - Transitions from YAML
+ * @param {Array} values - All enum values
+ * @returns {Object} Map { STATE: [ALLOWED_TARGETS] }
+ */
+function buildTransitionMap(transitions, values) {
+  const map = {};
+  values.forEach(v => { map[v] = []; });
+  transitions.forEach(t => {
+    const froms = Array.isArray(t.from) ? t.from : [t.from];
+    froms.forEach(f => {
+      if (!map[f]) map[f] = [];
+      if (!map[f].includes(t.to)) map[f].push(t.to);
+    });
+  });
+  return map;
+}
+
+/**
+ * Extract all enums from aggregates (preserving transitions and initialValue).
  * @param {Array} aggregates - Aggregates array from YAML
  * @returns {Array} All unique enums
  */
@@ -808,7 +844,9 @@ function extractAllEnums(aggregates) {
         if (!enumsMap.has(enumName)) {
           enumsMap.set(enumName, {
             name: enumName,
-            values: enumDef.values
+            values: enumDef.values,
+            transitions: enumDef.transitions || null,
+            initialValue: enumDef.initialValue || null
           });
         }
       });

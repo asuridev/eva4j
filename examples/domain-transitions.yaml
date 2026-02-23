@@ -1,0 +1,60 @@
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+          - name: status
+            type: OrderStatus   # References enum below — transitions auto-generate methods
+
+    enums:
+      - name: OrderStatus
+        initialValue: PENDING   # Auto-assigned in creation constructor (no param needed)
+        transitions:
+          - from: PENDING
+            to: CONFIRMED
+            method: confirm
+
+          - from: CONFIRMED
+            to: SHIPPED
+            method: ship
+
+          - from: SHIPPED
+            to: DELIVERED
+            method: deliver
+
+          - from: [PENDING, CONFIRMED]  # Multiple source states for one method
+            to: CANCELLED
+            method: cancel
+            guard: "this.status == OrderStatus.DELIVERED"  # BusinessException if true
+
+        values:
+          - PENDING
+          - CONFIRMED
+          - SHIPPED
+          - DELIVERED
+          - CANCELLED
+
+# What gets generated:
+#
+# OrderStatus.java
+#   - VALID_TRANSITIONS static map
+#   - canTransitionTo(OrderStatus target): boolean
+#   - transitionTo(OrderStatus target): OrderStatus   → throws InvalidStateTransitionException
+#
+# Order.java
+#   - Creation constructor does NOT receive status (auto-initialized to PENDING)
+#   - confirm()   – PENDING → CONFIRMED
+#   - ship()      – CONFIRMED → SHIPPED
+#   - deliver()   – SHIPPED → DELIVERED
+#   - cancel()    – [PENDING, CONFIRMED] → CANCELLED  (with guard)
+#   - isPending(), isConfirmed(), isShipped(), isDelivered(), isCancelled()
+#   - canConfirm(), canShip(), canDeliver(), canCancel()
