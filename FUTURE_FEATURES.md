@@ -12,7 +12,7 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 - [Soft Delete Completo](#3-soft-delete-completo)
 
 ### � Media Prioridad
-- [Paginación en Queries](#4-paginación-en-queries)
+- [Paginación en Queries](#4-paginación-en-queries) ✅
 - [Optimistic Locking](#5-optimistic-locking)
 - [Read Models Separados](#6-read-models-separados-proyecciones)
 - [Enums con Comportamiento y Transiciones](#7-enums-con-comportamiento-y-transiciones) ✅
@@ -27,6 +27,9 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 ### ✅ Implementado
 - [Auditoría de Tiempo y Usuario](#13-auditoría-implementada)
 - [Validaciones JSR-303](#14-validaciones-jsr-303-implementado)
+- [Enums con Comportamiento y Transiciones](#7-enums-con-comportamiento-y-transiciones)
+- [Generación Incremental / Diff](#10-generación-incremental--diff)
+- [Paginación en Queries](#4-paginación-en-queries)
 
 ---
 
@@ -320,73 +323,85 @@ public ResponseEntity<Void> restore(@PathVariable String id) {
 
 ---
 
-## 4. Paginación en Queries
+## 4. Paginación en Queries ✅
 
 ### Descripción
 
-Actualmente `ListQueryHandler` devuelve `List<T>` completo sin límite. En producción, cualquier colección que pueda crecer sin límite debe estar paginada. Esto también implica soporte para filtros dinámicos y ordenamiento.
+Implementado como **paginación siempre activa** en todos los módulos generados. `GET /` ya no devuelve `List<T>` sin límite — devuelve un `PagedResponse<T>` propio con `content`, `page`, `size`, `totalElements` y `totalPages`. Sin flags ni configuración adicional en `domain.yaml`.
 
-### Sintaxis Propuesta
+### Implementación Realizada
 
-```yaml
-aggregates:
-  - name: Order
-    queries:
-      - name: FindAllOrders
-        paginated: true
-        filters:
-          - field: status
-            type: OrderStatus
-          - field: customerId
-            type: String
-        sort:
-          defaultField: createdAt
-          defaultDirection: DESC
+#### PagedResponse — `shared/application/dtos/PagedResponse.java`
+
+Record genérico generado una vez por proyecto en la capa shared. Desacoplado de Spring Data `Page<T>` para no exponer internals de Spring en la API:
+
+```java
+public record PagedResponse<T>(
+    List<T> content,
+    int page,
+    int size,
+    long totalElements,
+    int totalPages
+) {
+    public static <T> PagedResponse<T> of(
+            List<T> content, int page, int size, long totalElements) {
+        int totalPages = size == 0 ? 1 : (int) Math.ceil((double) totalElements / size);
+        return new PagedResponse<>(content, page, size, totalElements, totalPages);
+    }
+}
 ```
 
-### Código Generado
+#### Query con parámetros de paginación
 
 ```java
 public record FindAllOrdersQuery(
-    OrderStatus status,
-    String customerId,
     int page,
     int size,
     String sortBy,
     String sortDirection
-) {}
+) implements Query<PagedResponse<OrderResponseDto>> {}
 ```
 
+#### Handler paginado
+
 ```java
-public Page<OrderResponseDto> handle(FindAllOrdersQuery query) {
-    Pageable pageable = PageRequest.of(
-        query.page(), query.size(),
-        Sort.by(Sort.Direction.fromString(query.sortDirection()), query.sortBy())
-    );
-    Page<Order> orders = orderRepository.findAll(
-        OrderSpecifications.build(query.status(), query.customerId()), pageable
-    );
-    return orders.map(mapper::toDto);
+public PagedResponse<OrderResponseDto> handle(FindAllOrdersQuery query) {
+    Sort sort = Sort.by(Sort.Direction.fromString(query.sortDirection()), query.sortBy());
+    Pageable pageable = PageRequest.of(query.page(), query.size(), sort);
+    Page<Order> page = repository.findAll(pageable);
+    List<OrderResponseDto> content = page.getContent().stream().map(mapper::toDto).toList();
+    return PagedResponse.of(content, page.getNumber(), page.getSize(), page.getTotalElements());
 }
 ```
 
-```java
-public class OrderSpecifications {
-    public static Specification<OrderJpa> build(OrderStatus status, String customerId) {
-        return Specification
-            .where(hasStatus(status))
-            .and(hasCustomerId(customerId));
-    }
-    private static Specification<OrderJpa> hasStatus(OrderStatus status) {
-        return (root, query, cb) ->
-            status == null ? null : cb.equal(root.get("status"), status);
-    }
-    private static Specification<OrderJpa> hasCustomerId(String customerId) {
-        return (root, query, cb) ->
-            customerId == null ? null : cb.equal(root.get("customerId"), customerId);
-    }
+#### Endpoint REST
+
+```bash
+# Defaults: page=0, size=20, sortBy=id, sortDirection=ASC
+GET /api/v1/orders?page=0&size=10&sortBy=createdAt&sortDirection=DESC
+
+# Respuesta
+{
+  "content": [...],
+  "page": 0,
+  "size": 10,
+  "totalElements": 87,
+  "totalPages": 9
 }
 ```
+
+#### Archivos modificados
+
+| Archivo | Cambio |
+|---|---|
+| `templates/shared/application/dtos/PagedResponse.java.ejs` | ✅ Nuevo template shared |
+| `src/generators/shared-generator.js` | ✅ Método `generatePagedResponse()` |
+| `src/commands/generate-entities.js` | ✅ Llama `generatePagedResponse` en cada `g entities` |
+| `templates/crud/ListQuery.java.ejs` | ✅ Parámetros de paginación |
+| `templates/crud/ListQueryHandler.java.ejs` | ✅ `PageRequest` + `PagedResponse` |
+| `templates/aggregate/AggregateRepository.java.ejs` | ✅ `Page<X> findAll(Pageable)` |
+| `templates/aggregate/AggregateRepositoryImpl.java.ejs` | ✅ Implementación `jpaRepository.findAll(pageable).map(...)` |
+| `templates/crud/Controller.java.ejs` | ✅ `@RequestParam` page/size/sortBy/sortDirection |
 
 ---
 
@@ -709,49 +724,49 @@ domain.yaml:41:7  error  Relationship type "OneToFew" is not valid.
 
 ---
 
-## 10. Generación Incremental / Diff
+## 10. Generación Incremental / Diff ✅
 
 ### Descripción
 
-Actualmente `eva4j g entities` regenera **todos** los archivos, sobreescribiendo cualquier modificación manual. Este es el mayor bloqueador para adopción en proyectos reales donde el desarrollador personaliza la lógica generada.
+Implementado como **safe mode con checksums SHA-256**. `eva4j g entities` (y `g usecase`, `g resource`) detecta si un archivo generado fue modificado manualmente después de su generación y lo omite automáticamente en re-ejecuciones. El flag `--force` permite sobreescribir cuando se desea regenerar intencionalmente.
 
-### Estrategias Propuestas
+### Implementación Realizada
 
-#### Opción A: Archivos base + archivos de extensión
+#### ChecksumManager — `src/utils/checksum-manager.js`
 
-```
-order/application/mappers/
-├── OrderApplicationMapperBase.java    <- regenerado siempre
-└── OrderApplicationMapper.java        <- creado una vez, el dev lo personaliza
-```
+Almacena hashes SHA-256 de cada archivo escrito en un archivo `.eva4j-checksums.json` por módulo (junto al `domain.yaml`). Métodos clave:
+- `wasModified(destPath, generatedContent)` — compara hash en disco vs hash almacenado
+- `recordWrite(destPath, content)` — registra hash del archivo recién escrito
+- `save()` — persiste la base de datos de checksums
 
-```java
-// OrderApplicationMapperBase.java — regenerado en cada g entities
-public abstract class OrderApplicationMapperBase {
-    public Order fromCommand(CreateOrderCommand command) { /* generado */ }
-    public OrderResponseDto toDto(Order entity) { /* generado */ }
-}
-
-// OrderApplicationMapper.java — creado una sola vez
-@Component
-public class OrderApplicationMapper extends OrderApplicationMapperBase {
-    // Override opcional de métodos base
-    // Métodos adicionales del proyecto aquí
-}
-```
-
-#### Opción B: Flag --safe en el CLI
+#### Safe mode en `renderAndWrite()` — `src/utils/template-engine.js`
 
 ```bash
-# Regenera solo archivos que NO fueron modificados manualmente
-eva4j g entities order --safe
+# Comportamiento por defecto (safe mode)
+eva4j g entities orders
 
 # Output:
-# OK  Order.java                       -- regenerado (sin cambios previos)
-# OK  OrderJpa.java                    -- regenerado (sin cambios previos)
-# SKIP OrderApplicationMapper.java     -- omitido (modificado manualmente)
-# SKIP CreateOrderCommandHandler.java  -- omitido (modificado manualmente)
+# ✅ Order.java                        -- regenerado (sin cambios previos)
+# ✅ OrderJpa.java                     -- regenerado (sin cambios previos)
+# ⚠️  SKIP OrderApplicationMapper.java -- omitido (modificado manualmente — use --force to overwrite)
+# ⚠️  SKIP CreateOrderCommandHandler.java -- omitido (modificado manualmente)
+
+# Con --force: sobreescribe todo
+eva4j g entities orders --force
 ```
+
+#### Comandos con safe mode integrado
+
+| Comando | Estado |
+|---|---|
+| `eva4j g entities <module>` | ✅ Integrado |
+| `eva4j g usecase <module> <name>` | ✅ Integrado |
+| `eva4j g resource <module>` | ✅ Integrado |
+| `eva4j create` / `eva4j add module` | ⚠️ Out of scope (archivos de scaffolding inicial, no se re-ejecutan) |
+
+#### Nota sobre portabilidad
+
+`.eva4j-checksums.json` está en `.gitignore` por diseño — es estado local de la máquina de desarrollo. En un `git clone` fresco, la primera re-ejecución regenerará todos los archivos (comportamiento correcto en ese contexto).
 
 ---
 
@@ -949,13 +964,13 @@ private Integer age;
 | 1 | Domain Events | � Alta | � Alta | � Pendiente |
 | 2 | Aggregate Boundaries por ID | � Alta | � Media | � Pendiente |
 | 3 | Soft Delete Completo | � Alta | � Baja | � Parcial |
-| 4 | Paginación en Queries | � Media | � Media | � Pendiente |
+| 4 | Paginación en Queries | Impl. | -- | ✅ Implementado |
 | 5 | Optimistic Locking | � Media | � Baja | � Pendiente |
 | 6 | Read Models / Proyecciones | � Media | � Alta | � Pendiente |
 | 7 | Enums con Transiciones | Impl. | -- | ✅ Implementado |
 | 8 | Specifications Pattern | � Media | � Media | � Pendiente |
 | 9 | JSON Schema para domain.yaml | � Tooling | � Media | � Pendiente |
-| 10 | Generacion Incremental | � Tooling | � Alta | � Pendiente |
+| 10 | Generacion Incremental | � Tooling | -- | ✅ Implementado |
 | 11 | eva4j doctor | � Tooling | � Media | � Pendiente |
 | 12 | Tests Completos | � Tooling | � Media | � Pendiente |
 | 13 | Auditoria completa | Impl. | -- | ✅ Implementado |
@@ -963,6 +978,6 @@ private Integer age;
 
 ---
 
-**Ultima actualizacion:** 2026-02-22
+**Ultima actualizacion:** 2026-02-23
 **Version de eva4j:** 1.x
 **Estado:** Documento de planificacion y referencia

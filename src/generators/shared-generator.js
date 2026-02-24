@@ -67,6 +67,19 @@ class SharedGenerator {
     await fs.ensureDir(eventsPath);
   }
 
+  async generatePagedResponse(basePath) {
+    const dtosPath = path.join(basePath, 'application', 'dtos');
+    const destPath = path.join(dtosPath, 'PagedResponse.java');
+
+    // Only generate if it doesn't exist yet
+    if (await fs.pathExists(destPath)) {
+      return;
+    }
+
+    await fs.ensureDir(dtosPath);
+    await this.generateFile('application/dtos/PagedResponse.java.ejs', destPath);
+  }
+
   async generatePackageInfo(basePath) {
     await this.generateFile('package-info.java.ejs', 
       path.join(basePath, 'package-info.java'));

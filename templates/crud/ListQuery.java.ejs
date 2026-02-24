@@ -1,9 +1,13 @@
 package <%= packageName %>.<%= moduleName %>.application.queries;
 
-import java.util.List;
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+import <%= packageName %>.shared.application.dtos.PagedResponse;
 import <%= packageName %>.shared.domain.interfaces.Query;
 
 public record FindAll<%= aggregateName %>sQuery(
-) implements Query<List<<%= aggregateName %>ResponseDto>> {
+    int page,
+    int size,
+    String sortBy,
+    String sortDirection
+) implements Query<PagedResponse<<%= aggregateName %>ResponseDto>> {
 }

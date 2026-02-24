@@ -5,25 +5,30 @@ import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %
 import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.shared.application.dtos.PagedResponse;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
 import <%= packageName %>.shared.domain.interfaces.QueryHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 /**
  * FindAll<%= aggregateName %>sQueryHandler
- * Handles retrieval of all <%= aggregateName %>s
+ * Handles retrieval of all <%= aggregateName %>s (paginated)
  */
 @Slf4j
 @ApplicationComponent
-public class FindAll<%= aggregateName %>sQueryHandler implements QueryHandler<FindAll<%= aggregateName %>sQuery, List<<%= aggregateName %>ResponseDto>> {
+public class FindAll<%= aggregateName %>sQueryHandler implements QueryHandler<FindAll<%= aggregateName %>sQuery, PagedResponse<<%= aggregateName %>ResponseDto>> {
 
     private final <%= aggregateName %>Repository repository;
     private final <%= aggregateName %>ApplicationMapper mapper;
 
-    public FindAll<%= aggregateName %>sQueryHandler(<%= aggregateName %>Repository repository, 
+    public FindAll<%= aggregateName %>sQueryHandler(<%= aggregateName %>Repository repository,
                                                      <%= aggregateName %>ApplicationMapper mapper) {
         this.repository = repository;
         this.mapper = mapper;
@@ -31,12 +36,21 @@ public class FindAll<%= aggregateName %>sQueryHandler implements QueryHandler<Fi
 
     @Override
     @Transactional(readOnly = true)
-    public List<<%= aggregateName %>ResponseDto> handle(FindAll<%= aggregateName %>sQuery query) {
-        log.info("Handling FindAll<%= aggregateName %>sQuery");
-        
-        List<<%= aggregateName %>> entities = repository.findAll();
-        
-        log.info("FindAll<%= aggregateName %>s retrieved - total elements: {}", entities.size());
-        return mapper.toDto(entities);
+    public PagedResponse<<%= aggregateName %>ResponseDto> handle(FindAll<%= aggregateName %>sQuery query) {
+        log.info("Handling FindAll<%= aggregateName %>sQuery — page={}, size={}, sortBy={}, sortDirection={}",
+                query.page(), query.size(), query.sortBy(), query.sortDirection());
+
+        Sort sort = Sort.by(Sort.Direction.fromString(query.sortDirection()), query.sortBy());
+        Pageable pageable = PageRequest.of(query.page(), query.size(), sort);
+
+        Page<<%= aggregateName %>> page = repository.findAll(pageable);
+        List<<%= aggregateName %>ResponseDto> content = page.getContent().stream()
+                .map(mapper::toDto)
+                .toList();
+
+        log.info("FindAll<%= aggregateName %>s retrieved — page={}/{}, totalElements={}",
+                page.getNumber() + 1, page.getTotalPages(), page.getTotalElements());
+
+        return PagedResponse.of(content, page.getNumber(), page.getSize(), page.getTotalElements());
     }
 }

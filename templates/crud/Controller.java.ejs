@@ -5,6 +5,7 @@ import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggre
 import <%= packageName %>.<%= moduleName %>.application.queries.Get<%= aggregateName %>Query;
 import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+import <%= packageName %>.shared.application.dtos.PagedResponse;
 import <%= packageName %>.shared.infrastructure.configurations.useCaseConfig.UseCaseMediator;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -13,8 +14,6 @@ import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/<%= apiVersion %>/<%= resourceNameKebab %>")
@@ -49,10 +48,15 @@ public class <%= aggregateName %>Controller {
 
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
-    @Operation(summary = "Get all <%= aggregateName %>s")
-    public List<<%= aggregateName %>ResponseDto> findAll() {
-        log.info("Finding all <%= aggregateName %>s");
-        return useCaseMediator.dispatch(new FindAll<%= aggregateName %>sQuery());
+    @Operation(summary = "Get all <%= aggregateName %>s (paginated)")
+    public PagedResponse<<%= aggregateName %>ResponseDto> findAll(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "id") String sortBy,
+            @RequestParam(defaultValue = "ASC") String sortDirection) {
+        log.info("Finding all <%= aggregateName %>s — page={}, size={}, sortBy={}, sortDirection={}",
+                page, size, sortBy, sortDirection);
+        return useCaseMediator.dispatch(new FindAll<%= aggregateName %>sQuery(page, size, sortBy, sortDirection));
     }
 
     @DeleteMapping("/{id}")

@@ -190,10 +190,13 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       agg.secondaryEntities.some(e => e.audit && e.audit.trackUser)
     );
     
+    // Always generate PagedResponse shared DTO (used by all ListQueryHandlers)
+    const sharedBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, 'shared');
+    const sharedGenerator = new SharedGenerator({ packageName, packagePath });
+    await sharedGenerator.generatePagedResponse(sharedBasePath);
+
     // Generate audit-related shared components if needed
     if (hasAuditableEntities || hasTrackUserEntities) {
-      const sharedBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, 'shared');
-      const sharedGenerator = new SharedGenerator({ packageName, packagePath });
       
       // Always generate base AuditableEntity if any audit is enabled
       if (hasAuditableEntities) {
