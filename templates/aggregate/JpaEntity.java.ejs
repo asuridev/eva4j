@@ -84,7 +84,8 @@ if (audit && audit.trackUser) {
     <% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)
     <% } else if (field.javaType === 'Long' || field.javaType === 'Integer') { %>@GeneratedValue(strategy = GenerationType.IDENTITY)
     <% } %><% } %>@Column(name = "<%= field.name.replace(/([A-Z])/g, '_$1').toLowerCase() %>")
-    private <%- field.javaType %> <%= field.name %>;
+    <% if (field.reference) { %>/** Cross-aggregate reference → <%= field.reference.aggregate %><% if (field.reference.module) { %> (module: <%= field.reference.module %>)<% } %> */
+    <% } %>private <%- field.javaType %> <%= field.name %>;
   <% } %>
 <% }); %>
 <% relationships.forEach(rel => { %>

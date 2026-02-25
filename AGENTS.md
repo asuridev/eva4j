@@ -558,6 +558,7 @@ Los campos en domain.yaml soportan las siguientes propiedades:
 | **`readOnly`** | Boolean | `false` | **Excluye del constructor de negocio y CreateDto** |
 | **`hidden`** | Boolean | `false` | **Excluye del ResponseDto** |
 | **`validations`** | Array | `[]` | **Anotaciones JSR-303 en el Command y CreateDto** |
+| **`reference`** | Object | `null` | **Declara referencia semántica a otro agregado (genera comentario Javadoc)** |
 
 #### Flags de Visibilidad: `readOnly` y `hidden`
 

@@ -74,6 +74,7 @@ if (audit && audit.trackUser) {
     <% }); %>    })
     <% } %>@Embedded
     <% } %><% if (field.isEnum) { %>@Enumerated(EnumType.STRING)
+    <% } %><% if (field.reference) { %>/** Cross-aggregate reference → <%= field.reference.aggregate %><% if (field.reference.module) { %> (module: <%= field.reference.module %>)<% } %> */
     <% } %>private <%- field.isValueObject ? field.javaTypeJpa : field.javaType %> <%= field.name %>;
   <% } %>
 <% }); %>

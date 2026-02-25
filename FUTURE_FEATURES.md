@@ -30,6 +30,7 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 - [Enums con Comportamiento y Transiciones](#7-enums-con-comportamiento-y-transiciones)
 - [Generación Incremental / Diff](#10-generación-incremental--diff)
 - [Paginación en Queries](#4-paginación-en-queries)
+- [Aggregate Boundaries por ID](#2-aggregate-boundaries-por-id-implementado)
 
 ---
 
@@ -178,15 +179,15 @@ public class OrderEventListener {
 
 ---
 
-## 2. Aggregate Boundaries por ID
+## 2. Aggregate Boundaries por ID ✅
 
 ### Descripción
 
-En DDD, las referencias entre agregados distintos deben realizarse **por ID**, nunca con `@ManyToOne` cruzado. Hoy eva4j genera referencias JPA directas entre todos los agregados del mismo módulo, creando un único grafo de entidades JPA en vez de agregados independientes.
+Eva4j ya genera correctamente el patrón DDD de referencia por ID: los campos que apuntan a otro agregado se generan como tipos primitivos (`String`, `Long`, etc.) sin ningún `@ManyToOne` cruzado. Esta feature añade **declaración semántica explícita** mediante la propiedad `reference:` en el campo, que permite documentar la intención en el YAML y generar un comentario Javadoc en el código.
 
-Esto impide escalar los agregados de forma independiente y crea dependencias de carga que violan los límites transaccionales.
+Sin `reference:`, un campo `customerId: String` es indistinguible de cualquier otro `String`. Con `reference:`, el generador sabe que es un puntero intencional al agregado `Customer` del módulo `customers`.
 
-### Sintaxis Propuesta
+### Sintaxis
 
 ```yaml
 aggregates:
@@ -200,8 +201,8 @@ aggregates:
           - name: customerId
             type: String
             reference:
-              aggregate: Customer
-              module: customers
+              aggregate: Customer   # Nombre del agregado (PascalCase) — obligatorio
+              module: customers     # Módulo donde vive el agregado — opcional
           - name: productId
             type: String
             reference:
@@ -209,36 +210,45 @@ aggregates:
               module: catalog
 ```
 
+### Comportamiento
+
+- El tipo Java **no cambia** — sigue siendo `String`, `Long`, etc.
+- JPA genera `@Column` normal — **sin** `@ManyToOne` ni `@JoinColumn`.
+- Se genera un **comentario Javadoc** en la entidad de dominio y en la entidad JPA.
+- `module:` es opcional: se puede omitir si el agregado referenciado está en el mismo módulo.
+- Si `reference:` está malformado (falta `aggregate`), eva4j lanza un error descriptivo.
+
 ### Código Generado
 
 ```java
 // domain/models/entities/Order.java
-public class Order {
-    private String id;
-    private String customerId;  // Solo el ID, nunca Customer customer
-    private String productId;
-}
+/** Cross-aggregate reference → Customer (module: customers) */
+private String customerId;
+
+/** Cross-aggregate reference → Product (module: catalog) */
+private String productId;
 ```
 
 ```java
-public class GetOrderWithCustomerQueryHandler {
-    private final OrderRepository orderRepository;
-    private final CustomerServiceClient customerClient;
+// infrastructure/database/entities/OrderJpa.java
+@Column(name = "customer_id")
+/** Cross-aggregate reference → Customer (module: customers) */
+private String customerId;
 
-    public OrderWithCustomerDto handle(GetOrderWithCustomerQuery query) {
-        Order order = orderRepository.findById(query.orderId()).orElseThrow();
-        CustomerSummary customer = customerClient.findById(order.getCustomerId());
-        return new OrderWithCustomerDto(order, customer);
-    }
-}
+@Column(name = "product_id")
+/** Cross-aggregate reference → Product (module: catalog) */
+private String productId;
 ```
 
-### Advertencia generada cuando se detecta cross-aggregate
+### Archivos Modificados
 
-```
-⚠️  WARNING: Order.customer uses a direct JPA reference to Customer aggregate.
-   Consider using customerId (reference by ID) instead.
-```
+| Archivo | Cambio |
+|---|---|
+| `src/utils/yaml-to-entity.js` | ✅ Destructura y valida `reference:` en `parseProperty()` |
+| `templates/aggregate/AggregateRoot.java.ejs` | ✅ Genera comentario Javadoc en campos con `reference` |
+| `templates/aggregate/JpaAggregateRoot.java.ejs` | ✅ Genera comentario Javadoc en campos con `reference` |
+| `templates/aggregate/JpaEntity.java.ejs` | ✅ Genera comentario Javadoc en campos con `reference` |
+| `examples/domain-multi-aggregate.yaml` | ✅ Actualizado con `reference:` en `productId` y `warehouseId` |
 
 ---
 
@@ -1043,7 +1053,7 @@ Domain Events (ítem 1) implementados y funcionando — este ítem solo añade p
 | # | Característica | Prioridad | Complejidad | Estado |
 |---|---|---|---|---|
 | 1 | Domain Events | Alta | Alta | ✅ Implementado |
-| 2 | Aggregate Boundaries por ID | Alta | Media | Pendiente |
+| 2 | Aggregate Boundaries por ID | Alta | Media | ✅ Implementado |
 | 3 | Soft Delete Completo | Alta | Baja | Parcial |
 | 4 | Paginación en Queries | Impl. | -- | ✅ Implementado |
 | 5 | Optimistic Locking | Media | Baja | Pendiente |
@@ -1060,6 +1070,6 @@ Domain Events (ítem 1) implementados y funcionando — este ítem solo añade p
 
 ---
 
-**Ultima actualizacion:** 2026-02-24
+**Ultima actualizacion:** 2026-02-25
 **Version de eva4j:** 1.x
 **Estado:** Documento de planificacion y referencia

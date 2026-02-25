@@ -683,6 +683,57 @@ fields:
 
 ---
 
+### Referencias entre Agregados (`reference:`)
+
+La propiedad `reference:` declara explícitamente que un campo es un puntero intencional a la raíz de otro agregado. El campo sigue siendo un tipo primitivo (`String`, `Long`, etc.) — **no se genera ningún `@ManyToOne`**.
+
+#### Sintaxis
+
+```yaml
+fields:
+  - name: customerId
+    type: String
+    reference:
+      aggregate: Customer   # Nombre del agregado referenciado (PascalCase) — obligatorio
+      module: customers     # Módulo donde vive el agregado — opcional
+  - name: productId
+    type: String
+    reference:
+      aggregate: Product
+      module: catalog
+```
+
+#### Comportamiento
+
+- El tipo Java **no cambia** — sigue siendo `String`, `Long`, UUID, etc.
+- JPA genera `@Column` normal — **sin** `@ManyToOne` ni `@JoinColumn`.
+- En la entidad de dominio y en la entidad JPA se genera un **comentario Javadoc** que documenta la referencia.
+- `module:` es opcional: puede omitirse si el agregado referenciado está en el mismo módulo.
+- Si `reference:` está malformado (falta `aggregate`), eva4j lanza un error descriptivo.
+
+#### Código Generado
+
+```java
+// domain/models/entities/Order.java
+/** Cross-aggregate reference → Customer (module: customers) */
+private String customerId;
+```
+
+```java
+// infrastructure/database/entities/OrderJpa.java
+@Column(name = "customer_id")
+/** Cross-aggregate reference → Customer (module: customers) */
+private String customerId;
+```
+
+#### Por qué no usar `@ManyToOne` entre agregados
+
+En DDD cada agregado es una unidad transaccional independiente. Un `@ManyToOne` cruzando límites crea un único grafo JPA que viola los límites transaccionales y crea dependencias de carga invisibles. La referencia por ID es el patrón correcto: el handler que necesite los datos del otro agregado los obtiene explícitamente via su propio repositorio.
+
+- **Ejemplo completo:** [examples/domain-multi-aggregate.yaml](../examples/domain-multi-aggregate.yaml)
+
+---
+
 ### Validaciones JSR-303
 
 Eva4j soporta anotaciones Bean Validation (JSR-303/Jakarta Validation) en campos del `domain.yaml`. Las validaciones se generan **únicamente en la capa de aplicación**: en el `Create<Aggregate>Command` y en los `Create<Entity>Dto` de entidades secundarias. **No se aplican a entidades de dominio** ni a campos con `readOnly: true`.

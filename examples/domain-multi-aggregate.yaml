@@ -142,8 +142,14 @@ aggregates:
             type: String
           - name: productId
             type: String
+            reference:
+              aggregate: Product
+              module: catalog
           - name: warehouseId
             type: String
+            reference:
+              aggregate: Warehouse
+              module: warehouses
           - name: quantity
             type: Integer
           - name: reservedQuantity

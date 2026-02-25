@@ -243,7 +243,16 @@ function buildAnnotationString(validation) {
 }
 
 function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
-  const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues, readOnly = false, hidden = false, validations = [] } = propData;
+  const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues, readOnly = false, hidden = false, validations = [], reference = null } = propData;
+
+  if (reference !== null) {
+    if (typeof reference !== 'object' || !reference.aggregate || typeof reference.aggregate !== 'string') {
+      throw new Error(`Field "${name}": "reference" must be an object with at least "aggregate" (string). Example:\n  reference:\n    aggregate: Customer\n    module: customers`);
+    }
+    if (reference.module !== undefined && typeof reference.module !== 'string') {
+      throw new Error(`Field "${name}": "reference.module" must be a string.`);
+    }
+  }
   
   const javaType = mapYamlTypeToJava(type, enumValues);
   const fieldName = toCamelCase(name);
@@ -298,7 +307,8 @@ function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
     validationAnnotations: validations.map(v => buildAnnotationString(v)),
     transitionMeta,
     autoInit,
-    autoInitValue
+    autoInitValue,
+    reference
   };
 }
 
