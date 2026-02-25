@@ -136,7 +136,7 @@ public class <%= name %> {
 <% transitionFields.forEach(field => { %>
 <%     const meta = field.transitionMeta; %>
 <%     const methodMap = new Map(); %>
-<%     meta.transitions.forEach(t => { if (!methodMap.has(t.method)) methodMap.set(t.method, t); }); %>
+<%     meta.transitions.forEach(t => { if (t.method && !methodMap.has(t.method)) methodMap.set(t.method, t); }); %>
 <%     methodMap.forEach((transition, methodName) => { %>
 <%         const froms = Array.isArray(transition.from) ? transition.from : [transition.from]; %>
 

@@ -503,7 +503,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           packageName,
           moduleName,
           aggregateName,
-          domainEvents: aggregateDomainEvents
+          domainEvents: aggregateDomainEvents,
+          hasKafkaEvents: aggregateDomainEvents.some(e => e.kafka)
         };
         await renderAndWrite(
           path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainEventHandler.java.ejs'),

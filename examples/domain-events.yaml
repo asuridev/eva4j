@@ -66,8 +66,7 @@
 #
 #        // El desarrollador llama a raise() dentro de sus métodos de negocio:
 #        public void place(String customerId, BigDecimal total) {
-#            this.status.validateTransitionTo(OrderStatus.PLACED);
-#            this.status = OrderStatus.PLACED;
+#            this.status = this.status.transitionTo(OrderStatus.PLACED);  // lanza InvalidStateTransitionException si no es válida
 #            raise(new OrderPlacedEvent(this.id, customerId, this.orderNumber, total));
 #        }
 #    }
@@ -151,7 +150,6 @@ aggregates:
 
     enums:
       - name: OrderStatus
-        withTransitions: true
         values:
           - DRAFT
           - PLACED
@@ -160,12 +158,20 @@ aggregates:
           - DELIVERED
           - CANCELLED
         transitions:
-          DRAFT:      [PLACED, CANCELLED]
-          PLACED:     [CONFIRMED, CANCELLED]
-          CONFIRMED:  [SHIPPED, CANCELLED]
-          SHIPPED:    [DELIVERED]
-          DELIVERED:  []
-          CANCELLED:  []
+          - from: DRAFT
+            to: PLACED
+          - from: DRAFT
+            to: CANCELLED
+          - from: PLACED
+            to: CONFIRMED
+          - from: PLACED
+            to: CANCELLED
+          - from: CONFIRMED
+            to: SHIPPED
+          - from: CONFIRMED
+            to: CANCELLED
+          - from: SHIPPED
+            to: DELIVERED
 
     # ─── Domain Events ────────────────────────────────────────────────────────
     # Siblings de entities:, enums: y valueObjects:
