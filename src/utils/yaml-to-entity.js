@@ -36,7 +36,7 @@ async function parseDomainYaml(yamlPath, packageName = '', moduleName = '') {
  * @returns {Object} Parsed aggregate with entities and value objects
  */
 function parseAggregate(aggregateData) {
-  const { name, entities = [], valueObjects = [], enums = [], packageName = '', moduleName = '' } = aggregateData;
+  const { name, entities = [], valueObjects = [], enums = [], events = [], packageName = '', moduleName = '' } = aggregateData;
   
   // Find the aggregate root
   const rootEntity = entities.find(e => e.isRoot === true);
@@ -72,6 +72,17 @@ function parseAggregate(aggregateData) {
   const allRootImports = new Set([...parsedRoot.imports, ...methodImports]);
   parsedRoot.imports = Array.from(allRootImports).sort();
   
+  // Parse domain events declared at aggregate level
+  const domainEvents = events.map(event => {
+    const eventName = toPascalCase(event.name);
+    const eventFields = (event.fields || []).map(f => parseProperty(f, aggregateEnums, valueObjectNames));
+    return {
+      name: eventName,
+      fieldName: toCamelCase(eventName),
+      fields: eventFields
+    };
+  });
+
   return {
     name: toPascalCase(name),
     packageName: aggregateData.package || '',
@@ -79,7 +90,8 @@ function parseAggregate(aggregateData) {
     secondaryEntities,
     valueObjects: parsedValueObjects,
     aggregateMethods,
-    allEntities: parsedEntities
+    allEntities: parsedEntities,
+    domainEvents
   };
 }
 

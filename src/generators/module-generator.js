@@ -25,6 +25,7 @@ class ModuleGenerator {
     // Create domain subdirectories
     await fs.ensureDir(path.join(moduleBasePath, 'domain', 'models', 'entities'));
     await fs.ensureDir(path.join(moduleBasePath, 'domain', 'models', 'valueObjects'));
+    await fs.ensureDir(path.join(moduleBasePath, 'domain', 'models', 'events'));
     await fs.ensureDir(path.join(moduleBasePath, 'domain', 'repositories'));
     await fs.ensureDir(path.join(moduleBasePath, 'domain', 'services'));
     

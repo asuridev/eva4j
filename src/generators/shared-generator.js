@@ -80,6 +80,19 @@ class SharedGenerator {
     await this.generateFile('application/dtos/PagedResponse.java.ejs', destPath);
   }
 
+  async generateDomainEvent(basePath) {
+    const domainPath = path.join(basePath, 'domain');
+    const destPath = path.join(domainPath, 'DomainEvent.java');
+
+    // Only generate if it doesn't exist yet
+    if (await fs.pathExists(destPath)) {
+      return;
+    }
+
+    await fs.ensureDir(domainPath);
+    await this.generateFile('domain/DomainEvent.java.ejs', destPath);
+  }
+
   async generatePackageInfo(basePath) {
     await this.generateFile('package-info.java.ejs', 
       path.join(basePath, 'package-info.java'));

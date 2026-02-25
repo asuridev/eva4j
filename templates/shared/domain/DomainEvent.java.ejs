@@ -1,0 +1,40 @@
+package <%= packageName %>.shared.domain;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+/**
+ * DomainEvent - Base class for all domain events
+ *
+ * Domain events represent facts that occurred in the business domain.
+ * They are immutable, pure Java (no Spring or infrastructure dependencies).
+ *
+ * Usage: extend this class in your domain/models/events/ classes.
+ *
+ * NOTE: For guaranteed delivery (at-least-once semantics), consider implementing
+ * the Transactional Outbox Pattern on top of this mechanism.
+ */
+public abstract class DomainEvent {
+
+    private final String eventId;
+    private final LocalDateTime occurredOn;
+    private final String aggregateId;
+
+    protected DomainEvent(String aggregateId) {
+        this.eventId = UUID.randomUUID().toString();
+        this.occurredOn = LocalDateTime.now();
+        this.aggregateId = aggregateId;
+    }
+
+    public String getEventId() {
+        return eventId;
+    }
+
+    public LocalDateTime getOccurredOn() {
+        return occurredOn;
+    }
+
+    public String getAggregateId() {
+        return aggregateId;
+    }
+}

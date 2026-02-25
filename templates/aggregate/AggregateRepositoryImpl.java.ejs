@@ -3,6 +3,9 @@ package <%= packageName %>.<%= moduleName %>.infrastructure.database.repositorie
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
+<% if (hasDomainEvents) { %>
+import org.springframework.context.ApplicationEventPublisher;
+<% } %>
 import lombok.RequiredArgsConstructor;
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= rootEntity.name %>;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= rootEntity.name %>Repository;
@@ -20,11 +23,17 @@ public class <%= rootEntity.name %>RepositoryImpl implements <%= rootEntity.name
     
     private final <%= rootEntity.name %>JpaRepository jpaRepository;
     private final <%= aggregateName %>Mapper mapper;
+<% if (hasDomainEvents) { %>
+    private final ApplicationEventPublisher eventPublisher;
+<% } %>
     
     @Override
     public <%= rootEntity.name %> save(<%= rootEntity.name %> <%= rootEntity.fieldName %>) {
         <%= rootEntity.name %>Jpa jpa = mapper.toJpa(<%= rootEntity.fieldName %>);
         <%= rootEntity.name %>Jpa saved = jpaRepository.save(jpa);
+<% if (hasDomainEvents) { %>
+        <%= rootEntity.fieldName %>.pullDomainEvents().forEach(eventPublisher::publishEvent);
+<% } %>
         return mapper.toDomain(saved);
     }
     

@@ -12,6 +12,12 @@ import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
 <% if (fields.some(f => f.transitionMeta && f.transitionMeta.transitions.some(t => t.guard))) { %>
 import <%= packageName %>.shared.domain.customExceptions.BusinessException;
 <% } %>
+<% if (domainEvents && domainEvents.length > 0) { %>
+import <%= packageName %>.shared.domain.DomainEvent;
+<% domainEvents.forEach(event => { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.events.<%= event.name %>;
+<% }); %>
+<% } %>
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -21,6 +27,29 @@ import java.util.List;
  * Domain entity (pure Java class without Lombok)
  */
 public class <%= name %> {
+<% if (domainEvents && domainEvents.length > 0) { %>
+
+    // ─── Domain Events ──────────────────────────────────────────────────────────
+    private final List<DomainEvent> _domainEvents = new ArrayList<>();
+
+    /**
+     * Registers a domain event to be published after successful persistence.
+     * Call this inside business methods when something significant happens.
+     */
+    protected void raise(DomainEvent event) {
+        _domainEvents.add(event);
+    }
+
+    /**
+     * Returns all pending domain events and clears the internal list (atomic).
+     * Called by the repository implementation after jpaRepository.save().
+     */
+    public List<DomainEvent> pullDomainEvents() {
+        List<DomainEvent> events = Collections.unmodifiableList(new ArrayList<>(_domainEvents));
+        _domainEvents.clear();
+        return events;
+    }
+<% } %>
     
 <% fields.forEach(field => { %>
   <% if (field.isCollection) { %>

@@ -1,10 +1,33 @@
 package <%= packageName %>.<%= moduleName %>.application.events;
+<% const needsBigDecimal = eventFields && eventFields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate = eventFields && eventFields.some(f => f.javaType === 'LocalDate' || f.javaType === 'LocalDateTime' || f.javaType === 'LocalTime'); %>
+<% const needsUUID = eventFields && eventFields.some(f => f.javaType === 'UUID'); %>
+<% const needsList = eventFields && eventFields.some(f => f.isCollection); %>
+<% if (needsBigDecimal) { %>
+import java.math.BigDecimal;
+<% } %>
+<% if (needsLocalDate) { %>
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+<% } %>
+<% if (needsUUID) { %>
+import java.util.UUID;
+<% } %>
+<% if (needsList) { %>
+import java.util.List;
+<% } %>
 
 public record <%= eventClassName %>(
+<% if (eventFields && eventFields.length > 0) { %>
+<% eventFields.forEach((field, idx) => { %>
+  <%- field.javaType %> <%= field.name %><%= idx < eventFields.length - 1 ? ',' : '' %>
+<% }); %>
+<% } else { %>
   // TODO: Add your event fields here
   // Example:
   // Long id,
   // String name,
   // LocalDateTime createdAt
+<% } %>
 ) {
 }

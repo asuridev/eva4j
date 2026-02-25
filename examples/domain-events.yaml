@@ -1,0 +1,195 @@
+# EJEMPLO: DOMAIN EVENTS
+# Muestra cómo declarar eventos de dominio en domain.yaml
+# Los eventos son siblings de entities:, valueObjects: y enums:
+#
+# Generación:
+#   eva4j g entities orders
+#
+# ─── ARCHIVOS GENERADOS ───────────────────────────────────────────────────────
+#
+# 1. shared/domain/DomainEvent.java  (una sola vez por proyecto)
+#
+#    public abstract class DomainEvent {
+#        private final String eventId;        // UUID autogenerado
+#        private final LocalDateTime occurredOn;
+#        private final String aggregateId;
+#
+#        protected DomainEvent(String aggregateId) {
+#            this.eventId = UUID.randomUUID().toString();
+#            this.occurredOn = LocalDateTime.now();
+#            this.aggregateId = aggregateId;
+#        }
+#        // getters...
+#    }
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 2. orders/domain/models/events/OrderPlacedEvent.java  (uno por evento)
+#
+#    public final class OrderPlacedEvent extends DomainEvent {
+#        private final String customerId;
+#        private final String orderNumber;
+#        private final BigDecimal totalAmount;
+#
+#        public OrderPlacedEvent(String aggregateId,
+#                                String customerId,
+#                                String orderNumber,
+#                                BigDecimal totalAmount) {
+#            super(aggregateId);
+#            this.customerId  = customerId;
+#            this.orderNumber = orderNumber;
+#            this.totalAmount = totalAmount;
+#        }
+#        // getters...
+#    }
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 3. orders/domain/models/entities/Order.java  (modificaciones al agregado)
+#
+#    public class Order {
+#        // ... campos normales ...
+#
+#        // ─── Domain Events ───────────────────────────────────────
+#        private final List<DomainEvent> _domainEvents = new ArrayList<>();
+#
+#        protected void raise(DomainEvent event) {
+#            _domainEvents.add(event);
+#        }
+#
+#        public List<DomainEvent> pullDomainEvents() {
+#            List<DomainEvent> events =
+#                Collections.unmodifiableList(new ArrayList<>(_domainEvents));
+#            _domainEvents.clear();
+#            return events;   // retorna y limpia (operación atómica)
+#        }
+#
+#        // El desarrollador llama a raise() dentro de sus métodos de negocio:
+#        public void place(String customerId, BigDecimal total) {
+#            this.status.validateTransitionTo(OrderStatus.PLACED);
+#            this.status = OrderStatus.PLACED;
+#            raise(new OrderPlacedEvent(this.id, customerId, this.orderNumber, total));
+#        }
+#    }
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 4. orders/infrastructure/database/repositories/OrderRepositoryImpl.java
+#    (publicación automática tras persistencia)
+#
+#    @Repository
+#    @RequiredArgsConstructor
+#    public class OrderRepositoryImpl implements OrderRepository {
+#
+#        private final OrderJpaRepository jpaRepository;
+#        private final OrderMapper mapper;
+#        private final ApplicationEventPublisher eventPublisher;  // ← inyectado por Spring
+#
+#        @Override
+#        public Order save(Order order) {
+#            OrderJpa jpa   = mapper.toJpa(order);
+#            OrderJpa saved = jpaRepository.save(jpa);          // 1. persiste en BD
+#            order.pullDomainEvents()
+#                 .forEach(eventPublisher::publishEvent);        // 2. publica al bus interno
+#            return mapper.toDomain(saved);
+#        }
+#    }
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 5. orders/application/usecases/OrderDomainEventHandler.java  (bridge)
+#
+#    @Component
+#    public class OrderDomainEventHandler {
+#
+#        @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+#        public void onOrderPlaced(OrderPlacedEvent event) {
+#            // TODO: messageBroker.sendOrderPlaced(event);
+#            //       notificationService.notify(event);
+#        }
+#
+#        @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+#        public void onOrderCancelled(OrderCancelledEvent event) {
+#            // TODO: handle OrderCancelled
+#        }
+#
+#        @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+#        public void onOrderShipped(OrderShippedEvent event) {
+#            // TODO: handle OrderShipped
+#        }
+#    }
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Para conectar un broker externo después de generar:
+#   eva4j g kafka-event orders OrderPlaced
+#   (el selector muestra los eventos declarados en este domain.yaml como opciones)
+
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+            validations:
+              - type: NotBlank
+          - name: customerId
+            type: String
+          - name: status
+            type: OrderStatus
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+
+    enums:
+      - name: OrderStatus
+        withTransitions: true
+        values:
+          - DRAFT
+          - PLACED
+          - CONFIRMED
+          - SHIPPED
+          - DELIVERED
+          - CANCELLED
+        transitions:
+          DRAFT:      [PLACED, CANCELLED]
+          PLACED:     [CONFIRMED, CANCELLED]
+          CONFIRMED:  [SHIPPED, CANCELLED]
+          SHIPPED:    [DELIVERED]
+          DELIVERED:  []
+          CANCELLED:  []
+
+    # ─── Domain Events ────────────────────────────────────────────────────────
+    # Siblings de entities:, enums: y valueObjects:
+    # La declaración es agnóstica al broker — ningún campo de infraestructura aquí.
+    # Cada entrada genera: domain/models/events/{Name}Event.java
+
+    events:
+      - name: OrderPlaced
+        fields:
+          - name: customerId
+            type: String
+          - name: orderNumber
+            type: String
+          - name: totalAmount
+            type: BigDecimal
+
+      - name: OrderCancelled
+        fields:
+          - name: reason
+            type: String
+
+      - name: OrderShipped
+        fields:
+          - name: shippingAddress
+            type: String
+          - name: estimatedDeliveryDate
+            type: LocalDate

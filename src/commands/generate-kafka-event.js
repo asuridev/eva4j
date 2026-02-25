@@ -8,6 +8,7 @@ const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject, moduleExists } = require('../utils/validator');
 const { toPackagePath, toPascalCase, toCamelCase, toSnakeCase, toKebabCase } = require('../utils/naming');
 const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
+const { parseDomainYaml } = require('../utils/yaml-to-entity');
 
 async function generateKafkaEventCommand(moduleName, eventName) {
   const projectDir = process.cwd();
@@ -51,22 +52,66 @@ async function generateKafkaEventCommand(moduleName, eventName) {
     process.exit(1);
   }
 
+  // Try to read domain events declared in domain.yaml for the module
+  let domainEventChoices = [];
+  let domainEventMap = {};
+  const domainYamlPath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName, 'domain.yaml');
+  if (await fs.pathExists(domainYamlPath)) {
+    try {
+      const parsed = await parseDomainYaml(domainYamlPath, packageName, moduleName);
+      parsed.aggregates.forEach(agg => {
+        (agg.domainEvents || []).forEach(event => {
+          domainEventChoices.push({ name: `${event.name} (from ${agg.name} aggregate)`, value: event.name });
+          domainEventMap[event.name] = event;
+        });
+      });
+    } catch (_) {
+      // domain.yaml may not be parseable yet — silently fall back to free text
+    }
+  }
+
   // Prompt for event name if not provided
   if (!eventName) {
-    const nameAnswer = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'eventName',
-        message: 'Enter event name:',
-        validate: (input) => {
-          if (!input || input.trim() === '') {
-            return 'Event name cannot be empty';
-          }
-          return true;
+    if (domainEventChoices.length > 0) {
+      domainEventChoices.push(new inquirer.Separator());
+      domainEventChoices.push({ name: 'Custom name (free text)...', value: '__custom__' });
+      const { selectedEvent } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'selectedEvent',
+          message: 'Select a domain event to publish via Kafka:',
+          choices: domainEventChoices
         }
+      ]);
+      if (selectedEvent === '__custom__') {
+        const { customName } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'customName',
+            message: 'Enter event name:',
+            validate: (input) => input && input.trim() !== '' ? true : 'Event name cannot be empty'
+          }
+        ]);
+        eventName = customName;
+      } else {
+        eventName = selectedEvent;
       }
-    ]);
-    eventName = nameAnswer.eventName;
+    } else {
+      const nameAnswer = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'eventName',
+          message: 'Enter event name:',
+          validate: (input) => {
+            if (!input || input.trim() === '') {
+              return 'Event name cannot be empty';
+            }
+            return true;
+          }
+        }
+      ]);
+      eventName = nameAnswer.eventName;
+    }
   }
 
   // Normalize event name to PascalCase
@@ -119,6 +164,9 @@ async function generateKafkaEventCommand(moduleName, eventName) {
     const topicPropertyValue = topicNameSnake;
     const topicSpringProperty = `\${topics.${topicNameKebab}}`;
 
+    // Resolve event fields from domain.yaml if available (used by Event.java.ejs for real field generation)
+    const selectedDomainEvent = domainEventMap[toPascalCase(eventName)] || null;
+
     const context = {
       packageName,
       moduleName,
@@ -133,7 +181,8 @@ async function generateKafkaEventCommand(moduleName, eventName) {
       topicPropertyValue,
       topicSpringProperty,
       partitions,
-      replicas
+      replicas,
+      eventFields: selectedDomainEvent ? selectedDomainEvent.fields : null
     };
 
     // 1. Generate Event Record

@@ -957,27 +957,109 @@ private Integer age;
 
 ---
 
+## 15. Transactional Outbox Pattern
+
+### Descripción
+
+El **Transactional Outbox Pattern** es la evolución natural de los Domain Events implementados (ítem 1). Resuelve el caso donde el proceso muere después del commit de BD pero antes de que `ApplicationEventPublisher` llegue a publicar al broker externo — en ese escenario, el evento se pierde silenciosamente.
+
+El patrón garantiza **at-least-once delivery**: los eventos son almacenados en la misma transacción que el agregado y un proceso separado los publica de forma resiliente.
+
+Los Domain Events ya implementados (`ApplicationEventPublisher` + `@TransactionalEventListener(AFTER_COMMIT)`) son suficientes para la mayoría de sistemas. Esta feature es necesaria para dominios críticos: pagos, auditoría regulatoria, inventario en tiempo real.
+
+**Nota:** El puerto `MessageBroker` ya generado no requiere cambios — solo se añade la capa de persistencia intermedia.
+
+### Flujo del Patrón
+
+```
+BD Transaction:
+  → INSERT INTO orders ...
+  → INSERT INTO outbox_events (type, payload, published=false)  ← misma TX
+  → COMMIT
+
+Proceso resiliente (polling o CDC con Debezium):
+  → SELECT * FROM outbox_events WHERE published = false
+  → Publica a Kafka / RabbitMQ / SNS
+  → UPDATE outbox_events SET published = true
+```
+
+### Sintaxis Propuesta en domain.yaml
+
+```yaml
+aggregates:
+  - name: Order
+    events:
+      - name: OrderPlaced
+        kafka: true
+        delivery: at-least-once        # ← activa Outbox Pattern para este evento
+        fields:
+          - name: customerId
+            type: String
+```
+
+### Código Generado (Outbox Table + Publisher)
+
+```java
+@Entity
+@Table(name = "outbox_events")
+public class OutboxEvent {
+    @Id
+    private String id;
+    private String aggregateType;
+    private String aggregateId;
+    private String eventType;
+    @Column(columnDefinition = "TEXT")
+    private String payload;       // JSON serializado del evento
+    private boolean published = false;
+    private LocalDateTime createdAt;
+    private LocalDateTime publishedAt;
+}
+```
+
+```java
+// OutboxEventPublisher — proceso de polling (cada 5s via @Scheduled)
+@Component
+public class OutboxEventPublisher {
+    @Scheduled(fixedDelay = 5000)
+    @Transactional
+    public void publishPendingEvents() {
+        List<OutboxEvent> pending = outboxRepository.findByPublishedFalse();
+        pending.forEach(event -> {
+            messageBroker.publishRaw(event.getEventType(), event.getPayload());
+            event.markPublished();
+        });
+    }
+}
+```
+
+### Prerrequisito
+
+Domain Events (ítem 1) implementados y funcionando — este ítem solo añade persistencia intermedia, no reemplaza la arquitectura existente.
+
+---
+
 ## Resumen de Prioridades
 
 | # | Característica | Prioridad | Complejidad | Estado |
 |---|---|---|---|---|
-| 1 | Domain Events | � Alta | � Alta | � Pendiente |
-| 2 | Aggregate Boundaries por ID | � Alta | � Media | � Pendiente |
-| 3 | Soft Delete Completo | � Alta | � Baja | � Parcial |
+| 1 | Domain Events | Alta | Alta | ✅ Implementado |
+| 2 | Aggregate Boundaries por ID | Alta | Media | Pendiente |
+| 3 | Soft Delete Completo | Alta | Baja | Parcial |
 | 4 | Paginación en Queries | Impl. | -- | ✅ Implementado |
-| 5 | Optimistic Locking | � Media | � Baja | � Pendiente |
-| 6 | Read Models / Proyecciones | � Media | � Alta | � Pendiente |
+| 5 | Optimistic Locking | Media | Baja | Pendiente |
+| 6 | Read Models / Proyecciones | Media | Alta | Pendiente |
 | 7 | Enums con Transiciones | Impl. | -- | ✅ Implementado |
-| 8 | Specifications Pattern | � Media | � Media | � Pendiente |
-| 9 | JSON Schema para domain.yaml | � Tooling | � Media | � Pendiente |
-| 10 | Generacion Incremental | � Tooling | -- | ✅ Implementado |
-| 11 | eva4j doctor | � Tooling | � Media | � Pendiente |
-| 12 | Tests Completos | � Tooling | � Media | � Pendiente |
+| 8 | Specifications Pattern | Media | Media | Pendiente |
+| 9 | JSON Schema para domain.yaml | Tooling | Media | Pendiente |
+| 10 | Generacion Incremental | Tooling | -- | ✅ Implementado |
+| 11 | eva4j doctor | Tooling | Media | Pendiente |
+| 12 | Tests Completos | Tooling | Media | Pendiente |
 | 13 | Auditoria completa | Impl. | -- | ✅ Implementado |
 | 14 | Validaciones JSR-303 | Impl. | -- | ✅ Implementado |
+| 15 | Transactional Outbox Pattern | Alta | Alta | Pendiente |
 
 ---
 
-**Ultima actualizacion:** 2026-02-23
+**Ultima actualizacion:** 2026-02-24
 **Version de eva4j:** 1.x
 **Estado:** Documento de planificacion y referencia

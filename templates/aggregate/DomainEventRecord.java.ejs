@@ -1,0 +1,50 @@
+package <%= packageName %>.<%= moduleName %>.domain.models.events;
+
+import <%= packageName %>.shared.domain.DomainEvent;
+<% const needsBigDecimal = fields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate = fields.some(f => f.javaType === 'LocalDate' || f.javaType === 'LocalDateTime' || f.javaType === 'LocalTime'); %>
+<% const needsUUID = fields.some(f => f.javaType === 'UUID'); %>
+<% const needsList = fields.some(f => f.isCollection); %>
+<% if (needsBigDecimal) { %>
+import java.math.BigDecimal;
+<% } %>
+<% if (needsLocalDate) { %>
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+<% } %>
+<% if (needsUUID) { %>
+import java.util.UUID;
+<% } %>
+<% if (needsList) { %>
+import java.util.List;
+<% } %>
+
+/**
+ * <%= name %> - Domain Event
+ *
+ * Raised when: TODO — describe the business fact this event represents.
+ * Aggregate:   <%= aggregateName %>
+ *
+ * This is a pure domain class. It carries no Spring or infrastructure dependencies.
+ * Publish it externally via <%= aggregateName %>DomainEventHandler (application layer).
+ */
+public final class <%= name %> extends DomainEvent {
+
+<% fields.forEach(field => { %>
+    private final <%- field.javaType %> <%= field.name %>;
+<% }); %>
+
+    public <%= name %>(String aggregateId<% fields.forEach(field => { %>, <%- field.javaType %> <%= field.name %><% }); %>) {
+        super(aggregateId);
+<% fields.forEach(field => { %>
+        this.<%= field.name %> = <%= field.name %>;
+<% }); %>
+    }
+
+<% fields.forEach(field => { %>
+    public <%- field.javaType %> get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() {
+        return <%= field.name %>;
+    }
+
+<% }); %>
+}

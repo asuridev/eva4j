@@ -195,6 +195,12 @@ async function generateEntitiesCommand(moduleName, options = {}) {
     const sharedGenerator = new SharedGenerator({ packageName, packagePath });
     await sharedGenerator.generatePagedResponse(sharedBasePath);
 
+    // Check if any aggregate declares domain events and generate shared DomainEvent base class
+    const hasDomainEventsInModule = aggregates.some(agg => agg.domainEvents && agg.domainEvents.length > 0);
+    if (hasDomainEventsInModule) {
+      await sharedGenerator.generateDomainEvent(sharedBasePath);
+    }
+
     // Generate audit-related shared components if needed
     if (hasAuditableEntities || hasTrackUserEntities) {
       
@@ -244,6 +250,11 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       agg.valueObjects.forEach(vo => {
         console.log(chalk.gray(`  │   └── ${vo.name} (VO)`));
       });
+      if (agg.domainEvents && agg.domainEvents.length > 0) {
+        agg.domainEvents.forEach(event => {
+          console.log(chalk.gray(`  │   └── ${event.name} (Event${event.kafka ? ' · kafka' : ''})`))
+        });
+      }
     });
     console.log();
 
@@ -287,7 +298,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         imports: rootEntity.imports,
         valueObjects,
         aggregateMethods: aggregate.aggregateMethods,
-        auditable: rootEntity.auditable
+        auditable: rootEntity.auditable,
+        domainEvents: aggregate.domainEvents || []
       };
 
       await renderAndWrite(
@@ -452,7 +464,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         packageName,
         moduleName,
         aggregateName,
-        rootEntity
+        rootEntity,
+        hasDomainEvents: (aggregate.domainEvents || []).length > 0
       };
 
       await renderAndWrite(
@@ -462,6 +475,44 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         writeOptions
       );
       generatedFiles.push({ type: 'Repository Impl', name: `${rootEntity.name}RepositoryImpl`, path: `${moduleName}/infrastructure/database/repositories/${rootEntity.name}RepositoryImpl.java` });
+
+      // 9. Generate Domain Events (if declared in domain.yaml)
+      const aggregateDomainEvents = aggregate.domainEvents || [];
+      if (aggregateDomainEvents.length > 0) {
+
+        for (const event of aggregateDomainEvents) {
+          const eventContext = {
+            packageName,
+            moduleName,
+            aggregateName,
+            name: event.name,
+            fields: event.fields,
+            kafka: event.kafka
+          };
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainEventRecord.java.ejs'),
+            path.join(moduleBasePath, 'domain', 'models', 'events', `${event.name}.java`),
+            eventContext,
+            writeOptions
+          );
+          generatedFiles.push({ type: 'Domain Event', name: event.name, path: `${moduleName}/domain/models/events/${event.name}.java` });
+        }
+
+        // Generate the bridge handler
+        const handlerContext = {
+          packageName,
+          moduleName,
+          aggregateName,
+          domainEvents: aggregateDomainEvents
+        };
+        await renderAndWrite(
+          path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainEventHandler.java.ejs'),
+          path.join(moduleBasePath, 'application', 'usecases', `${aggregateName}DomainEventHandler.java`),
+          handlerContext,
+          writeOptions
+        );
+        generatedFiles.push({ type: 'Domain Event Handler', name: `${aggregateName}DomainEventHandler`, path: `${moduleName}/application/usecases/${aggregateName}DomainEventHandler.java` });
+      }
     }
 
     spinner.succeed(chalk.green(`Generated ${generatedFiles.length} files! ✨`));
