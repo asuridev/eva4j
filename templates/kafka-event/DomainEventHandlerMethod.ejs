@@ -1,0 +1,1 @@
+messageBroker.publish<%= eventClassName %>(new <%= eventClassName %>(<% if (domainEventFields && domainEventFields.length > 0) { domainEventFields.forEach(function(field, idx) { %>event.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<%= idx < domainEventFields.length - 1 ? ', ' : '' %><% }); } %>));

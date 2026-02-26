@@ -70,157 +70,172 @@ async function generateKafkaEventCommand(moduleName, eventName) {
     }
   }
 
-  // Prompt for event name if not provided
-  if (!eventName) {
-    if (domainEventChoices.length > 0) {
-      domainEventChoices.push(new inquirer.Separator());
-      domainEventChoices.push({ name: 'Custom name (free text)...', value: '__custom__' });
-      const { selectedEvent } = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'selectedEvent',
-          message: 'Select a domain event to publish via Kafka:',
-          choices: domainEventChoices
-        }
-      ]);
-      if (selectedEvent === '__custom__') {
-        const { customName } = await inquirer.prompt([
-          {
-            type: 'input',
-            name: 'customName',
-            message: 'Enter event name:',
-            validate: (input) => input && input.trim() !== '' ? true : 'Event name cannot be empty'
-          }
-        ]);
-        eventName = customName;
-      } else {
-        eventName = selectedEvent;
+  // ── Resolve list of event names to process ─────────────────────────────
+  let eventNames = [];
+
+  if (eventName) {
+    // Provided via CLI arg → single event
+    eventNames = [eventName];
+  } else if (domainEventChoices.length > 0) {
+    // Interactive multi-select from domain.yaml events
+    const choicesWithAll = [
+      { name: chalk.bold('★  All events'), value: '__all__' },
+      new inquirer.Separator(),
+      ...domainEventChoices,
+      new inquirer.Separator(),
+      { name: 'Custom name (free text)...', value: '__custom__' }
+    ];
+
+    const { selectedEvents } = await inquirer.prompt([
+      {
+        type: 'checkbox',
+        name: 'selectedEvents',
+        message: 'Select domain events to publish via Kafka (space to select, enter to confirm):',
+        choices: choicesWithAll,
+        validate: (input) => input.length > 0 ? true : 'Select at least one event'
       }
-    } else {
-      const nameAnswer = await inquirer.prompt([
+    ]);
+
+    if (selectedEvents.includes('__all__')) {
+      // Expand to every declared domain event
+      eventNames = domainEventChoices.map(c => c.value);
+    } else if (selectedEvents.includes('__custom__')) {
+      const { customName } = await inquirer.prompt([
         {
           type: 'input',
-          name: 'eventName',
+          name: 'customName',
           message: 'Enter event name:',
-          validate: (input) => {
-            if (!input || input.trim() === '') {
-              return 'Event name cannot be empty';
-            }
-            return true;
-          }
+          validate: (input) => input && input.trim() !== '' ? true : 'Event name cannot be empty'
         }
       ]);
-      eventName = nameAnswer.eventName;
+      eventNames = [customName];
+    } else {
+      eventNames = selectedEvents;
     }
+  } else {
+    // No domain events in yaml → free-text fallback
+    const nameAnswer = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'eventName',
+        message: 'Enter event name:',
+        validate: (input) => input && input.trim() !== '' ? true : 'Event name cannot be empty'
+      }
+    ]);
+    eventNames = [nameAnswer.eventName];
   }
 
-  // Normalize event name to PascalCase
-  const normalizedEventName = toPascalCase(eventName);
-  const eventClassName = normalizedEventName.endsWith('Event') 
-    ? normalizedEventName 
-    : `${normalizedEventName}Event`;
-
-  // Check if event already exists
-  const eventPath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName, 'application', 'events', `${eventClassName}.java`);
-  if (await fs.pathExists(eventPath)) {
-    console.error(chalk.red(`❌ Event '${eventClassName}' already exists in module '${moduleName}'`));
-    process.exit(1);
-  }
-
-  // Prompt for event configuration
+  // ── Shared configuration (applies to all selected events) ────────────────
   const answers = await inquirer.prompt([
     {
       type: 'number',
       name: 'partitions',
       message: 'Number of partitions:',
       default: 3,
-      validate: (value) => {
-        if (value < 1) return 'Partitions must be at least 1';
-        return true;
-      }
+      validate: (value) => value >= 1 ? true : 'Partitions must be at least 1'
     },
     {
       type: 'number',
       name: 'replicas',
       message: 'Number of replicas:',
       default: 1,
-      validate: (value) => {
-        if (value < 1) return 'Replicas must be at least 1';
-        return true;
-      }
+      validate: (value) => value >= 1 ? true : 'Replicas must be at least 1'
     }
   ]);
 
   const { partitions, replicas } = answers;
-
-  const spinner = ora('Generating Kafka event...').start();
+  const isBatch = eventNames.length > 1;
+  const spinner = ora(`Generating ${isBatch ? `${eventNames.length} Kafka events` : 'Kafka event'}...`).start();
+  const results = [];
 
   try {
-    // Generate property names
-    const topicNameKebab = toKebabCase(eventName);
-    const topicNameCamel = toCamelCase(eventName);
-    const topicNameSnake = toSnakeCase(eventName).toUpperCase();
-    const topicPropertyKey = topicNameKebab;
-    const topicPropertyValue = topicNameSnake;
-    const topicSpringProperty = `\${topics.${topicNameKebab}}`;
+    for (const name of eventNames) {
+      const normalizedName = toPascalCase(name);
+      const evtClassName = normalizedName.endsWith('Event') ? normalizedName : `${normalizedName}Event`;
 
-    // Resolve event fields from domain.yaml if available (used by Event.java.ejs for real field generation)
-    const selectedDomainEvent = domainEventMap[toPascalCase(eventName)] || null;
+      // In batch mode skip already-existing events; in single mode abort
+      const evtPath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName, 'application', 'events', `${evtClassName}.java`);
+      if (await fs.pathExists(evtPath)) {
+        if (isBatch) {
+          results.push({ name: evtClassName, skipped: true });
+          continue;
+        } else {
+          spinner.fail();
+          console.error(chalk.red(`❌ Event '${evtClassName}' already exists in module '${moduleName}'`));
+          process.exit(1);
+        }
+      }
 
-    const context = {
-      packageName,
-      moduleName,
-      modulePascalCase: toPascalCase(moduleName),
-      moduleCamelCase: toCamelCase(moduleName),
-      kafkaMessageBrokerClassName: `${toPascalCase(moduleName)}KafkaMessageBroker`,
-      eventClassName,
-      topicNameSnake,
-      topicNameKebab,
-      topicNameCamel,
-      topicPropertyKey,
-      topicPropertyValue,
-      topicSpringProperty,
-      partitions,
-      replicas,
-      eventFields: selectedDomainEvent ? selectedDomainEvent.fields : null
-    };
+      const topicNameKebab = toKebabCase(name);
+      const topicNameCamel = toCamelCase(name);
+      const topicNameSnake = toSnakeCase(name).toUpperCase();
+      const topicSpringProperty = `\${topics.${topicNameKebab}}`;
+      const selectedDomainEvent = domainEventMap[normalizedName] || null;
 
-    // 1. Generate Event Record
-    spinner.text = 'Generating event record...';
-    await generateEventRecord(projectDir, packagePath, context);
+      const context = {
+        packageName,
+        moduleName,
+        modulePascalCase: toPascalCase(moduleName),
+        moduleCamelCase: toCamelCase(moduleName),
+        kafkaMessageBrokerClassName: `${toPascalCase(moduleName)}KafkaMessageBroker`,
+        eventClassName: evtClassName,
+        topicNameSnake,
+        topicNameKebab,
+        topicNameCamel,
+        topicPropertyKey: topicNameKebab,
+        topicPropertyValue: topicNameSnake,
+        topicSpringProperty,
+        partitions,
+        replicas,
+        eventFields: selectedDomainEvent ? selectedDomainEvent.fields : null
+      };
 
-    // 2. Update kafka.yaml files
-    spinner.text = 'Updating kafka.yaml configuration...';
-    await updateKafkaYml(projectDir, topicPropertyKey, topicPropertyValue);
+      if (isBatch) spinner.text = `[${results.length + 1}/${eventNames.length}] Generating ${evtClassName}...`;
 
-    // 3. Create/Update MessageBroker interface
-    spinner.text = 'Updating MessageBroker interface...';
-    await createOrUpdateMessageBroker(projectDir, packagePath, context);
+      await generateSingleKafkaEvent(projectDir, packagePath, context);
+      results.push({ name: evtClassName, skipped: false, handlerUpdated: context._handlerUpdated });
+    }
 
-    // 4. Create/Update KafkaMessageBroker implementation
-    spinner.text = 'Updating KafkaMessageBroker implementation...';
-    await createOrUpdateKafkaMessageBroker(projectDir, packagePath, context);
+    const generated = results.filter(r => !r.skipped);
+    spinner.succeed(chalk.green(`${isBatch ? `${generated.length} Kafka events` : 'Kafka event'} generated successfully! ✨`));
 
-    // 5. Update KafkaConfig with NewTopic bean
-    spinner.text = 'Updating KafkaConfig...';
-    await updateKafkaConfig(projectDir, packagePath, context);
-
-    spinner.succeed(chalk.green('Kafka event generated successfully! ✨'));
-
+    const kafkaMessageBrokerClass = `${toPascalCase(moduleName)}KafkaMessageBroker`;
     console.log(chalk.blue('\n📦 Generated/Updated components:'));
-    console.log(chalk.gray(`  ├── ${moduleName}/application/events/${eventClassName}.java`));
+    results.forEach((r) => {
+      if (r.skipped) {
+        console.log(chalk.yellow(`  ├── ${moduleName}/application/events/${r.name}.java (skipped — already exists)`));
+      } else {
+        console.log(chalk.gray(`  ├── ${moduleName}/application/events/${r.name}.java`));
+      }
+    });
     console.log(chalk.gray(`  ├── ${moduleName}/application/ports/MessageBroker.java`));
-    console.log(chalk.gray(`  ├── ${moduleName}/infrastructure/adapters/kafkaMessageBroker/${context.kafkaMessageBrokerClassName}.java`));
+    console.log(chalk.gray(`  ├── ${moduleName}/infrastructure/adapters/kafkaMessageBroker/${kafkaMessageBrokerClass}.java`));
     console.log(chalk.gray(`  ├── shared/configurations/kafkaConfig/KafkaConfig.java`));
+    if (results.some(r => r.handlerUpdated)) {
+      console.log(chalk.gray(`  ├── ${moduleName}/application/usecases/*DomainEventHandler.java`));
+    }
     console.log(chalk.gray('  └── parameters/*/kafka.yaml (all environments)'));
-    
-    console.log(chalk.blue('\n✅ Kafka event configured successfully!'));
-    console.log(chalk.white(`\n   Event: ${eventClassName}`));
-    console.log(chalk.white(`   Topic: ${topicPropertyValue} (${topicNameKebab})`));
-    console.log(chalk.white(`   Partitions: ${partitions}`));
-    console.log(chalk.white(`   Replicas: ${replicas}`));
-    console.log(chalk.gray('\n   You can now inject MessageBroker in your services and call:'));
-    console.log(chalk.gray(`   messageBroker.publish${eventClassName}(event);\n`));
+
+    if (!isBatch && generated.length === 1) {
+      const r = generated[0];
+      const topicSnake = toSnakeCase(eventNames[0]).toUpperCase();
+      const topicKebab = toKebabCase(eventNames[0]);
+      console.log(chalk.blue('\n✅ Kafka event configured successfully!'));
+      console.log(chalk.white(`\n   Event: ${r.name}`));
+      console.log(chalk.white(`   Topic: ${topicSnake} (${topicKebab})`));
+      console.log(chalk.white(`   Partitions: ${partitions}`));
+      console.log(chalk.white(`   Replicas: ${replicas}`));
+      console.log(chalk.gray('\n   You can now inject MessageBroker in your services and call:'));
+      console.log(chalk.gray(`   messageBroker.publish${r.name}(event);\n`));
+    } else {
+      console.log(chalk.blue('\n✅ All Kafka events configured successfully!'));
+      console.log(chalk.white(`\n   Partitions: ${partitions}  |  Replicas: ${replicas}`));
+      if (generated.length > 0) {
+        console.log(chalk.gray('\n   Available MessageBroker methods:'));
+        generated.forEach(r => console.log(chalk.gray(`   messageBroker.publish${r.name}(event);`)));
+      }
+      console.log('');
+    }
 
   } catch (error) {
     spinner.fail(chalk.red('Failed to generate Kafka event'));
@@ -230,6 +245,19 @@ async function generateKafkaEventCommand(moduleName, eventName) {
     }
     process.exit(1);
   }
+}
+
+/**
+ * Run the full generation pipeline for a single event.
+ * Mutates context._handlerUpdated to signal whether the DomainEventHandler was wired.
+ */
+async function generateSingleKafkaEvent(projectDir, packagePath, context) {
+  await generateEventRecord(projectDir, packagePath, context);
+  await updateKafkaYml(projectDir, context.topicPropertyKey, context.topicPropertyValue);
+  await createOrUpdateMessageBroker(projectDir, packagePath, context);
+  await createOrUpdateKafkaMessageBroker(projectDir, packagePath, context);
+  await updateKafkaConfig(projectDir, packagePath, context);
+  context._handlerUpdated = await updateDomainEventHandler(projectDir, packagePath, context);
 }
 
 /**
@@ -502,6 +530,113 @@ async function updateKafkaConfig(projectDir, packagePath, context) {
 
   content = content.slice(0, lastBraceIndex) + '\n' + beanMethod + '\n}\n';
   await fs.writeFile(configPath, content, 'utf-8');
+}
+
+/**
+ * Update DomainEventHandler: inject MessageBroker dependency and replace TODO with real mapping call.
+ * Returns true if the handler was found and updated, false if skipped.
+ */
+async function updateDomainEventHandler(projectDir, packagePath, context) {
+  const handlerDir = path.join(
+    projectDir, 'src', 'main', 'java', packagePath,
+    context.moduleName, 'application', 'usecases'
+  );
+
+  if (!(await fs.pathExists(handlerDir))) {
+    console.log(chalk.yellow(`\n   ⚠️  No usecases directory found — skipping handler update`));
+    console.log(chalk.gray(`      Run 'eva4j g entities ${context.moduleName}' first to generate the DomainEventHandler`));
+    return false;
+  }
+
+  const files = await fs.readdir(handlerDir);
+  const handlerFile = files.find(f => f.endsWith('DomainEventHandler.java'));
+
+  if (!handlerFile) {
+    console.log(chalk.yellow(`\n   ⚠️  DomainEventHandler not found in ${context.moduleName}/application/usecases/ — skipping`));
+    console.log(chalk.gray(`      Run 'eva4j g entities ${context.moduleName}' first`));
+    return false;
+  }
+
+  const handlerPath = path.join(handlerDir, handlerFile);
+  const handlerClassName = handlerFile.replace('.java', '');
+  let content = await fs.readFile(handlerPath, 'utf-8');
+
+  // Idempotency: bail if the publish call is already there
+  if (content.includes(`publish${context.eventClassName}`)) {
+    return false;
+  }
+
+  // Compute domain event name by stripping 'Event' suffix from eventClassName
+  // e.g. OrderPlacedEvent → OrderPlaced
+  const domainEventName = context.eventClassName.endsWith('Event')
+    ? context.eventClassName.slice(0, -'Event'.length)
+    : context.eventClassName;
+
+  // Guard: the TODO comment must exist (generated by g entities)
+  if (!content.includes(`// TODO: handle ${domainEventName}`)) {
+    console.log(chalk.yellow(`\n   ⚠️  No TODO handler found for '${domainEventName}' in ${handlerFile} — skipping`));
+    return false;
+  }
+
+  // 1. Inject import for the application-layer event record
+  const eventImport = `import ${context.packageName}.${context.moduleName}.application.events.${context.eventClassName};`;
+  if (!content.includes(eventImport)) {
+    content = injectImportIntoFile(content, eventImport);
+  }
+
+  // 2. Inject import for the MessageBroker port
+  const brokerImport = `import ${context.packageName}.${context.moduleName}.application.ports.MessageBroker;`;
+  if (!content.includes(brokerImport)) {
+    content = injectImportIntoFile(content, brokerImport);
+  }
+
+  // 3. Inject field + constructor if MessageBroker is not yet present
+  if (!content.includes('private final MessageBroker messageBroker;')) {
+    const classPattern = /(public\s+class\s+\w+DomainEventHandler\s*\{\s*\n)/;
+    const classMatch = content.match(classPattern);
+    if (classMatch) {
+      const insertPos = classMatch.index + classMatch[0].length;
+      const fieldAndCtor =
+        `\n    private final MessageBroker messageBroker;\n` +
+        `\n    public ${handlerClassName}(MessageBroker messageBroker) {\n` +
+        `        this.messageBroker = messageBroker;\n` +
+        `    }\n`;
+      content = content.slice(0, insertPos) + fieldAndCtor + content.slice(insertPos);
+    }
+  }
+
+  // 4. Render the mapping call and replace the TODO block
+  const templatePath = path.join(__dirname, '..', '..', 'templates', 'kafka-event', 'DomainEventHandlerMethod.ejs');
+  const mappingLine = await renderTemplate(templatePath, { ...context, domainEventFields: context.eventFields });
+
+  const todoRegex = new RegExp(
+    `([ \\t]*\/\/ TODO: handle ${domainEventName}[^\\n]*\\n)(?:[ \\t]*\/\/[^\\n]*\\n)*`
+  );
+  content = content.replace(todoRegex, `        ${mappingLine.trim()}\n`);
+
+  await fs.writeFile(handlerPath, content, 'utf-8');
+  return true;
+}
+
+/**
+ * Injects an import statement after the last existing import, or after the package declaration.
+ */
+function injectImportIntoFile(content, importStatement) {
+  const packageMatch = content.match(/(package\s+[\w.]+;\s*\n)/);
+  if (!packageMatch) return content;
+
+  const hasImports = /import\s+[\w.]+;/.test(content);
+  if (hasImports) {
+    const imports = content.matchAll(/import\s+[\w.]+;\s*\n/g);
+    let lastImportEnd = packageMatch.index + packageMatch[0].length;
+    for (const match of imports) {
+      lastImportEnd = match.index + match[0].length;
+    }
+    return content.slice(0, lastImportEnd) + importStatement + '\n' + content.slice(lastImportEnd);
+  } else {
+    const insertPos = packageMatch.index + packageMatch[0].length;
+    return content.slice(0, insertPos) + '\n' + importStatement + '\n' + content.slice(insertPos);
+  }
 }
 
 module.exports = generateKafkaEventCommand;
