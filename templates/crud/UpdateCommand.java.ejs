@@ -1,0 +1,52 @@
+package <%= packageName %>.<%= moduleName %>.application.commands;
+
+import <%= packageName %>.shared.domain.interfaces.Command;
+<% if (hasValueObjects) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
+<% } %>
+<% if (hasEnums) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
+<% } %>
+<% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
+import java.util.List;
+import jakarta.validation.Valid;
+<% oneToManyRelationships.forEach(rel => { %>
+import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= rel.targetEntityName %>Dto;
+<% }); %>
+<% } %>
+<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
+import jakarta.validation.Valid;
+<% oneToOneRelationships.forEach(rel => { %>
+import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= rel.targetEntityName %>Dto;
+<% }); %>
+<% } %>
+<% imports.forEach(imp => { %>
+<%- imp %>
+<% }); %>
+
+/**
+ * Update<%= aggregateName %>Command — PATCH
+ *
+ * All fields except {@code id} are nullable.
+ * The handler only applies fields that are non-null,
+ * following the partial-update (PATCH) semantics.
+ */
+public record Update<%= aggregateName %>Command(
+    <%- idType %> id<% if (commandFields && commandFields.length > 0) { %>,<% } %>
+<% commandFields.forEach((field, idx) => { %>
+    <%- field.javaType %> <%= field.name %><% if (idx < commandFields.length - 1 || (oneToManyRelationships && oneToManyRelationships.length > 0) || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
+<% }); %>
+<% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
+<% oneToManyRelationships.forEach((rel, idx) => { %>
+    @Valid
+    List<Create<%= rel.targetEntityName %>Dto> <%= rel.fieldName %><% if (idx < oneToManyRelationships.length - 1 || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
+<% }); %>
+<% } %>
+<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
+<% oneToOneRelationships.forEach((rel, idx) => { %>
+    @Valid
+    Create<%= rel.targetEntityName %>Dto <%= rel.fieldName %><% if (idx < oneToOneRelationships.length - 1) { %>,<% } %>
+<% }); %>
+<% } %>
+) implements Command {
+}

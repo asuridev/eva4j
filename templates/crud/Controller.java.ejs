@@ -2,6 +2,7 @@ package <%= packageName %>.<%= moduleName %>.infrastructure.rest.controllers.<%=
 
 import <%= packageName %>.<%= moduleName %>.application.commands.Create<%= aggregateName %>Command;
 import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggregateName %>Command;
+import <%= packageName %>.<%= moduleName %>.application.commands.Update<%= aggregateName %>Command;
 import <%= packageName %>.<%= moduleName %>.application.queries.Get<%= aggregateName %>Query;
 import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
@@ -65,5 +66,30 @@ public class <%= aggregateName %>Controller {
     public void delete(@PathVariable <%- idType %> id) {
         log.info("Deleting <%= aggregateName %>: {}", id);
         useCaseMediator.dispatch(new Delete<%= aggregateName %>Command(id));
+    }
+
+    @PatchMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(summary = "Update <%= aggregateName %>")
+    public void update(
+            @PathVariable <%- idType %> id,
+            @RequestBody Update<%= aggregateName %>Command command) {
+        log.info("Updating <%= aggregateName %>: {}", id);
+        useCaseMediator.dispatch(new Update<%= aggregateName %>Command(
+                id<% if (commandFields && commandFields.length > 0) { %>,<% } %>
+<% commandFields.forEach((field, idx) => { %>
+                command.<%= field.name %>()<% if (idx < commandFields.length - 1 || (oneToManyRelationships && oneToManyRelationships.length > 0) || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
+<% }); %>
+<% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
+<% oneToManyRelationships.forEach((rel, idx) => { %>
+                command.<%= rel.fieldName %>()<% if (idx < oneToManyRelationships.length - 1 || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
+<% }); %>
+<% } %>
+<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
+<% oneToOneRelationships.forEach((rel, idx) => { %>
+                command.<%= rel.fieldName %>()<% if (idx < oneToOneRelationships.length - 1) { %>,<% } %>
+<% }); %>
+<% } %>
+        ));
     }
 }

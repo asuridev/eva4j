@@ -868,6 +868,14 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     writeOptions
   );
   generatedFiles.push({ type: 'Command', name: `Delete${aggregateName}Command`, path: `${moduleName}/application/commands/Delete${aggregateName}Command.java` });
+
+  await renderAndWrite(
+    path.join(templatesDir, 'UpdateCommand.java.ejs'),
+    path.join(moduleBasePath, 'application', 'commands', `Update${aggregateName}Command.java`),
+    { ...baseContext, imports: commandAppImports },
+    writeOptions
+  );
+  generatedFiles.push({ type: 'Command', name: `Update${aggregateName}Command`, path: `${moduleName}/application/commands/Update${aggregateName}Command.java` });
   
   // 3. Generate Queries
   await renderAndWrite(
@@ -924,6 +932,14 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     writeOptions
   );
   generatedFiles.push({ type: 'Handler', name: `Delete${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Delete${aggregateName}CommandHandler.java` });
+
+  await renderAndWrite(
+    path.join(templatesDir, 'UpdateCommandHandler.java.ejs'),
+    path.join(moduleBasePath, 'application', 'usecases', `Update${aggregateName}CommandHandler.java`),
+    baseContext,
+    writeOptions
+  );
+  generatedFiles.push({ type: 'Handler', name: `Update${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Update${aggregateName}CommandHandler.java` });
   
   // 5. Generate DTOs
   const responseDtoContext = {

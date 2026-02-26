@@ -1,0 +1,105 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.commands.Update<%= aggregateName %>Command;
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+<% if ((commandFields || []).some(f => f.originalVoType)) { %>
+import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
+<% } %>
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
+import <%= packageName %>.shared.domain.interfaces.CommandHandler;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Update<%= aggregateName %>CommandHandler — PATCH
+ *
+ * Reconstructs the <%= aggregateName %> aggregate using the full constructor,
+ * merging each command field with the existing entity value.
+ * Non-null command fields override the current value; null fields are preserved
+ * from the loaded entity. No setters are required on the domain entity.
+ */
+@Slf4j
+@ApplicationComponent
+public class Update<%= aggregateName %>CommandHandler implements CommandHandler<Update<%= aggregateName %>Command> {
+
+    private final <%= aggregateName %>Repository repository;
+<% if ((commandFields || []).some(f => f.originalVoType)) { %>
+    private final <%= aggregateName %>ApplicationMapper mapper;
+
+    public Update<%= aggregateName %>CommandHandler(
+            <%= aggregateName %>Repository repository,
+            <%= aggregateName %>ApplicationMapper mapper) {
+        this.repository = repository;
+        this.mapper = mapper;
+    }
+<% } else { %>
+    public Update<%= aggregateName %>CommandHandler(<%= aggregateName %>Repository repository) {
+        this.repository = repository;
+    }
+<% } %>
+
+    @Override
+    @Transactional
+    public void handle(Update<%= aggregateName %>Command command) {
+        log.info("Handling Update<%= aggregateName %>Command for id: {}", command.id());
+
+        <%= aggregateName %> existing = repository
+                .findById(command.id())
+                .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
+
+<%
+    // Build a lookup map: field name → commandField (with originalVoType info)
+    const cmdFieldMap = {};
+    (commandFields || []).forEach(f => { cmdFieldMap[f.name] = f; });
+
+    // oneToOneRelationships are non-collection non-inverse rels → appear in the full constructor
+    const ctorRels = oneToOneRelationships || [];
+    const totalArgs = (rootEntity.fields || []).length + ctorRels.length;
+    let argIdx = 0;
+
+    function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+%>
+        // Merge: use command value when non-null, otherwise preserve existing value.
+        // The full constructor is called so no setters are needed on the domain entity.
+        <%= aggregateName %> updated = new <%= aggregateName %>(
+<% (rootEntity.fields || []).forEach(field => { argIdx++; %>
+<%   const cmdField = cmdFieldMap[field.name]; %>
+<%   const getter = `existing.get${capitalize(field.name)}()`; %>
+<%   const comma = argIdx < totalArgs ? ',' : ''; %>
+<%   if (cmdField && cmdField.originalVoType) { %>
+                command.<%= field.name %>() != null
+                        ? mapper.to<%= cmdField.originalVoType %>(command.<%= field.name %>())
+                        : <%= getter %><%= comma %>
+<%   } else if (cmdField) { %>
+                command.<%= field.name %>() != null ? command.<%= field.name %>() : <%= getter %><%= comma %>
+<%   } else { %>
+                <%= getter %><%= comma %> // preserved: <%= field.name %>
+<%   } %>
+<% }); %>
+<% ctorRels.forEach(rel => { argIdx++; %>
+<%   const comma = argIdx < totalArgs ? ',' : ''; %>
+                existing.get<%= capitalize(rel.fieldName) %>()<%= comma %> // preserved: <%= rel.fieldName %>
+<% }); %>
+        );
+<% if ((oneToManyRelationships || []).length > 0) { %>
+
+        // TODO: Collection relationships require an explicit replacement strategy.
+        //       Choose the right approach for your domain and uncomment:
+        //
+        //  Option A — Clear-and-replace (simple, loses existing entity ids):
+        //    existing.get<collection>().clear();
+        //    command.<collection>().forEach(dto -> entity.add<Item>(...));
+        //
+        //  Option B — Merge by id (preserves audit trail, more complex):
+        //    reconcile existing items against command items by id
+<% (oneToManyRelationships || []).forEach(rel => { %>
+        // if (command.<%= rel.fieldName %>() != null) { /* replace <%= rel.fieldName %> */ }
+<% }); %>
+<% } %>
+
+        repository.save(updated);
+        log.info("<%= aggregateName %> updated successfully with id: {}", command.id());
+    }
+}
