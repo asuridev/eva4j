@@ -1,66 +1,912 @@
 # Command `generate entities` (alias: `g entities`)
 
-## 📋 Description
+---
 
-Generates complete domain model from a YAML definition file, including entities, value objects, enums, JPA mappings, repositories, and CRUD operations with CQRS pattern.
+## Índice
 
-## 🎯 Purpose
+1. [Descripción y propósito](#1-descripción-y-propósito)
+2. [Sintaxis y ubicación del YAML](#2-sintaxis-y-ubicación-del-yaml)
+3. [Estructura base del domain.yaml](#3-estructura-base-del-domainyaml)
+4. [Tipos de datos soportados](#4-tipos-de-datos-soportados)
+5. [Propiedades de campo](#5-propiedades-de-campo)
+6. [Validaciones JSR-303](#6-validaciones-jsr-303)
+7. [Auditoría](#7-auditoría)
+8. [Relaciones](#8-relaciones)
+9. [Value Objects](#9-value-objects)
+10. [Enums y transiciones de estado](#10-enums-y-transiciones-de-estado)
+11. [Eventos de dominio](#11-eventos-de-dominio)
+12. [Múltiples agregados](#12-múltiples-agregados)
+13. [Archivos generados](#13-archivos-generados)
+14. [Ejemplos completos](#14-ejemplos-completos)
+15. [Prerequisitos y errores comunes](#15-prerequisitos-y-errores-comunes)
 
-Automate the creation of domain models with full hexagonal architecture implementation, eliminating repetitive coding and ensuring consistency across all layers (domain, application, infrastructure).
+---
 
-## 📝 Syntax
+## 1. Descripción y propósito
+
+`generate entities` es el comando central de eva4j. A partir de un archivo `domain.yaml`, genera la arquitectura hexagonal completa del módulo:
+
+- **Capa de dominio** – Entidades, Value Objects, Enums, interfaces de repositorio
+- **Capa de aplicación** – Commands, Queries, handlers, DTOs, mappers
+- **Capa de infraestructura** – Entidades JPA, repositorios Spring Data, implementaciones de repositorio, controladores REST
+
+El generador entiende relaciones, auditoría, visibilidad de campos, validaciones, transiciones de estado y eventos de dominio.
+
+---
+
+## 2. Sintaxis y ubicación del YAML
 
 ```bash
-eva4j generate entities <aggregate-name>
-eva4j g entities <aggregate-name>        # Short alias
+eva generate entities <module>
+eva g entities <module>          # alias corto
 ```
 
-### Parameters
+### Parámetros
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `aggregate-name` | Yes | Name of the aggregate (must match YAML file name) |
+| Parámetro | Requerido | Descripción |
+|-----------|-----------|-------------|
+| `<module>` | Sí | Nombre del módulo (debe existir en el proyecto) |
 
-## 📄 YAML File Structure
+### Opciones
 
-The command expects a YAML file at `examples/<aggregate-name>.yaml` with the following structure:
+| Opción | Descripción |
+|--------|-------------|
+| `--force` | Sobrescribe archivos con cambios del desarrollador |
+
+### Ubicación del YAML
+
+El archivo se lee desde:
+
+```
+src/main/java/<package>/<module>/domain.yaml
+```
+
+> El generador detecta cambios de desarrollador mediante checksums. Si un archivo fue modificado manualmente, **no se sobreescribe** a menos que uses `--force`.
+
+---
+
+## 3. Estructura base del domain.yaml
 
 ```yaml
-module: <module-name>      # Target module for generation
+aggregates:                          # Lista de agregados en el módulo
+  - name: Order                      # Nombre del agregado (PascalCase)
+    entities:                        # Entidades del agregado
+      - name: order                  # Nombre de entidad (camelCase)
+        isRoot: true                 # true = raíz del agregado
+        tableName: orders            # Nombre de tabla SQL (opcional)
+        audit:                       # Auditoría (opcional)
+          enabled: true
+          trackUser: false
+        fields:                      # Campos de la entidad
+          - name: id
+            type: String
+          - name: status
+            type: OrderStatus        # Referencia a enum o VO
+        relationships:               # Relaciones JPA (opcional)
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
 
-aggregates:
-  - name: <AggregateName>
-    tableName: <table_name>
-    auditable: true|false
-    
-    entities:
-      - name: <EntityName>
-        isRoot: true|false
-        tableName: <table_name>
+      - name: orderItem              # Entidad secundaria (sin isRoot o isRoot: false)
+        tableName: order_items
         fields:
-          - name: <fieldName>
-            type: <JavaType|ValueObject|Enum>
-            validations:
-              - <@Annotation>
-        relationships:
-          - type: OneToMany|ManyToOne|OneToOne|ManyToMany
-            target: <TargetEntity>
-            mappedBy: <fieldName>       # For inverse side
-            cascade: ALL|PERSIST|MERGE
-            fetch: LAZY|EAGER
-    
-    valueObjects:
-      - name: <ValueObjectName>
+          - name: id
+            type: Long
+          - name: quantity
+            type: Integer
+
+    valueObjects:                    # Value Objects del agregado
+      - name: Money
         fields:
-          - name: <fieldName>
-            type: <JavaType>
-    
-    enums:
-      - name: <EnumName>
-        values:
-          - VALUE1
-          - VALUE2
+          - name: amount
+            type: BigDecimal
+          - name: currency
+            type: String
+
+    enums:                           # Enums del agregado
+      - name: OrderStatus
+        values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+
+    events:                          # Eventos de dominio (opcional)
+      - name: OrderPlaced
+        fields:
+          - name: customerId
+            type: String
 ```
+
+> **Sinónimos soportados**: `fields` = `properties`; `target` = `targetEntity`
+
+### Regla del campo `id`
+
+Toda entidad **debe** tener un campo llamado exactamente `id`:
+
+| Tipo del `id` | Estrategia generada |
+|---------------|---------------------|
+| `String` | `@GeneratedValue(strategy = GenerationType.UUID)` |
+| `Long` | `@GeneratedValue(strategy = GenerationType.IDENTITY)` |
+
+---
+
+## 4. Tipos de datos soportados
+
+| Tipo YAML | Tipo Java | Observaciones |
+|-----------|-----------|---------------|
+| `String` | `String` | Para `id` genera UUID |
+| `Integer` | `Integer` | Para `id` genera IDENTITY |
+| `Long` | `Long` | Para `id` genera IDENTITY |
+| `Double` | `Double` | |
+| `BigDecimal` | `BigDecimal` | |
+| `Boolean` | `Boolean` | |
+| `LocalDate` | `LocalDate` | Import automático |
+| `LocalDateTime` | `LocalDateTime` | Import automático |
+| `LocalTime` | `LocalTime` | Import automático |
+| `UUID` | `UUID` | Import automático |
+| `List<String>` | `List<String>` | `@ElementCollection` |
+| `List<VO>` | `List<VoJpa>` | `@ElementCollection` |
+| Nombre de Enum | Enum del módulo | `@Enumerated(STRING)` |
+| Nombre de VO | Value Object | `@Embedded` |
+
+---
+
+## 5. Propiedades de campo
+
+```yaml
+fields:
+  - name: fieldName        # camelCase, requerido
+    type: String           # tipo Java, requerido
+    readOnly: false        # default false
+    hidden: false          # default false
+    validations: []        # anotaciones JSR-303
+    annotations: []        # anotaciones JPA crudas
+    reference:             # referencia semántica a otro agregado
+      aggregate: Customer
+      module: customers
+    enumValues: []         # enum inline (alternativa a enums:)
+```
+
+### Matriz de visibilidad
+
+| Campo | Constructor creación | CreateDto/Command | Constructor completo | ResponseDto |
+|-------|---------------------|-------------------|----------------------|-------------|
+| normal | ✅ | ✅ | ✅ | ✅ |
+| `readOnly: true` | ❌ | ❌ | ✅ | ✅ |
+| `hidden: true` | ✅ | ✅ | ✅ | ❌ |
+| `readOnly + hidden` | ❌ | ❌ | ✅ | ❌ |
+
+### readOnly
+
+Marca un campo como calculado/derivado: se excluye del constructor de negocio y del `CreateDto`/`CreateCommand`, pero sí aparece en el constructor completo (reconstrucción desde persistencia) y en `ResponseDto`.
+
+```yaml
+fields:
+  - name: totalAmount
+    type: BigDecimal
+    readOnly: true    # calculado de la suma de items
+```
+
+> Cuando un enum tiene `initialValue`, el campo correspondiente se trata como `readOnly` automáticamente.
+
+### hidden
+
+Marca un campo como sensible: se incluye en creación pero NO aparece en `ResponseDto`.
+
+```yaml
+fields:
+  - name: passwordHash
+    type: String
+    hidden: true    # no exponer en API
+```
+
+### annotations (JPA crudas)
+
+Permite agregar anotaciones JPA personalizadas a la entidad JPA generada.
+
+```yaml
+fields:
+  - name: email
+    type: String
+    annotations:
+      - "@Column(unique = true, nullable = false)"
+```
+
+### reference
+
+Declara una referencia semántica a un campo de otro agregado. Genera un comentario Javadoc indicando la relación, sin crear dependencia de código.
+
+```yaml
+fields:
+  - name: customerId
+    type: String
+    reference:
+      aggregate: Customer
+      module: customers
+```
+
+Genera en la entidad de dominio:
+
+```java
+/** @see customers.Customer */
+private String customerId;
+```
+
+---
+
+## 6. Validaciones JSR-303
+
+Las validaciones se declaran en el campo y se aplican al `CreateCommand` y `CreateDto`. **No** se añaden a las entidades de dominio.
+
+```yaml
+fields:
+  - name: name
+    type: String
+    validations:
+      - type: NotBlank
+        message: "El nombre es obligatorio"
+      - type: Size
+        min: 2
+        max: 100
+```
+
+Genera import automático: `import jakarta.validation.constraints.*;`
+
+### Parámetros soportados
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `type` | Nombre de la anotación sin `@` (requerido) |
+| `message` | Mensaje de error personalizado |
+| `value` | Valor único (para `@Min`, `@Max`) |
+| `min` | Valor mínimo (para `@Size`, `@DecimalMin`) |
+| `max` | Valor máximo (para `@Size`, `@DecimalMax`) |
+| `regexp` | Expresión regular (para `@Pattern`) |
+| `integer` | Dígitos enteros (para `@Digits`) |
+| `fraction` | Dígitos decimales (para `@Digits`) |
+| `inclusive` | Inclusivo (para `@DecimalMin`, `@DecimalMax`) |
+
+### Ejemplos por tipo
+
+```yaml
+# @NotBlank
+- type: NotBlank
+  message: "Campo obligatorio"
+
+# @NotNull
+- type: NotNull
+
+# @Size
+- type: Size
+  min: 2
+  max: 255
+
+# @Email
+- type: Email
+
+# @Min / @Max (para numéricos)
+- type: Min
+  value: 1
+- type: Max
+  value: 999
+
+# @Pattern
+- type: Pattern
+  regexp: "^[A-Z]{2}[0-9]{6}$"
+  message: "Formato inválido"
+
+# @DecimalMin / @DecimalMax
+- type: DecimalMin
+  min: "0.01"
+  inclusive: true
+- type: DecimalMax
+  max: "9999.99"
+
+# @Digits
+- type: Digits
+  integer: 6
+  fraction: 2
+```
+
+---
+
+## 7. Auditoría
+
+### Sintaxis
+
+```yaml
+# Nuevo (recomendado)
+audit:
+  enabled: true       # agrega createdAt, updatedAt
+  trackUser: true     # también agrega createdBy, updatedBy
+
+# Legacy (equivalente a audit.enabled: true, trackUser: false)
+auditable: true
+```
+
+### Herencia JPA generada
+
+| Configuración | Clase base JPA |
+|---------------|----------------|
+| Sin auditoría | sin herencia |
+| `audit.enabled: true` | `extends AuditableEntity` |
+| `audit.trackUser: true` | `extends FullAuditableEntity` |
+
+### Campos generados
+
+| Campo | `audit.enabled` | `audit.trackUser` | En ResponseDto |
+|-------|-----------------|-------------------|----------------|
+| `createdAt` | ✅ | ✅ | ✅ |
+| `updatedAt` | ✅ | ✅ | ✅ |
+| `createdBy` | ❌ | ✅ | ❌ |
+| `updatedBy` | ❌ | ✅ | ❌ |
+
+> `createdBy` y `updatedBy` son metadatos administrativos: nunca se exponen en DTOs de respuesta.
+
+### Infraestructura generada con `trackUser: true`
+
+Cuando se activa `trackUser`, eva4j genera automáticamente:
+
+| Archivo | Propósito |
+|---------|-----------|
+| `UserContextHolder.java` | ThreadLocal para el usuario actual |
+| `UserContextFilter.java` | Captura el header `X-User` de cada request |
+| `AuditorAwareImpl.java` | Provee el usuario actual para JPA Auditing |
+
+La clase `Application.java` se configura con `@EnableJpaAuditing(auditorAwareRef = "auditorProvider")`.
+
+### Ejemplo
+
+```yaml
+entities:
+  - name: order
+    isRoot: true
+    tableName: orders
+    audit:
+      enabled: true
+      trackUser: true
+    fields:
+      - name: id
+        type: String
+      - name: amount
+        type: BigDecimal
+```
+
+> Los campos de auditoría **no se definen manualmente** en `fields:`; se heredan de la clase base JPA.
+
+---
+
+## 8. Relaciones
+
+### Propiedades
+
+| Propiedad | Valores | Descripción |
+|-----------|---------|-------------|
+| `type` | `OneToMany`, `ManyToOne`, `OneToOne`, `ManyToMany` | Tipo de relación |
+| `target` / `targetEntity` | Nombre de entidad | Entidad relacionada |
+| `mappedBy` | nombre de campo | Lado inverso de la relación |
+| `joinColumn` | nombre de columna | Nombre de la FK |
+| `cascade` | array de `PERSIST`, `MERGE`, `REMOVE`, `REFRESH`, `DETACH`, `ALL` | Operaciones en cascada |
+| `fetch` | `LAZY` (default), `EAGER` | Estrategia de carga |
+
+### Auto-generación del lado inverso
+
+Cuando defines `OneToMany` con `mappedBy`, eva4j genera automáticamente el `@ManyToOne` en la entidad JPA del target. **No es necesario definir ambos lados.**
+
+```yaml
+# ✅ Solo esto es necesario
+entities:
+  - name: order
+    isRoot: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        mappedBy: order
+        cascade: [PERSIST, MERGE, REMOVE]
+        fetch: LAZY
+
+# Eva4j genera en OrderItemJpa:
+# @ManyToOne(fetch = FetchType.LAZY)
+# @JoinColumn(name = "order_id")
+# private OrderJpa order;
+```
+
+> Si defines `ManyToOne` manualmente, esa definición tiene prioridad sobre la auto-generación.
+
+### OneToMany
+
+```yaml
+relationships:
+  - type: OneToMany
+    target: OrderItem
+    mappedBy: order
+    cascade: [PERSIST, MERGE, REMOVE]
+    fetch: LAZY
+```
+
+Genera en dominio:
+
+```java
+private List<OrderItem> orderItems = new ArrayList<>();
+public void addOrderItem(OrderItem item) { orderItems.add(item); }
+public void removeOrderItem(OrderItem item) { orderItems.remove(item); }
+```
+
+### ManyToOne (manual, cuando necesitas FK específica)
+
+```yaml
+relationships:
+  - type: ManyToOne
+    target: Order
+    joinColumn: fk_order_uuid
+    fetch: LAZY
+```
+
+### OneToOne
+
+```yaml
+# Lado con mappedBy (inverso)
+relationships:
+  - type: OneToOne
+    target: OrderSummary
+    mappedBy: order
+    cascade: [PERSIST, MERGE]
+    fetch: LAZY
+
+# Lado propietario (con FK)
+relationships:
+  - type: OneToOne
+    target: Order
+    joinColumn: order_id
+    fetch: LAZY
+```
+
+### Cuándo definir ManyToOne manualmente
+
+| Escenario | ¿Definir ManyToOne? |
+|-----------|---------------------|
+| Relación estándar con `mappedBy` | ❌ Eva4j lo genera |
+| FK con nombre personalizado | ✅ Sí, para controlar `joinColumn` |
+| Múltiples FKs a la misma entidad | ✅ Sí, para nombres distintos |
+| Relación unidireccional (sin inverso) | ✅ Sí |
+
+### Cascade recomendado
+
+```yaml
+# Hijo no tiene sentido sin padre → incluir REMOVE
+cascade: [PERSIST, MERGE, REMOVE]
+
+# Hijo tiene ciclo de vida independiente
+cascade: [PERSIST, MERGE]
+```
+
+---
+
+## 9. Value Objects
+
+Son objetos inmutables que representan conceptos de dominio sin identidad propia.
+
+```yaml
+valueObjects:
+  - name: Money
+    fields:
+      - name: amount
+        type: BigDecimal
+      - name: currency
+        type: String
+```
+
+Genera:
+
+- `Money.java` – clase de dominio inmutable con constructor, getters, `equals()`, `hashCode()`
+- `MoneyJpa.java` – `@Embeddable` con Lombok
+
+Uso en campo:
+
+```yaml
+- name: totalAmount
+  type: Money    # detectado automáticamente como @Embedded
+```
+
+### Lista de Value Objects
+
+```yaml
+- name: addresses
+  type: List<Address>
+```
+
+Genera:
+
+```java
+@ElementCollection
+@CollectionTable(name = "entity_addresses", joinColumns = @JoinColumn(name = "entity_id"))
+@Builder.Default
+private List<AddressJpa> addresses = new ArrayList<>();
+```
+
+---
+
+## 10. Enums y transiciones de estado
+
+### Enum simple
+
+```yaml
+enums:
+  - name: OrderStatus
+    values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+```
+
+Genera `OrderStatus.java` con los valores enumerados. En JPA: `@Enumerated(EnumType.STRING)`.
+
+### Enum con transiciones de estado
+
+Las transiciones generan métodos de negocio en la entidad, lógica de validación en el enum y previenen estados inválidos.
+
+```yaml
+enums:
+  - name: OrderStatus
+    initialValue: PENDING          # asigna valor inicial; campo queda readOnly
+    values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+    transitions:
+      - from: PENDING              # puede ser string o [array]
+        to: CONFIRMED
+        method: confirm            # nombre del método generado en la entidad
+      - from: [PENDING, CONFIRMED]
+        to: CANCELLED
+        method: cancel
+        guard: "this.status == OrderStatus.DELIVERED"  # BusinessException si es true
+      - from: CONFIRMED
+        to: SHIPPED
+        method: ship
+```
+
+#### Lo que genera en el Enum
+
+```java
+private static final Map<OrderStatus, List<OrderStatus>> VALID_TRANSITIONS = Map.of(
+    PENDING,   List.of(CONFIRMED, CANCELLED),
+    CONFIRMED, List.of(SHIPPED, CANCELLED),
+    SHIPPED,   List.of(DELIVERED));
+
+public boolean canTransitionTo(OrderStatus next) {
+    return VALID_TRANSITIONS.getOrDefault(this, List.of()).contains(next);
+}
+
+public OrderStatus transitionTo(OrderStatus next) {
+    if (!canTransitionTo(next)) {
+        throw new InvalidStateTransitionException(this, next);
+    }
+    return next;
+}
+```
+
+#### Lo que genera en la entidad raíz
+
+Un método por transición, más helpers `is*()` y `can*()`:
+
+```java
+public void confirm() {
+    this.status = this.status.transitionTo(OrderStatus.CONFIRMED);
+}
+
+public void cancel() {
+    if (this.status == OrderStatus.DELIVERED) {
+        throw new BusinessException("Cannot cancel a delivered order");
+    }
+    this.status = this.status.transitionTo(OrderStatus.CANCELLED);
+}
+
+public boolean isPending() { return this.status == OrderStatus.PENDING; }
+public boolean canConfirm() { return this.status.canTransitionTo(OrderStatus.CONFIRMED); }
+```
+
+### `initialValue`
+
+Asigna un valor por defecto al campo de estado en el constructor de creación. El campo queda marcado como `readOnly` automáticamente (no aparece en `CreateDto`/`CreateCommand`).
+
+```yaml
+enums:
+  - name: OrderStatus
+    initialValue: PENDING
+```
+
+### `guard`
+
+Condición Java evaluada en el método de transición. Si la expresión es `true`, se lanza `BusinessException`.
+
+```yaml
+- from: [PENDING, CONFIRMED]
+  to: CANCELLED
+  method: cancel
+  guard: "this.totalAmount.compareTo(BigDecimal.ZERO) == 0"
+```
+
+---
+
+## 11. Eventos de dominio
+
+Los eventos se declaran bajo el agregado (a mismo nivel que `entities:`, `enums:`, `valueObjects:`).
+
+```yaml
+aggregates:
+  - name: Order
+    events:
+      - name: OrderPlaced        # sufijo "Event" se agrega automáticamente
+        fields:
+          - name: customerId
+            type: String
+          - name: totalAmount
+            type: BigDecimal
+      - name: OrderCancelled
+        fields:
+          - name: reason
+            type: String
+    entities:
+      - name: order
+        # ...
+```
+
+### Archivos generados
+
+| Archivo | Descripción |
+|---------|-------------|
+| `shared/domain/DomainEvent.java` | Clase base abstracta (generada una vez por proyecto) |
+| `domain/models/events/OrderPlacedEvent.java` | Evento concreto que extiende `DomainEvent` |
+| `domain/models/events/OrderCancelledEvent.java` | Evento concreto |
+| `raise()` / `pullDomainEvents()` en el agregado raíz | Infraestructura de eventos en la entidad |
+| `OrderRepositoryImpl.java` | Llama `eventPublisher.publishEvent()` al guardar |
+| `OrderDomainEventHandler.java` | Clase con `@TransactionalEventListener` por cada evento |
+
+### Evento generado
+
+```java
+public final class OrderPlacedEvent extends DomainEvent {
+    private final String customerId;
+    private final BigDecimal totalAmount;
+
+    public OrderPlacedEvent(String customerId, BigDecimal totalAmount) {
+        this.customerId = customerId;
+        this.totalAmount = totalAmount;
+    }
+
+    // getters
+}
+```
+
+### Cómo disparar el evento en la entidad
+
+```java
+public class Order {
+    private final List<DomainEvent> domainEvents = new ArrayList<>();
+
+    public void place(String customerId, BigDecimal totalAmount) {
+        // lógica de negocio...
+        raise(new OrderPlacedEvent(customerId, totalAmount));
+    }
+
+    protected void raise(DomainEvent event) {
+        domainEvents.add(event);
+    }
+
+    public List<DomainEvent> pullDomainEvents() {
+        List<DomainEvent> events = new ArrayList<>(domainEvents);
+        domainEvents.clear();
+        return events;
+    }
+}
+```
+
+---
+
+## 12. Múltiples agregados
+
+Un `domain.yaml` puede contener varios agregados. Cada uno genera su propio conjunto de archivos.
+
+```yaml
+aggregates:
+  - name: Customer
+    entities:
+      - name: customer
+        isRoot: true
+        fields:
+          - name: id
+            type: String
+          - name: email
+            type: String
+
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+    enums:
+      - name: ProductCategory
+        values: [ELECTRONICS, CLOTHING, FOOD]
+```
+
+> Los enums y Value Objects son locales al agregado donde se definen. Si dos agregados necesitan el mismo VO, se debe declarar en cada uno.
+
+---
+
+## 13. Archivos generados
+
+Por cada agregado se generan aproximadamente los siguientes archivos:
+
+| Archivo | Capa | Descripción |
+|---------|------|-------------|
+| `{Root}.java` | Domain | Entidad raíz del agregado |
+| `{Entity}.java` | Domain | Entidades secundarias |
+| `{Vo}.java` | Domain | Value Objects |
+| `{Enum}.java` | Domain | Enums (con VALID_TRANSITIONS si hay transiciones) |
+| `{Root}Repository.java` | Domain | Interfaz de repositorio (puerto) |
+| `Create{Root}Command.java` | Application | Comando de creación |
+| `Create{Root}CommandHandler.java` | Application | Handler del comando |
+| `Get{Root}Query.java` | Application | Query por ID |
+| `Get{Root}QueryHandler.java` | Application | Handler de query |
+| `List{Root}Query.java` | Application | Query paginada |
+| `List{Root}QueryHandler.java` | Application | Handler de lista |
+| `{Root}ResponseDto.java` | Application | DTO de respuesta |
+| `Create{Root}Dto.java` | Application | DTO de creación |
+| `{Root}ApplicationMapper.java` | Application | Mapper Command/DTO ↔ Domain |
+| `{Root}Jpa.java` | Infrastructure | Entidad JPA |
+| `{Entity}Jpa.java` | Infrastructure | Entidades secundarias JPA |
+| `{Vo}Jpa.java` | Infrastructure | Value Objects JPA (@Embeddable) |
+| `{Root}Mapper.java` | Infrastructure | Mapper Domain ↔ JPA |
+| `{Root}JpaRepository.java` | Infrastructure | Repositorio Spring Data |
+| `{Root}RepositoryImpl.java` | Infrastructure | Implementación del repositorio |
+| `{Root}Controller.java` | Infrastructure | Controlador REST |
+
+### Endpoints REST generados
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `POST` | `/api/{module}/{entity}` | Crear |
+| `GET` | `/api/{module}/{entity}/{id}` | Obtener por ID |
+| `GET` | `/api/{module}/{entity}?page=0&size=20` | Listar paginado |
+| `PUT` | `/api/{module}/{entity}/{id}` | Actualizar |
+| `DELETE` | `/api/{module}/{entity}/{id}` | Eliminar |
+
+---
+
+## 14. Ejemplos completos
+
+### Ejemplo 1: Pedido con transiciones y eventos
+
+```yaml
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: customerId
+            type: String
+            reference:
+              aggregate: Customer
+              module: customers
+          - name: status
+            type: OrderStatus
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+        relationships:
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+
+      - name: orderItem
+        tableName: order_items
+        fields:
+          - name: id
+            type: Long
+          - name: productId
+            type: String
+          - name: quantity
+            type: Integer
+            validations:
+              - type: Min
+                value: 1
+          - name: unitPrice
+            type: BigDecimal
+
+    enums:
+      - name: OrderStatus
+        initialValue: PENDING
+        values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+        transitions:
+          - from: PENDING
+            to: CONFIRMED
+            method: confirm
+          - from: CONFIRMED
+            to: SHIPPED
+            method: ship
+          - from: [PENDING, CONFIRMED]
+            to: CANCELLED
+            method: cancel
+            guard: "this.status == OrderStatus.DELIVERED"
+
+    events:
+      - name: OrderPlaced
+        fields:
+          - name: customerId
+            type: String
+      - name: OrderCancelled
+        fields:
+          - name: reason
+            type: String
+```
+
+### Ejemplo 2: Usuario con auditoría y campo sensible
+
+```yaml
+aggregates:
+  - name: User
+    entities:
+      - name: user
+        isRoot: true
+        tableName: users
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: username
+            type: String
+            validations:
+              - type: NotBlank
+              - type: Size
+                min: 3
+                max: 50
+          - name: email
+            type: String
+            validations:
+              - type: Email
+            annotations:
+              - "@Column(unique = true)"
+          - name: passwordHash
+            type: String
+            hidden: true
+          - name: role
+            type: UserRole
+          - name: active
+            type: Boolean
+
+    enums:
+      - name: UserRole
+        values: [ADMIN, USER, MODERATOR]
+```
+
+---
+
+## 15. Prerequisitos y errores comunes
+
+### Prerequisitos
+
+- Proyecto creado con `eva create`
+- Módulo existente (`eva add module <module>`)
+- Archivo `domain.yaml` en `src/main/java/<package>/<module>/`
+
+### Errores comunes
+
+| Error | Causa | Solución |
+|-------|-------|----------|
+| `Module does not exist` | El módulo no fue creado | Ejecutar `eva add module <module>` |
+| `YAML file not found` | No existe `domain.yaml` en la ruta correcta | Verificar `src/main/java/<pkg>/<module>/domain.yaml` |
+| `Invalid relationship target` | El target no está definido en el mismo YAML | Definir la entidad target en el mismo `domain.yaml` |
+| `Column 'x_id' is duplicated` | ManyToOne definido manualmente + auto-generado | Eliminar el ManyToOne manual; dejar que eva4j lo genere |
+| Archivo no regenerado | El archivo fue modificado manualmente (checksum) | Usar `--force` para sobreescribir |
+| Import errors | Campo `type` no coincide con nombre en `enums:` o `valueObjects:` | Verificar que los nombres coincidan exactamente |
 
 ## 💡 Examples
 
