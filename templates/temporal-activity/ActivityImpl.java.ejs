@@ -1,0 +1,14 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.activities;
+
+import <%= packageName %>.<%= moduleName %>.application.ports.<%= activityPascalCase %>Activity;
+import <%= packageName %>.shared.domain.interfaces.<%= activityCategory %>;
+import org.springframework.stereotype.Component;
+
+@Component
+public class <%= activityPascalCase %>ActivityImpl implements <%= activityPascalCase %>Activity, <%= activityCategory %> {
+
+    @Override
+    public void execute(String flowId) {
+        //todo: implement the logic
+    }
+}

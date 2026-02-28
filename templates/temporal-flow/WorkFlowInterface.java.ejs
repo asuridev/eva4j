@@ -1,0 +1,19 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import io.temporal.workflow.QueryMethod;
+import io.temporal.workflow.SignalMethod;
+import io.temporal.workflow.WorkflowInterface;
+import io.temporal.workflow.WorkflowMethod;
+
+@WorkflowInterface
+public interface <%= flowPascalCase %>WorkFlow {
+
+    @WorkflowMethod
+    void start(String flowId);
+
+    @SignalMethod
+    void confirm();
+
+    @QueryMethod
+    String getStatus();
+}

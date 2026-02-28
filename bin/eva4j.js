@@ -14,6 +14,8 @@ const generateKafkaListenerCommand = require('../src/commands/generate-kafka-lis
 const generateResourceCommand = require('../src/commands/generate-resource');
 const generateRecordCommand = require('../src/commands/generate-record');
 const generateEntitiesCommand = require('../src/commands/generate-entities');
+const generateTemporalFlowCommand = require('../src/commands/generate-temporal-flow');
+const generateTemporalActivityCommand = require('../src/commands/generate-temporal-activity');
 const infoCommand = require('../src/commands/info');
 const detachCommand = require('../src/commands/detach');
 
@@ -198,6 +200,42 @@ program
       return;
     }
 
+    if (type === 'temporal-activity') {
+      if (!module) {
+        console.error(chalk.red('❌ Module name is required'));
+        console.log(chalk.gray('Usage: eva generate temporal-activity <module> [activity-name]'));
+        console.log(chalk.gray('Examples:'));
+        console.log(chalk.gray('  eva generate temporal-activity order register-order'));
+        console.log(chalk.gray('  eva generate temporal-activity order  # Will prompt for name\n'));
+        process.exit(1);
+      }
+      try {
+        await generateTemporalActivityCommand(module, name, options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (type === 'temporal-flow') {
+      if (!module) {
+        console.error(chalk.red('❌ Module name is required'));
+        console.log(chalk.gray('Usage: eva generate temporal-flow <module> [workflow-name]'));
+        console.log(chalk.gray('Examples:'));
+        console.log(chalk.gray('  eva generate temporal-flow order process-order'));
+        console.log(chalk.gray('  eva generate temporal-flow order  # Will prompt for name\n'));
+        process.exit(1);
+      }
+      try {
+        await generateTemporalFlowCommand(module, name, options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
     if (type === 'resource') {
       if (!module) {
         console.error(chalk.red('❌ Module name is required'));
@@ -222,6 +260,8 @@ program
     console.log(chalk.gray('  eva4j generate http-exchange <port-name> <module>'));
     console.log(chalk.gray('  eva4j generate kafka-event <event-name> <module>'));
     console.log(chalk.gray('  eva4j generate kafka-listener <module>'));
+    console.log(chalk.gray('  eva4j generate temporal-flow <module> [workflow-name]'));
+    console.log(chalk.gray('  eva4j generate temporal-activity <module> [activity-name]'));
     console.log(chalk.gray('  eva4j generate resource <module>'));
     console.log(chalk.gray('  eva4j generate record'));
     console.log(chalk.gray('  eva4j generate entities <module>'));
@@ -230,6 +270,8 @@ program
     console.log(chalk.gray('  eva4j g http-exchange user-service-port user'));
     console.log(chalk.gray('  eva4j g kafka-event user-created user'));
     console.log(chalk.gray('  eva4j g kafka-listener user'));
+    console.log(chalk.gray('  eva4j g temporal-flow order process-order'));
+    console.log(chalk.gray('  eva4j g temporal-activity order register-order'));
     console.log(chalk.gray('  eva4j g resource product'));
     console.log(chalk.gray('  eva4j g record  # Reads JSON from clipboard'));
     console.log(chalk.gray('  eva4j g entities order  # Generates from domain.yaml\n'));
@@ -275,6 +317,8 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j g http-exchange user-service-port user'));
   console.log(chalk.gray('  $ eva4j g entities order'));
   console.log(chalk.gray('  $ eva4j g kafka-event user-created user'));
+  console.log(chalk.gray('  $ eva4j g temporal-flow order process-order'));
+  console.log(chalk.gray('  $ eva4j g temporal-activity order register-order'));
   console.log(chalk.gray('  $ eva4j g record'));
   console.log(chalk.gray('  $ eva4j detach user'));
   console.log(chalk.gray('  $ eva4j info'));

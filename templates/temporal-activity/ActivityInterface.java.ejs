@@ -1,0 +1,11 @@
+package <%= packageName %>.<%= moduleName %>.application.ports;
+
+import io.temporal.activity.ActivityInterface;
+import io.temporal.activity.ActivityMethod;
+
+@ActivityInterface
+public interface <%= activityPascalCase %>Activity {
+
+    @ActivityMethod(name = "<%= activityPascalCase %>")
+    void execute(String flowId);
+}

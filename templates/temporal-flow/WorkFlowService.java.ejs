@@ -1,0 +1,49 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import io.temporal.client.WorkflowClient;
+import io.temporal.client.WorkflowOptions;
+import org.springframework.beans.factory.annotation.Value;
+
+@ApplicationComponent
+public class <%= flowPascalCase %>WorkFlowService {
+
+    private final WorkflowClient workflowClient;
+    private final String flowQueue;
+
+    public <%= flowPascalCase %>WorkFlowService(
+        WorkflowClient workflowClient,
+        @Value("${temporal.flow-queue}") String flowQueue
+    ) {
+        this.workflowClient = workflowClient;
+        this.flowQueue = flowQueue;
+    }
+
+    public void startAsync(String flowId) {
+        <%= flowPascalCase %>WorkFlow workflow = get<%= flowPascalCase %>WorkFlow(flowId);
+        WorkflowClient.start(workflow::start, flowId);
+    }
+
+    public void startSync(String flowId) {
+        <%= flowPascalCase %>WorkFlow workflow = get<%= flowPascalCase %>WorkFlow(flowId);
+        workflow.start(flowId);
+    }
+
+    public void confirm(String flowId) {
+        <%= flowPascalCase %>WorkFlow workflow = get<%= flowPascalCase %>WorkFlow(flowId);
+        workflow.confirm();
+    }
+
+    public String getStatus(String flowId) {
+        <%= flowPascalCase %>WorkFlow workflow = get<%= flowPascalCase %>WorkFlow(flowId);
+        return workflow.getStatus();
+    }
+
+    private <%= flowPascalCase %>WorkFlow get<%= flowPascalCase %>WorkFlow(String flowId) {
+        WorkflowOptions options = WorkflowOptions.newBuilder()
+            .setWorkflowId(flowId)
+            .setTaskQueue(flowQueue)
+            .build();
+        return workflowClient.newWorkflowStub(<%= flowPascalCase %>WorkFlow.class, options);
+    }
+}
