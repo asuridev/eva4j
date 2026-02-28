@@ -6,6 +6,7 @@ const packageJson = require('../package.json');
 const createCommand = require('../src/commands/create');
 const addModuleCommand = require('../src/commands/add-module');
 const addKafkaClientCommand = require('../src/commands/add-kafka-client');
+const addTemporalClientCommand = require('../src/commands/add-temporal-client');
 const generateUsecaseCommand = require('../src/commands/generate-usecase');
 const generateHttpExchangeCommand = require('../src/commands/generate-http-exchange');
 const generateKafkaEventCommand = require('../src/commands/generate-kafka-event');
@@ -39,11 +40,21 @@ program
 // Add module command
 program
   .command('add <type> [name]')
-  .description('Add components to the project. Use: module [name], kafka-client')
+  .description('Add components to the project. Use: module [name], kafka-client, temporal-client')
   .action(async (type, name, options) => {
     if (type === 'kafka-client') {
       try {
         await addKafkaClientCommand(options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (type === 'temporal-client') {
+      try {
+        await addTemporalClientCommand(options);
       } catch (error) {
         console.error(chalk.red('Error:'), error.message);
         process.exit(1);
@@ -56,6 +67,7 @@ program
       console.log(chalk.yellow('\nUsage:'));
       console.log(chalk.gray('  eva4j add module [module-name]  # Interactive or with name'));
       console.log(chalk.gray('  eva4j add kafka-client'));
+      console.log(chalk.gray('  eva4j add temporal-client'));
       console.log(chalk.gray('\nExamples:'));
       console.log(chalk.gray('  eva4j add module user'));
       console.log(chalk.gray('  eva4j add module  # Will prompt for name\n'));

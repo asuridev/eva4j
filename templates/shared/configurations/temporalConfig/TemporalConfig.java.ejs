@@ -1,0 +1,104 @@
+package <%= packageName %>.shared.infrastructure.configurations.temporalConfig;
+
+import <%= packageName %>.shared.domain.interfaces.HeavyActivity;
+import <%= packageName %>.shared.domain.interfaces.LightActivity;
+import io.temporal.client.WorkflowClient;
+import io.temporal.serviceclient.WorkflowServiceStubs;
+import io.temporal.worker.Worker;
+import io.temporal.worker.WorkerFactory;
+import io.temporal.worker.WorkerOptions;
+import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
+
+@Configuration
+public class TemporalConfig {
+
+    @Value("${temporal.service-url}")
+    private String temporalServiceUrl;
+
+    @Value("${temporal.namespace}")
+    private String namespace;
+
+    @Value("${temporal.flow-queue}")
+    private String flowQueue;
+
+    @Value("${temporal.number-flow-worker}")
+    private Integer numberFlowWorker;
+
+    @Value("${temporal.heavy-queue}")
+    private String heavyQueue;
+
+    @Value("${temporal.number-heavy-worker}")
+    private Integer numberHeavyWorker;
+
+    @Value("${temporal.light-queue}")
+    private String lightQueue;
+
+    @Value("${temporal.number-light-worker}")
+    private Integer numberLightWorker;
+
+    private WorkerFactory workerFactory;
+
+    @Bean
+    public WorkflowServiceStubs workflowServiceStubs() {
+        return WorkflowServiceStubs.newServiceStubs(
+            io.temporal.serviceclient.WorkflowServiceStubsOptions.newBuilder()
+                .setTarget(temporalServiceUrl)
+                .build()
+        );
+    }
+
+    @Bean
+    public WorkflowClient workflowClient(WorkflowServiceStubs serviceStubs) {
+        return WorkflowClient.newInstance(
+            serviceStubs,
+            io.temporal.client.WorkflowClientOptions.newBuilder()
+                .setNamespace(namespace)
+                .build()
+        );
+    }
+
+    @Bean
+    public WorkerFactory workerFactory(WorkflowClient client,
+                                       List<HeavyActivity> heavyActivities,
+                                       List<LightActivity> lightActivities) {
+
+        workerFactory = WorkerFactory.newInstance(client);
+
+        // 1. WORKER DE FLUJO (Orquestador)
+        WorkerOptions workflowOptions = WorkerOptions.newBuilder()
+            .setMaxConcurrentWorkflowTaskExecutionSize(numberFlowWorker)
+            .build();
+        Worker workflowWorker = workerFactory.newWorker(flowQueue, workflowOptions);
+        // TODO: register your workflow implementation types here
+        // workflowWorker.registerWorkflowImplementationTypes(MyWorkflowImpl.class);
+
+        // 2. WORKER PESADO (tareas complejas)
+        WorkerOptions heavyOptions = WorkerOptions.newBuilder()
+            .setMaxConcurrentActivityExecutionSize(numberHeavyWorker)
+            .build();
+        Worker heavyWorker = workerFactory.newWorker(heavyQueue, heavyOptions);
+        heavyWorker.registerActivitiesImplementations(heavyActivities.toArray());
+
+        // 3. WORKER LIGERO (tareas rápidas)
+        WorkerOptions lightOptions = WorkerOptions.newBuilder()
+            .setMaxConcurrentActivityExecutionSize(numberLightWorker)
+            .build();
+        Worker lightWorker = workerFactory.newWorker(lightQueue, lightOptions);
+        lightWorker.registerActivitiesImplementations(lightActivities.toArray());
+
+        workerFactory.start();
+        return workerFactory;
+    }
+
+    @PreDestroy
+    public void destroy() {
+        if (workerFactory != null) {
+            workerFactory.shutdown();
+        }
+    }
+}
