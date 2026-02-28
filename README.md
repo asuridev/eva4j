@@ -16,14 +16,14 @@
 
 ```bash
 # Create a complete project
-eva4j create my-ecommerce
+eva create my-ecommerce
 cd my-ecommerce
 
 # Add a module
-eva4j add module product
+eva add module product
 
 # Generate full CRUD from YAML
-eva4j g entities product
+eva g entities product
 
 # 🎉 Done! You have:
 # ✅ Domain entities with business logic
@@ -229,6 +229,8 @@ All commands are fully documented with examples, use cases, and best practices:
 | `g resource` | Generate REST API | [📖 GENERATE_RESOURCE.md](docs/commands/GENERATE_RESOURCE.md) |
 | `g http` | HTTP client | [📖 GENERATE_HTTP_EXCHANGE.md](docs/commands/GENERATE_HTTP_EXCHANGE.md) |
 | `g kafka-event` | Kafka events | [📖 GENERATE_KAFKA_EVENT.md](docs/commands/GENERATE_KAFKA_EVENT.md) |
+| `g temporal-flow` | Temporal workflow | [📖 GENERATE_TEMPORAL_FLOW.md](docs/commands/GENERATE_TEMPORAL_FLOW.md) |
+| `g temporal-activity` | Temporal activity | [📖 GENERATE_TEMPORAL_ACTIVITY.md](docs/commands/GENERATE_TEMPORAL_ACTIVITY.md) |
 | `detach` | Extract microservice | [📖 DETACH.md](docs/commands/DETACH.md) |
 
 ### 📘 Additional Resources
@@ -266,26 +268,29 @@ Eva4j provides a comprehensive set of commands for different stages of developme
 |---------|-------------|---------------|
 | **generate http-exchange** (g http) | Create HTTP client with OpenFeign | [📖 GENERATE_HTTP_EXCHANGE.md](docs/commands/GENERATE_HTTP_EXCHANGE.md) |
 | **generate kafka-event** (g kafka-event) | Setup Kafka event publishing | [📖 GENERATE_KAFKA_EVENT.md](docs/commands/GENERATE_KAFKA_EVENT.md) |
-| **generate kafka-listener** (g kafka-listener) | Create Kafka event consumer | Coming soon |
+| **generate kafka-listener** (g kafka-listener) | Create Kafka event consumer | [📖 GENERATE_KAFKA_LISTENER.md](docs/commands/GENERATE_KAFKA_LISTENER.md) |
 | **add kafka-client** | Add Kafka dependencies to module | Coming soon |
+| **add temporal-client** | Add Temporal SDK and worker infrastructure | Coming soon |
+| **generate temporal-flow** (g temporal-flow) | Create Temporal workflow with Saga | [📖 GENERATE_TEMPORAL_FLOW.md](docs/commands/GENERATE_TEMPORAL_FLOW.md) |
+| **generate temporal-activity** (g temporal-activity) | Create Temporal activity (Light or Heavy) | [📖 GENERATE_TEMPORAL_ACTIVITY.md](docs/commands/GENERATE_TEMPORAL_ACTIVITY.md) |
 
 ### Quick Start Example
 
 ```bash
 # 1. Create project
-eva4j create my-ecommerce
+eva create my-ecommerce
 cd my-ecommerce
 
 # 2. Start development services
 docker-compose up -d
 
 # 3. Add modules
-eva4j add module product
-eva4j add module order
-eva4j add module customer
+eva add module product
+eva add module order
+eva add module customer
 
 # 4. Generate entities from YAML
-eva4j g entities product
+eva g entities product
 
 # 5. Run application
 ./gradlew bootRun
@@ -296,13 +301,15 @@ eva4j g entities product
 For faster development, most generate commands have short aliases:
 
 ```bash
-eva4j g entities <name>        # generate entities
-eva4j g usecase <name>         # generate usecase  
-eva4j g resource <name>        # generate resource
-eva4j g record <name>          # generate record
-eva4j g http <name>            # generate http-exchange
-eva4j g kafka-event <name>     # generate kafka-event
-eva4j g kafka-listener <name>  # generate kafka-listener
+eva g entities <name>           # generate entities
+eva g usecase <name>            # generate usecase  
+eva g resource <name>           # generate resource
+eva g record <name>             # generate record
+eva g http <name>               # generate http-exchange
+eva g kafka-event <name>        # generate kafka-event
+eva g kafka-listener <name>     # generate kafka-listener
+eva g temporal-flow <module>    # generate temporal-flow
+eva g temporal-activity <module># generate temporal-activity
 ```
 
 ---
@@ -314,7 +321,7 @@ eva4j g kafka-listener <name>  # generate kafka-listener
 Initialize a new Spring Boot project with modular architecture.
 
 ```bash
-eva4j create <project-name>
+eva create <project-name>
 ```
 
 Creates a production-ready Spring Boot project with:
@@ -333,7 +340,7 @@ Creates a production-ready Spring Boot project with:
 Add a domain module following hexagonal architecture.
 
 ```bash
-eva4j add module <module-name>
+eva add module <module-name>
 ```
 
 Generates a complete module with:
@@ -352,8 +359,8 @@ Generates a complete module with:
 Generate complete domain implementation from YAML definition.
 
 ```bash
-eva4j generate entities <aggregate-name>
-eva4j g entities <aggregate-name>    # Short alias
+eva generate entities <aggregate-name>
+eva g entities <aggregate-name>    # Short alias
 ```
 
 Creates from a YAML file:
@@ -389,13 +396,13 @@ For complete documentation on all commands, see:
 
 ```bash
 # 1. Add module
-eva4j add module product
+eva add module product
 
 # 2. Create YAML definition
 # Edit examples/product.yaml
 
 # 3. Generate entities
-eva4j g entities product
+eva g entities product
 
 # 4. Run and test
 ./gradlew bootRun
@@ -405,19 +412,19 @@ eva4j g entities product
 
 ```bash
 # Generate additional commands
-eva4j g usecase UpdateProductPrice --type command
-eva4j g usecase DeactivateProduct --type command
+eva g usecase UpdateProductPrice --type command
+eva g usecase DeactivateProduct --type command
 
 # Generate custom queries
-eva4j g usecase SearchProductsByCategory --type query
-eva4j g usecase GetLowStockProducts --type query
+eva g usecase SearchProductsByCategory --type query
+eva g usecase GetLowStockProducts --type query
 ```
 
 ### Workflow 3: Integrate External Service
 
 ```bash
 # Create HTTP client
-eva4j g http PaymentGateway
+eva g http PaymentGateway
 
 # Configure in application.yaml
 # Implement client methods
@@ -428,17 +435,17 @@ eva4j g http PaymentGateway
 
 ```bash
 # Publish events
-eva4j g kafka-event OrderCreated
+eva g kafka-event OrderCreated
 
 # Consume events in another module
-eva4j g kafka-listener OrderCreated
+eva g kafka-listener OrderCreated
 ```
 
 ### Workflow 5: Extract to Microservice
 
 ```bash
 # When module is mature and needs independence
-eva4j detach order
+eva detach order
 
 # Result: order-service/ as standalone application
 ```
@@ -462,7 +469,7 @@ For backward compatibility, here's the old reference format:
 Install Kafka dependencies and configuration.
 
 ```bash
-eva4j add kafka-client
+eva add kafka-client
 ```
 
 **What it does:**
@@ -484,7 +491,7 @@ spring.kafka:
 
 **Example:**
 ```bash
-eva4j add kafka-client
+eva add kafka-client
 ```
 
 ---
@@ -494,8 +501,8 @@ eva4j add kafka-client
 Create a use case (command or query) following CQRS pattern.
 
 ```bash
-eva4j generate usecase <module-name> [usecase-name]
-eva4j g usecase <module-name> [usecase-name]
+eva generate usecase <module-name> [usecase-name]
+eva g usecase <module-name> [usecase-name]
 ```
 
 **Interactive Prompts:**
@@ -535,9 +542,9 @@ public record UserResponseDto(UUID id, String name, String email) {}
 
 **Examples:**
 ```bash
-eva4j g usecase user create-user      # Command
-eva4j g usecase user find-user-by-id  # Query
-eva4j g usecase product update-stock  # Command
+eva g usecase user create-user      # Command
+eva g usecase user find-user-by-id  # Query
+eva g usecase product update-stock  # Command
 ```
 
 ---
@@ -547,8 +554,8 @@ eva4j g usecase product update-stock  # Command
 Generate complete REST resource with full CRUD operations.
 
 ```bash
-eva4j generate resource <module-name>
-eva4j g resource <module-name>
+eva generate resource <module-name>
+eva g resource <module-name>
 ```
 
 **Interactive Prompts:**
@@ -576,8 +583,8 @@ public class UserController {
 
 **Example:**
 ```bash
-eva4j g resource user
-eva4j g resource product
+eva g resource user
+eva g resource product
 ```
 
 ---
@@ -587,8 +594,8 @@ eva4j g resource product
 Create HTTP client adapter using Spring Cloud OpenFeign.
 
 ```bash
-eva4j generate http-exchange <module-name> [port-name]
-eva4j g http-exchange <module-name> [port-name]
+eva generate http-exchange <module-name> [port-name]
+eva g http-exchange <module-name> [port-name]
 ```
 
 **Interactive Prompts:**
@@ -626,8 +633,8 @@ urls:
 
 **Example:**
 ```bash
-eva4j g http-exchange order product-service
-eva4j g http-exchange user payment-gateway
+eva g http-exchange order product-service
+eva g http-exchange user payment-gateway
 ```
 
 ---
@@ -637,8 +644,8 @@ eva4j g http-exchange user payment-gateway
 Create Kafka event publisher with topic configuration.
 
 ```bash
-eva4j generate kafka-event <module-name> [event-name]
-eva4j g kafka-event <module-name> [event-name]
+eva generate kafka-event <module-name> [event-name]
+eva g kafka-event <module-name> [event-name]
 ```
 
 **Prerequisites:** Kafka client must be installed
@@ -693,9 +700,9 @@ public class CreateUserCommandHandler {
 
 **Example:**
 ```bash
-eva4j g kafka-event user user-created
-eva4j g kafka-event order order-placed
-eva4j g kafka-event product stock-updated
+eva g kafka-event user user-created
+eva g kafka-event order order-placed
+eva g kafka-event product stock-updated
 ```
 
 ---
@@ -705,8 +712,8 @@ eva4j g kafka-event product stock-updated
 Create individual Kafka event listener classes for consuming events from topics.
 
 ```bash
-eva4j generate kafka-listener <module-name>
-eva4j g kafka-listener <module-name>
+eva generate kafka-listener <module-name>
+eva g kafka-listener <module-name>
 ```
 
 **Prerequisites:** 
@@ -749,7 +756,7 @@ public class UserUserCreatedListener {
 
 **Example:**
 ```bash
-eva4j g kafka-listener notification
+eva g kafka-listener notification
 # Select: user-created, order-placed
 # Generates: NotificationUserCreatedListener.java, NotificationOrderPlacedListener.java
 ```
@@ -761,7 +768,7 @@ eva4j g kafka-listener notification
 Extract a module from the monolith into an independent microservice.
 
 ```bash
-eva4j detach [module-name]
+eva detach [module-name]
 ```
 
 **Interactive Prompts:**
@@ -784,7 +791,7 @@ eva4j detach [module-name]
 **Example:**
 ```bash
 # In monolith project
-eva4j detach user
+eva detach user
 
 # Creates: ../user_msvc/
 # Port: parent port + 1
@@ -835,7 +842,7 @@ cd product_msvc && ./gradlew bootJar
 Display project configuration and module history.
 
 ```bash
-eva4j info
+eva info
 ```
 
 **Output Example:**
@@ -881,26 +888,26 @@ Timestamps:
 
 ```bash
 # 1. Create project
-eva4j create e-commerce
+eva create e-commerce
 cd e-commerce
 
 # 2. Add modules
-eva4j add module user
-eva4j add module product
-eva4j add module order
+eva add module user
+eva add module product
+eva add module order
 
 # 3. Generate resources
-eva4j g resource user
-eva4j g resource product
-eva4j g resource order
+eva g resource user
+eva g resource product
+eva g resource order
 
 # 4. Add event-driven communication
-eva4j add kafka-client
-eva4j g kafka-event order order-placed
-eva4j g kafka-listener notification
+eva add kafka-client
+eva g kafka-event order order-placed
+eva g kafka-listener notification
 
 # 5. Add external service clients
-eva4j g http-exchange order payment-service
+eva g http-exchange order payment-service
 
 # 6. Run entire system locally
 ./gradlew bootRun
@@ -920,9 +927,9 @@ eva4j g http-exchange order payment-service
 
 ```bash
 # Extract modules to microservices
-eva4j detach user       # Port 8041
-eva4j detach product    # Port 8042  
-eva4j detach order      # Port 8043
+eva detach user       # Port 8041
+eva detach product    # Port 8042  
+eva detach order      # Port 8043
 
 # Deploy independently
 cd ../user_msvc

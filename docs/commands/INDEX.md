@@ -79,6 +79,28 @@ Commands for integrating with external services and messaging systems.
   - Kafka dependencies installation
   - Base configuration
 
+### ⏳ Temporal / Workflow Commands
+
+Commands for integrating with [Temporal](https://temporal.io/) for durable workflow orchestration.
+
+- **add temporal-client** - Add Temporal SDK and worker infrastructure
+  - *Documentation coming soon*
+  - Temporal SDK dependency
+  - Worker configuration (FLOW_QUEUE, LIGHT_TASK_QUEUE, HEAVY_TASK_QUEUE)
+  - Docker Compose service for local development
+
+- **[generate temporal-flow](./GENERATE_TEMPORAL_FLOW.md)** (`g temporal-flow`) - Create a Temporal workflow
+  - `@WorkflowInterface` with signal and query methods
+  - Saga implementation with compensation
+  - Spring service facade (async & sync)
+  - Auto-registers in `TemporalConfig.java`
+
+- **[generate temporal-activity](./GENERATE_TEMPORAL_ACTIVITY.md)** (`g temporal-activity`) - Create a Temporal activity
+  - `@ActivityInterface` with unique `@ActivityMethod` name
+  - `LightActivity` or `HeavyActivity` marker for queue routing
+  - Auto-registered via Spring DI (no manual config patching)
+  - Registers stub in the chosen `WorkFlowImpl`
+
 ### 🚀 Deployment & Scaling Commands
 
 Commands for transitioning from monolith to microservices.
@@ -116,6 +138,11 @@ Commands for transitioning from monolith to microservices.
 1. [generate http-exchange](./GENERATE_HTTP_EXCHANGE.md) - External APIs
 2. [generate kafka-event](./GENERATE_KAFKA_EVENT.md) - Event publishing
 3. [generate kafka-listener](./GENERATE_KAFKA_LISTENER.md) - Event consumption
+
+### Orchestrating Workflows
+1. [add temporal-client](./INDEX.md) - Install Temporal infrastructure
+2. [generate temporal-flow](./GENERATE_TEMPORAL_FLOW.md) - Define workflow
+3. [generate temporal-activity](./GENERATE_TEMPORAL_ACTIVITY.md) - Implement activities
 
 ### Scaling to Microservices
 1. [detach](./DETACH.md) - Extract module
@@ -191,13 +218,15 @@ Commands for transitioning from monolith to microservices.
 All generate commands support short aliases for faster development:
 
 ```bash
-eva4j g entities <name>        # generate entities
-eva4j g usecase <name>         # generate usecase  
-eva4j g resource <name>        # generate resource
-eva4j g record <name>          # generate record
-eva4j g http <name>            # generate http-exchange
-eva4j g kafka-event <name>     # generate kafka-event
-eva4j g kafka-listener <name>  # generate kafka-listener
+eva g entities <name>           # generate entities
+eva g usecase <name>            # generate usecase  
+eva g resource <name>           # generate resource
+eva g record <name>             # generate record
+eva g http <name>               # generate http-exchange
+eva g kafka-event <name>        # generate kafka-event
+eva g kafka-listener <name>     # generate kafka-listener
+eva g temporal-flow <module>    # generate temporal-flow
+eva g temporal-activity <module># generate temporal-activity
 ```
 
 ---

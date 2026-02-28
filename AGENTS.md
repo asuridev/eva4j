@@ -387,19 +387,28 @@ void assignUser(User user) {  // package-private
 
 ```bash
 # Crear proyecto
-eva4j create my-app
+eva create my-app
 
 # Agregar módulo
-eva4j add module users
+eva add module users
 
 # Generar entidades desde YAML
-eva4j g entities users
+eva g entities users
 
 # Generar use case
-eva4j g usecase users ActivateUser
+eva g usecase users ActivateUser
 
 # Generar resource (REST)
-eva4j g resource users
+eva g resource users
+
+# Agregar cliente Temporal
+eva add temporal-client
+
+# Generar workflow Temporal
+eva g temporal-flow users
+
+# Generar actividad Temporal
+eva g temporal-activity users
 ```
 
 ### Estructura de domain.yaml

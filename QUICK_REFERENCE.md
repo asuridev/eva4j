@@ -1,204 +1,152 @@
-# Quick Reference: Configuration Persistence Feature
+# eva — Quick Reference Cheat Sheet
 
-## New Command
-
-```bash
-eva4j info
-```
-
-**Purpose**: Display project configuration and module history
-
-**Output Example**:
-```
-📦 Eva4j Project Information
-
-Project Details:
-  Name:              my-shop
-  Group ID:          com.company
-  Artifact ID:       my-shop
-  Package:           com.company.myshop
-
-Versions:
-  Java:              21
-  Spring Boot:       3.5.5
-  Spring Modulith:   1.4.6
-
-Dependencies:
-  • web
-  • data-jpa
-  • validation
-
-Modules:
-  • user (soft-delete, audit)
-  • product (soft-delete, audit)
-
-Timestamps:
-  Created:           1/27/2026, 10:25:00 AM
-  Last Updated:      1/27/2026, 10:35:00 AM
-```
-
-## .eva4j.json File
-
-**Location**: Project root directory
-
-**Purpose**: 
-- Persist project configuration
-- Track module history
-- Share state with team members
-
-**When Created**: Automatically when you run `eva4j create <project-name>`
-
-**When Updated**: Automatically when you run `eva4j add module <module-name>`
-
-**Should I commit it?**: **YES!** 
-- It's tracked in git by default
-- Helps team members see project state
-- Ensures consistent configuration
-
-## What Gets Persisted?
-
-### Project Information
-- Project name, group ID, artifact ID
-- Base package name
-- Java version
-- Spring Boot version
-- Spring Modulith version
-
-### Dependencies
-- Selected dependencies (web, data-jpa, security, etc.)
-
-### Modules
-- Module names
-- Module options:
-  - hasSoftDelete: boolean
-  - hasAudit: boolean
-- Creation timestamps per module
-
-### Timestamps
-- Project creation date/time
-- Last update date/time
-
-## Usage Examples
-
-### View Project Configuration
-```bash
-cd my-shop
-eva4j info
-```
-
-### Check Before Adding Module
-```bash
-eva4j info  # See existing modules
-eva4j add module inventory  # Add new module
-eva4j info  # Verify module was added
-```
-
-### After Closing Terminal
-```bash
-# Day 1
-eva4j create my-shop
-cd my-shop
-eva4j add module user
-
-# Close terminal...
-
-# Day 2 - Open new terminal
-cd my-shop
-eva4j info  # Shows all previous configuration!
-eva4j add module product  # Continues where you left off
-```
-
-## New Validations
-
-### Module Duplicate Prevention
-```bash
-eva4j add module user
-# Success! Module created
-
-eva4j add module user
-# ❌ Module 'user' is already registered
-```
-
-The CLI now checks both:
-1. Filesystem (does directory exist?)
-2. Configuration file (is module registered?)
-
-## Error Messages
-
-### Not in Project Directory
-```bash
-cd /some/other/folder
-eva4j info
-# ❌ Not in an eva4j project directory
-# Run this command inside a project created with eva4j
-```
-
-### Configuration File Issues
-```bash
-eva4j add module test
-# (if .eva4j.json is corrupted)
-# ❌ Could not load project configuration
-```
-
-## Developer Notes
-
-### ConfigManager API
-
-```javascript
-const ConfigManager = require('./src/utils/config-manager');
-
-// Create instance
-const configManager = new ConfigManager(projectPath);
-
-// Check if config exists
-const exists = await configManager.exists();
-
-// Load configuration
-const config = await configManager.loadProjectConfig();
-
-// Save project configuration
-await configManager.saveProjectConfig({
-  projectName: 'my-shop',
-  groupId: 'com.company',
-  // ... more fields
-});
-
-// Add module
-await configManager.addModule('user', {
-  hasSoftDelete: true,
-  hasAudit: true
-});
-
-// Check if module exists
-const exists = await configManager.moduleExists('user');
-
-// Get all modules
-const modules = await configManager.getModules();
-```
-
-## Tips
-
-1. **Always run `eva4j info`** before adding modules to see current state
-2. **Commit .eva4j.json** to share configuration with your team
-3. **Don't manually edit .eva4j.json** - let the CLI manage it
-4. **Use info command** for troubleshooting configuration issues
-5. **Configuration persists across sessions** - no need to remember what you did
-
-## Compatibility
-
-- Works with all existing eva4j projects
-- Backward compatible (won't break existing projects without .eva4j.json)
-- Forward compatible (configuration format can be extended)
-
-## Files Involved
-
-- **src/utils/config-manager.js** - Configuration management
-- **src/commands/info.js** - Info display command
-- **src/generators/base-generator.js** - Saves config on project creation
-- **src/commands/add-module.js** - Updates config on module addition
-- **bin/eva4j.js** - Registers info command
-- **templates/base/root/gitignore.ejs** - Ensures .eva4j.json is tracked
+> Binary: `eva` &nbsp;|&nbsp; Install: `npm install -g eva4j` &nbsp;|&nbsp; [Full docs](docs/commands/INDEX.md)
 
 ---
 
-**For full documentation, see**: [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)
+## 🏗️ Project Setup
+
+```bash
+eva create <project-name>        # Create Spring Boot project (interactive)
+eva add module <module>          # Add hexagonal module to existing project
+eva info                         # Show project config and module list
+eva detach <module>              # Extract module to standalone microservice
+```
+
+---
+
+## ⚡ Code Generation
+
+### Domain Model
+
+```bash
+eva g entities <module>          # Generate full CRUD from domain.yaml
+```
+
+### Use Cases (CQRS)
+
+```bash
+eva g usecase <module>           # Create command or query (interactive)
+```
+
+### REST API
+
+```bash
+eva g resource <module>          # Generate REST controller + 5 CRUD use cases
+eva g record <module>            # Create immutable Java Record (DTO / value object)
+```
+
+---
+
+## 🔌 Integration
+
+### HTTP Clients
+
+```bash
+eva g http-exchange <module>     # Spring OpenFeign HTTP client (interactive)
+```
+
+### Kafka
+
+```bash
+eva add kafka-client             # Install Kafka SDK + base configuration
+eva g kafka-event <module>       # Kafka event publisher (interactive)
+eva g kafka-listener <module>    # Kafka event consumer(s) — select topics
+```
+
+### Temporal Workflows
+
+```bash
+eva add temporal-client          # Install Temporal SDK + 3-queue worker setup
+eva g temporal-flow <module>     # Workflow interface + Saga impl + service facade
+eva g temporal-activity <module> # Activity interface + impl (Light or Heavy)
+```
+
+---
+
+## 🔤 Aliases
+
+All `generate` commands can be shortened to `g`:
+
+| Full form | Short alias |
+|-----------|-------------|
+| `eva generate entities` | `eva g entities` |
+| `eva generate usecase` | `eva g usecase` |
+| `eva generate resource` | `eva g resource` |
+| `eva generate record` | `eva g record` |
+| `eva generate http-exchange` | `eva g http-exchange` |
+| `eva generate kafka-event` | `eva g kafka-event` |
+| `eva generate kafka-listener` | `eva g kafka-listener` |
+| `eva generate temporal-flow` | `eva g temporal-flow` |
+| `eva generate temporal-activity` | `eva g temporal-activity` |
+
+---
+
+## 📋 Typical Project Workflow
+
+```bash
+# 1. Bootstrap
+eva create my-app && cd my-app
+
+# 2. Add modules
+eva add module order
+eva add module notification
+
+# 3. Generate domain model (edit domain.yaml first)
+eva g entities order
+
+# 4. Add custom use cases
+eva g usecase order
+
+# 5. Expose via REST
+eva g resource order
+
+# 6. Add async events
+eva add kafka-client
+eva g kafka-event order order-placed
+eva g kafka-listener notification
+
+# 7. Add workflow orchestration
+eva add temporal-client
+eva g temporal-flow order          # e.g., process-order
+eva g temporal-activity order      # e.g., validate-stock (Light)
+eva g temporal-activity order      # e.g., charge-payment (Heavy)
+
+# 8. Extract to microservice when ready
+eva detach order
+```
+
+---
+
+## 🧩 Temporal Queue Model
+
+| Queue | Purpose | ActivityOptions var |
+|-------|---------|---------------------|
+| `FLOW_QUEUE` | Workflow orchestration | — |
+| `LIGHT_TASK_QUEUE` | Fast activities < 30 s | `lightActivityOptions` |
+| `HEAVY_TASK_QUEUE` | Long-running ≤ 2 min | `heavyActivityOptions` |
+
+Activities are registered automatically via Spring DI (`LightActivity` / `HeavyActivity` marker interfaces). No manual `TemporalConfig.java` patching needed.
+
+---
+
+## 📁 Project Config File
+
+**`.eva4j.json`** is auto-created and managed. Commit it to git.
+
+```bash
+eva info    # Read current config
+```
+
+---
+
+## 📚 Full Documentation
+
+| Resource | Link |
+|----------|------|
+| All commands | [docs/commands/INDEX.md](docs/commands/INDEX.md) |
+| YAML guide | [DOMAIN_YAML_GUIDE.md](DOMAIN_YAML_GUIDE.md) |
+| AI agent guide | [AGENTS.md](AGENTS.md) |
+| YAML examples | [examples/](examples/) |
+| Temporal flow | [docs/commands/GENERATE_TEMPORAL_FLOW.md](docs/commands/GENERATE_TEMPORAL_FLOW.md) |
+| Temporal activity | [docs/commands/GENERATE_TEMPORAL_ACTIVITY.md](docs/commands/GENERATE_TEMPORAL_ACTIVITY.md) |
