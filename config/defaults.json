@@ -5,6 +5,9 @@
   "dependencyManagementVersion": "1.1.7",
   "springModulithVersion": "1.4.6",
   "springCloudVersion": "2025.0.0",
+  "temporalSdkVersion": "1.24.1",
+  "temporalDockerVersion": "1.21.5",
+  "kafkaConfluentVersion": "7.6.0",
   "gradleVersion": "8.7",
   "encoding": "UTF-8",
   "server": {

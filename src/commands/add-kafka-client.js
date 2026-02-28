@@ -7,6 +7,7 @@ const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath } = require('../utils/naming');
 const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
+const defaults = require('../../config/defaults.json');
 
 async function addKafkaClientCommand() {
   const projectDir = process.cwd();
@@ -53,7 +54,8 @@ async function addKafkaClientCommand() {
       packagePath,
       projectName,
       groupId,
-      artifactId
+      artifactId,
+      kafkaConfluentVersion: defaults.kafkaConfluentVersion
     };
 
     // 1. Add dependencies to build.gradle

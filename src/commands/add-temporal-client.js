@@ -7,8 +7,9 @@ const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath } = require('../utils/naming');
 const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
+const defaults = require('../../config/defaults.json');
 
-const TEMPORAL_SDK_VERSION = '1.24.1';
+const TEMPORAL_SDK_VERSION = defaults.temporalSdkVersion;
 
 async function addTemporalClientCommand() {
   const projectDir = process.cwd();
@@ -55,7 +56,8 @@ async function addTemporalClientCommand() {
       packagePath,
       projectName,
       groupId,
-      artifactId
+      artifactId,
+      temporalDockerVersion: defaults.temporalDockerVersion
     };
 
     // 1. Add dependency to build.gradle

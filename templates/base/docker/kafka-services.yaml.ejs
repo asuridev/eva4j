@@ -1,5 +1,5 @@
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.0
+    image: confluentinc/cp-zookeeper:<%= kafkaConfluentVersion %>
     container_name: <%= artifactId %>-zookeeper
     ports:
       - "2181:2181"
@@ -10,7 +10,7 @@
       - <%= artifactId %>-network
 
   kafka:
-    image: confluentinc/cp-kafka:7.6.0
+    image: confluentinc/cp-kafka:<%= kafkaConfluentVersion %>
     container_name: <%= artifactId %>-kafka
     ports:
       - "9092:9092"         # Para conectarte desde fuera del contenedor
