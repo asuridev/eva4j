@@ -1,498 +1,219 @@
 # Command `generate kafka-event` (alias: `g kafka-event`)
 
-## 📋 Description
+## Description
 
-Generates infrastructure for publishing domain events to Apache Kafka topics, enabling asynchronous event-driven communication between modules or microservices.
+Generates the infrastructure for publishing a domain event to an Apache Kafka topic, enabling asynchronous event-driven communication between modules or microservices.
 
-## 🎯 Purpose
+## Purpose
 
-Implement event-driven architecture by publishing domain events to Kafka, allowing other services to react to business events without direct coupling.
+Implement event publishing without coupling the sender to the consumer. The generated `MessageBroker` port keeps the domain free of Kafka dependencies, while the adapter handles the actual publishing using `EventEnvelope` for correlation tracking.
 
-## 📝 Syntax
+## Syntax
 
 ```bash
-eva4j generate kafka-event <EventName>
-eva4j g kafka-event <EventName>    # Short alias
+eva generate kafka-event <module> [event-name]
+eva g kafka-event <module> [event-name]    # Short alias
 ```
 
 ### Parameters
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `EventName` | Yes | Name of the event (PascalCase, e.g., OrderCreated, PaymentProcessed) |
+| `module` | Yes | Module that owns and publishes the event (e.g., `user`, `order`) |
+| `event-name` | No | Event name in kebab-case — prompted if omitted; `Event` suffix is added automatically |
 
-## 💡 Examples
+> **Interactive prompts:**
+> 1. **Event name** — if not provided (e.g., `user-created`, `order-placed`)
+> 2. **Topic name** — Kafka topic identifier (e.g., `USER_CREATED`)
+> 3. **Number of partitions** — default: 3
+> 4. **Number of replicas** — default: 1
 
-### Example 1: Order Created Event
+**Note:** Running the command multiple times on the same module safely **appends** a new method to the existing `MessageBroker.java` without overwriting it.
 
-```bash
-eva4j g kafka-event OrderCreated
-```
+## Prerequisites
 
-### Example 2: Payment Processed Event
-
-```bash
-eva4j g kafka-event PaymentProcessed
-```
-
-### Example 3: User Registered Event
+Kafka client must be installed in the project:
 
 ```bash
-eva4j g kafka-event UserRegistered
+eva add kafka-client
 ```
 
-## 📦 Generated Code Structure
+## Examples
+
+### Example 1: User created event
+
+```bash
+eva g kafka-event user user-created
+# Event class: UserCreatedEvent
+# Topic: USER_CREATED (entered at prompt)
+```
+
+Generates:
+- `user/application/events/UserCreatedEvent.java`
+- `user/application/ports/MessageBroker.java` (created or appended)
+- `user/infrastructure/adapters/kafkaMessageBroker/UserKafkaMessageBroker.java`
+- Adds topic config to `parameters/*/kafka.yaml`
+
+### Example 2: Order placed event
+
+```bash
+eva g kafka-event order order-placed
+```
+
+### Example 3: Multiple events in the same module
+
+```bash
+eva g kafka-event user user-created   # Creates MessageBroker with publishUserCreatedEvent
+eva g kafka-event user user-updated   # Appends publishUserUpdatedEvent to MessageBroker
+eva g kafka-event user user-deleted   # Appends publishUserDeletedEvent to MessageBroker
+```
+
+Each run adds a new method without overwriting existing ones.
+
+## Generated Code Structure
 
 ```
 <module>/
-├── domain/
-│   └── events/
-│       └── OrderCreatedEvent.java              # Domain event
+├── application/
+│   ├── events/
+│   │   └── UserCreatedEvent.java             # Java record (event data)
+│   └── ports/
+│       └── MessageBroker.java                # Port interface (append-safe)
 │
 └── infrastructure/
-    └── messaging/
-        ├── events/
-        │   └── OrderCreatedKafkaEvent.java     # Kafka DTO
-        ├── publishers/
-        │   └── OrderEventPublisher.java        # Event publisher
-        └── config/
-            └── KafkaProducerConfig.java        # Kafka configuration
+    └── adapters/
+        └── kafkaMessageBroker/
+            └── UserKafkaMessageBroker.java   # Kafka adapter
 ```
 
-## 📄 Generated Files
+## Generated Files
 
-### 1. Domain Event
+### 1. Event (Application Layer)
 
-**OrderCreatedEvent.java:**
+**UserCreatedEvent.java** (`application/events/`):
 ```java
-package com.example.project.order.domain.events;
+package com.example.project.user.application.events;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import java.time.LocalDateTime;
-
-/**
- * Domain event: OrderCreated
- */
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class OrderCreatedEvent {
-    
-    private String eventId;
-    private LocalDateTime occurredOn;
-    
-    // Add your event data here
-    private Long orderId;
-    private Long customerId;
-    private String orderNumber;
-    
-    public OrderCreatedEvent(Long orderId, Long customerId, String orderNumber) {
-        this.eventId = java.util.UUID.randomUUID().toString();
-        this.occurredOn = LocalDateTime.now();
-        this.orderId = orderId;
-        this.customerId = customerId;
-        this.orderNumber = orderNumber;
-    }
+public record UserCreatedEvent(
+  // TODO: Add your event fields here
+  // Example:
+  // Long id,
+  // String name,
+  // LocalDateTime createdAt
+) {
 }
 ```
 
-### 2. Kafka Event DTO
+> Events are pure Java records — immutable, no Lombok, no framework annotations.
 
-**OrderCreatedKafkaEvent.java:**
+### 2. MessageBroker Port (Application Layer)
+
+**MessageBroker.java** (`application/ports/`):
 ```java
-package com.example.project.order.infrastructure.messaging.events;
+package com.example.project.user.application.ports;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import com.example.project.user.application.events.UserCreatedEvent;
 
-/**
- * Kafka DTO for OrderCreated event
- */
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class OrderCreatedKafkaEvent {
-    
-    private String eventId;
-    private String occurredOn;
-    private Long orderId;
-    private Long customerId;
-    private String orderNumber;
-    
-    // Add metadata
-    private String eventType = "OrderCreated";
-    private String version = "1.0";
+public interface MessageBroker {
+
+  void publishUserCreatedEvent(UserCreatedEvent event);
 }
 ```
 
-### 3. Event Publisher
+> If `MessageBroker.java` already exists (from a previous run), the new `publishXxx` method is **appended** to the interface rather than overwriting it.
 
-**OrderEventPublisher.java:**
+### 3. Kafka Adapter (Infrastructure)
+
+**UserKafkaMessageBroker.java** (`infrastructure/adapters/kafkaMessageBroker/`):
 ```java
-package com.example.project.order.infrastructure.messaging.publishers;
+package com.example.project.user.infrastructure.adapters.kafkaMessageBroker;
 
-import com.example.project.order.domain.events.OrderCreatedEvent;
-import com.example.project.order.infrastructure.messaging.events.OrderCreatedKafkaEvent;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
-import org.springframework.stereotype.Component;
-
-import java.util.concurrent.CompletableFuture;
-
-/**
- * Publisher for Order events
- */
-@Slf4j
-@Component
-@RequiredArgsConstructor
-public class OrderEventPublisher {
-    
-    private final KafkaTemplate<String, OrderCreatedKafkaEvent> kafkaTemplate;
-    
-    private static final String ORDER_CREATED_TOPIC = "order.created";
-    
-    public void publishOrderCreated(OrderCreatedEvent event) {
-        OrderCreatedKafkaEvent kafkaEvent = mapToKafkaEvent(event);
-        
-        CompletableFuture<SendResult<String, OrderCreatedKafkaEvent>> future = 
-            kafkaTemplate.send(ORDER_CREATED_TOPIC, event.getOrderId().toString(), kafkaEvent);
-        
-        future.whenComplete((result, ex) -> {
-            if (ex == null) {
-                log.info("OrderCreated event published successfully: orderId={}, offset={}", 
-                    event.getOrderId(), result.getRecordMetadata().offset());
-            } else {
-                log.error("Failed to publish OrderCreated event: orderId={}", 
-                    event.getOrderId(), ex);
-            }
-        });
-    }
-    
-    private OrderCreatedKafkaEvent mapToKafkaEvent(OrderCreatedEvent event) {
-        return new OrderCreatedKafkaEvent(
-            event.getEventId(),
-            event.getOccurredOn().toString(),
-            event.getOrderId(),
-            event.getCustomerId(),
-            event.getOrderNumber()
-        );
-    }
-}
-```
-
-### 4. Kafka Configuration
-
-**KafkaProducerConfig.java:**
-```java
-package com.example.project.order.infrastructure.messaging.config;
-
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.StringSerializer;
+import com.example.project.user.application.events.UserCreatedEvent;
+import com.example.project.user.application.ports.MessageBroker;
+import com.example.project.shared.infrastructure.eventEnvelope.EventEnvelope;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.core.ProducerFactory;
-import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.springframework.stereotype.Component;
+import org.slf4j.MDC;
 
-import java.util.HashMap;
-import java.util.Map;
+@Component("userKafkaMessageBroker")
+public class UserKafkaMessageBroker implements MessageBroker {
 
-/**
- * Kafka producer configuration
- */
-@Configuration
-public class KafkaProducerConfig {
-    
-    @Value("${spring.kafka.bootstrap-servers}")
-    private String bootstrapServers;
-    
-    @Bean
-    public ProducerFactory<String, Object> producerFactory() {
-        Map<String, Object> config = new HashMap<>();
-        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        config.put(ProducerConfig.ACKS_CONFIG, "all");
-        config.put(ProducerConfig.RETRIES_CONFIG, 3);
-        config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        return new DefaultKafkaProducerFactory<>(config);
-    }
-    
-    @Bean
-    public KafkaTemplate<String, Object> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
-    }
+  @Value("${topics.user-created}")
+  private String usercreatedTopic;
+
+  private final KafkaTemplate<String, Object> kafkaTemplate;
+
+  public UserKafkaMessageBroker(KafkaTemplate<String, Object> kafkaTemplate) {
+    this.kafkaTemplate = kafkaTemplate;
+  }
+
+  @Override
+  public void publishUserCreatedEvent(UserCreatedEvent event) {
+    EventEnvelope<UserCreatedEvent> envelope = EventEnvelope.of(
+      usercreatedTopic,
+      event,
+      MDC.get("correlationId")
+    );
+    kafkaTemplate.send(usercreatedTopic, envelope);
+  }
 }
 ```
 
-## ✨ Features
+> `EventEnvelope.of(topic, payload, correlationId)` wraps the event with routing metadata and the current MDC correlation ID for distributed tracing.
 
-### Event Publishing
-- ✅ **Asynchronous** - Non-blocking event publishing
-- ✅ **Idempotent** - Prevents duplicate events
-- ✅ **Reliable** - Acknowledgment and retries
-- ✅ **Partitioned** - Uses orderId as partition key
-- ✅ **Logged** - Success/failure logging
-
-### Event Structure
-- ✅ **Event ID** - Unique identifier for deduplication
-- ✅ **Timestamp** - When event occurred
-- ✅ **Type** - Event type identifier
-- ✅ **Version** - Schema versioning
-- ✅ **Payload** - Business data
-
-## 🔧 Configuration
-
-### Application Properties
+## Configuration Added
 
 ```yaml
-# application.yaml
-
-spring:
-  kafka:
-    bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      retries: 3
-      properties:
-        enable.idempotence: true
-        max.in.flight.requests.per.connection: 5
-
-# Topic configuration
-kafka:
+# parameters/local/kafka.yaml
+spring.kafka:
   topics:
-    order-created: order.created
-    payment-processed: payment.processed
+    user-created: USER_CREATED
 ```
 
-## 🎯 Usage Examples
+The same entry is added to every environment (`local`, `develop`, `test`, `production`).
 
-### 1. Publish from Command Handler
+## Usage in a Command Handler
+
+Inject `MessageBroker` (the port, not the Kafka class) and call the publish method:
 
 ```java
-@Service
-@RequiredArgsConstructor
-public class CreateOrderCommandHandler {
-    
-    private final OrderRepository repository;
-    private final OrderEventPublisher eventPublisher;
-    
-    @Transactional
-    public OrderResponseDto handle(CreateOrderCommand command) {
-        // Create order
-        Order order = Order.create(command.getCustomerId(), command.getItems());
-        Order savedOrder = repository.save(order);
-        
-        // Publish event
-        OrderCreatedEvent event = new OrderCreatedEvent(
-            savedOrder.getId(),
-            savedOrder.getCustomerId(),
-            savedOrder.getOrderNumber()
+@ApplicationComponent
+public class CreateUserCommandHandler {
+
+    private final UserRepository userRepository;
+    private final MessageBroker messageBroker;
+
+    public CreateUserCommandHandler(UserRepository userRepository, MessageBroker messageBroker) {
+        this.userRepository = userRepository;
+        this.messageBroker = messageBroker;
+    }
+
+    public void handle(CreateUserCommand command) {
+        User user = new User(command.name(), command.email());
+        userRepository.save(user);
+
+        messageBroker.publishUserCreatedEvent(
+            new UserCreatedEvent(/* fill fields */)
         );
-        eventPublisher.publishOrderCreated(event);
-        
-        return OrderMapper.toDto(savedOrder);
     }
 }
 ```
 
-### 2. Publish from Domain Entity
+## Bean Naming
 
-```java
-@Entity
-public class Order {
-    
-    @Transient
-    private final List<DomainEvent> domainEvents = new ArrayList<>();
-    
-    public static Order create(Long customerId, List<OrderItem> items) {
-        Order order = new Order();
-        order.setCustomerId(customerId);
-        order.setItems(items);
-        
-        // Register domain event
-        order.registerEvent(new OrderCreatedEvent(
-            order.getId(),
-            order.getCustomerId(),
-            order.getOrderNumber()
-        ));
-        
-        return order;
-    }
-    
-    private void registerEvent(DomainEvent event) {
-        domainEvents.add(event);
-    }
-    
-    public List<DomainEvent> getDomainEvents() {
-        return Collections.unmodifiableList(domainEvents);
-    }
-}
+The adapter is registered with an explicit bean name to avoid conflicts when multiple modules have a `MessageBroker`:
 
-// In handler
-@Transactional
-public void handle(CreateOrderCommand command) {
-    Order order = Order.create(command.getCustomerId(), command.getItems());
-    Order savedOrder = repository.save(order);
-    
-    // Publish collected events
-    savedOrder.getDomainEvents().forEach(event -> {
-        if (event instanceof OrderCreatedEvent) {
-            eventPublisher.publishOrderCreated((OrderCreatedEvent) event);
-        }
-    });
-}
-```
+| Module | Bean name |
+|--------|-----------|
+| `user` | `userKafkaMessageBroker` |
+| `order` | `orderKafkaMessageBroker` |
+| `product` | `productKafkaMessageBroker` |
 
-### 3. Publish Multiple Events
+Spring resolves the correct adapter for each module via constructor injection by type + qualifier if needed.
 
-```java
-@Service
-@RequiredArgsConstructor
-public class OrderEventPublisher {
-    
-    private final KafkaTemplate<String, Object> kafkaTemplate;
-    
-    public void publishOrderCreated(OrderCreatedEvent event) {
-        kafkaTemplate.send("order.created", event.getOrderId().toString(), 
-            mapToKafkaEvent(event));
-    }
-    
-    public void publishOrderCancelled(OrderCancelledEvent event) {
-        kafkaTemplate.send("order.cancelled", event.getOrderId().toString(),
-            mapToKafkaEvent(event));
-    }
-    
-    public void publishOrderShipped(OrderShippedEvent event) {
-        kafkaTemplate.send("order.shipped", event.getOrderId().toString(),
-            mapToKafkaEvent(event));
-    }
-}
-```
+## See Also
 
-## 🔄 Event-Driven Patterns
-
-### 1. Event Notification
-
-```java
-// Order service publishes
-eventPublisher.publishOrderCreated(event);
-
-// Inventory service listens and reacts
-@KafkaListener(topics = "order.created")
-public void handleOrderCreated(OrderCreatedKafkaEvent event) {
-    inventoryService.reserveStock(event.getOrderId());
-}
-```
-
-### 2. Event-Carried State Transfer
-
-```java
-// Include all necessary data in event
-public class OrderCreatedEvent {
-    private Long orderId;
-    private Long customerId;
-    private List<OrderItem> items;  // Full state
-    private BigDecimal totalAmount;
-    private String shippingAddress;
-}
-```
-
-### 3. Event Sourcing (Advanced)
-
-```java
-// Store events as source of truth
-public class OrderEventStore {
-    public void save(OrderCreatedEvent event) {
-        // Persist event to event store
-    }
-    
-    public Order rebuild(Long orderId) {
-        // Replay events to rebuild state
-        List<DomainEvent> events = loadEvents(orderId);
-        return Order.fromEvents(events);
-    }
-}
-```
-
-## 🚀 Next Steps
-
-After generating Kafka event infrastructure:
-
-1. **Define event payload:**
-   ```java
-   public class OrderCreatedEvent {
-       private Long orderId;
-       private Long customerId;
-       private BigDecimal totalAmount;
-       private List<OrderItemDto> items;
-   }
-   ```
-
-2. **Publish from business logic:**
-   ```java
-   eventPublisher.publishOrderCreated(event);
-   ```
-
-3. **Create listeners in other modules:**
-   ```bash
-   eva4j g kafka-listener OrderCreated
-   ```
-
-4. **Monitor events:**
-   - Use Kafka UI (http://localhost:8080 if using docker-compose)
-   - Check logs for publish confirmations
-
-## ⚠️ Prerequisites
-
-- Be in a project created with `eva4j create`
-- Module must exist
-- Kafka must be running (use `docker-compose up -d`)
-- Spring Kafka dependency (automatically added)
-
-## 🔍 Validations
-
-The command validates:
-- ✅ Valid eva4j project
-- ✅ Event name is in PascalCase
-- ✅ Module exists
-- ✅ Kafka is configured
-
-## 📚 See Also
-
-- [generate-kafka-listener](./GENERATE_KAFKA_LISTENER.md) - Consume Kafka events
-- [add-kafka-client](./ADD_KAFKA_CLIENT.md) - Add Kafka to module
-- [generate-entities](./GENERATE_ENTITIES.md) - Generate domain models
-
-## 🐛 Troubleshooting
-
-**Error: "Kafka connection refused"**
-- Solution: Ensure Kafka is running: `docker-compose up -d kafka`
-
-**Events not appearing in topic**
-- Solution: Check Kafka logs and verify topic exists
-  ```bash
-  docker exec -it kafka kafka-topics --list --bootstrap-server localhost:9092
-  ```
-
-**Serialization errors**
-- Solution: Ensure event classes are serializable and have no-arg constructor
-
-**Lost events**
-- Solution: Configure appropriate `acks` and `retries`:
-  ```yaml
-  spring:
-    kafka:
-      producer:
-        acks: all
-        retries: 3
-  ```
+- [generate-kafka-listener](./GENERATE_KAFKA_LISTENER.md) — Create Kafka event consumer
+- [add-kafka-client](./ADD_MODULE.md) — Install Kafka dependencies
+- [generate-usecase](./GENERATE_USECASE.md) — Create use case handlers

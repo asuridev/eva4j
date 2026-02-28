@@ -1,450 +1,274 @@
-# Command `generate http-exchange` (alias: `g http`)
+# Command `generate http-exchange` (alias: `g http-exchange`)
 
-## 📋 Description
+## Description
 
-Generates HTTP client infrastructure using Spring Cloud OpenFeign for consuming external REST APIs, following the hexagonal architecture pattern with ports and adapters.
+Generates an HTTP client adapter using Spring Cloud OpenFeign for consuming external REST APIs, following hexagonal architecture.
 
-## 🎯 Purpose
+## Purpose
 
-Enable modules to communicate with external HTTP services or other microservices through clean, declarative interfaces while maintaining architectural boundaries.
+Enable modules to communicate with external HTTP services through a clean, declarative interface while maintaining architectural boundaries (Port → Adapter → FeignClient).
 
-## 📝 Syntax
+## Syntax
 
 ```bash
-eva4j generate http-exchange <ClientName>
-eva4j g http <ClientName>    # Short alias
+eva generate http-exchange <module> [port-name]
+eva g http-exchange <module> [port-name]    # Short alias
 ```
 
 ### Parameters
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `ClientName` | Yes | Name of the HTTP client (PascalCase, e.g., PaymentGateway, UserService) |
+| `module` | Yes | Module that will own the HTTP client (e.g., `order`, `payment`) |
+| `port-name` | No | Name of the external service in PascalCase — prompted if omitted |
 
-## 💡 Examples
+> **Interactive prompts:**
+> 1. **Port name** — if not provided (e.g., `PaymentGateway`, `ProductService`)
+> 2. **Base URL** — default URL of the remote service for local environment
 
-### Example 1: Payment Gateway Client
+## Examples
 
-```bash
-eva4j g http PaymentGateway
-```
-
-### Example 2: User Service Client
-
-```bash
-eva4j g http UserService
-```
-
-### Example 3: External API Client
+### Example 1: Payment gateway in the order module
 
 ```bash
-eva4j g http WeatherApi
+eva g http-exchange order payment-gateway
 ```
 
-## 📦 Generated Code Structure
+Generates:
+- `order/application/ports/PaymentGateway.java`
+- `order/infrastructure/adapters/paymentGateway/PaymentGatewayAdapter.java`
+- `order/infrastructure/adapters/paymentGateway/PaymentGatewayFeignClient.java`
+- `order/infrastructure/adapters/paymentGateway/PaymentGatewayConfig.java`
+- Adds entry to `parameters/*/urls.yaml`
+
+### Example 2: User service client
+
+```bash
+eva g http-exchange order user-service
+```
+
+### Example 3: Inventory service
+
+```bash
+eva g http-exchange product inventory-service
+```
+
+## Generated Code Structure
 
 ```
 <module>/
-├── domain/
-│   └── ports/
-│       └── PaymentGatewayPort.java              # Port (interface)
-│
 ├── application/
-│   └── services/
-│       └── PaymentGatewayAdapter.java           # Adapter implementation
+│   └── ports/
+│       └── PaymentGateway.java              # Port interface
 │
 └── infrastructure/
-    └── external/
-        ├── clients/
-        │   └── PaymentGatewayClient.java        # Feign client
-        └── config/
-            └── PaymentGatewayConfig.java        # Feign configuration
+    └── adapters/
+        └── paymentGateway/
+            ├── PaymentGatewayAdapter.java   # Adapter (@Component)
+            ├── PaymentGatewayFeignClient.java  # Feign client
+            └── PaymentGatewayConfig.java    # Feign config (timeouts)
 ```
 
-## 📄 Generated Files
+## Generated Files
 
-### 1. Port (Domain Layer)
+### 1. Port (Application Layer)
 
-**PaymentGatewayPort.java:**
+**PaymentGateway.java** (`application/ports/`):
 ```java
-package com.example.project.payment.domain.ports;
+package com.example.project.order.application.ports;
 
-/**
- * Port for PaymentGateway external communication
- */
-public interface PaymentGatewayPort {
-    
-    // Define your methods here
-    // Example:
-    // PaymentResponse processPayment(PaymentRequest request);
+public interface PaymentGateway {
+
+  Object findAll();
+
+  Object findById(Long id);
+
+  Object create(Object request);
+
+  Object update(Long id, Object request);
+
+  void delete(Long id);
 }
 ```
 
-### 2. Feign Client (Infrastructure Layer)
+> The port exposes generic `Object` methods as scaffolding. Replace them with typed methods that match the remote API contract.
 
-**PaymentGatewayClient.java:**
+### 2. Feign Client (Infrastructure)
+
+**PaymentGatewayFeignClient.java** (`infrastructure/adapters/paymentGateway/`):
 ```java
-package com.example.project.payment.infrastructure.external.clients;
+package com.example.project.order.infrastructure.adapters.paymentGateway;
 
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * Feign client for PaymentGateway
- */
 @FeignClient(
-    name = "payment-gateway",
-    url = "${external.payment-gateway.url}",
+    name = "order-payment-gateway",
+    url = "${order.payment-gateway.base-url}",
     configuration = PaymentGatewayConfig.class
 )
-public interface PaymentGatewayClient {
-    
-    // Define your HTTP endpoints here
-    // Example:
-    // @PostMapping("/payments")
-    // PaymentResponse processPayment(@RequestBody PaymentRequest request);
-    
-    // @GetMapping("/payments/{id}")
-    // PaymentResponse getPayment(@PathVariable String id);
+public interface PaymentGatewayFeignClient {
+
+  @GetMapping("/api/resources")
+  Object findAll();
+
+  @GetMapping("/api/resources/{id}")
+  Object findById(@PathVariable("id") Long id);
+
+  @PostMapping("/api/resources")
+  Object create(@RequestBody Object request);
+
+  @PutMapping("/api/resources/{id}")
+  Object update(@PathVariable("id") Long id, @RequestBody Object request);
+
+  @DeleteMapping("/api/resources/{id}")
+  void delete(@PathVariable("id") Long id);
 }
 ```
 
-### 3. Configuration (Infrastructure Layer)
+> Property key format: `<module-kebab>.<port-kebab>.base-url`
 
-**PaymentGatewayConfig.java:**
+### 3. Config (Infrastructure)
+
+**PaymentGatewayConfig.java** (`infrastructure/adapters/paymentGateway/`):
 ```java
-package com.example.project.payment.infrastructure.external.config;
+package com.example.project.order.infrastructure.adapters.paymentGateway;
 
 import feign.Logger;
-import feign.RequestInterceptor;
-import org.springframework.beans.factory.annotation.Value;
+import feign.Request;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 
-/**
- * Configuration for PaymentGateway Feign client
- */
-@Configuration
+import java.util.concurrent.TimeUnit;
+
 public class PaymentGatewayConfig {
-    
-    @Value("${external.payment-gateway.api-key:}")
-    private String apiKey;
-    
-    @Bean
-    public Logger.Level feignLoggerLevel() {
-        return Logger.Level.FULL;
-    }
-    
-    @Bean
-    public RequestInterceptor requestInterceptor() {
-        return requestTemplate -> {
-            // Add headers
-            requestTemplate.header("Content-Type", "application/json");
-            if (apiKey != null && !apiKey.isEmpty()) {
-                requestTemplate.header("X-API-Key", apiKey);
-            }
-        };
-    }
-}
-```
 
-### 4. Adapter (Application Layer)
+  @Bean
+  public Logger.Level feignLoggerLevel() {
+    return Logger.Level.BASIC;
+  }
 
-**PaymentGatewayAdapter.java:**
-```java
-package com.example.project.payment.application.services;
-
-import com.example.project.payment.domain.ports.PaymentGatewayPort;
-import com.example.project.payment.infrastructure.external.clients.PaymentGatewayClient;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-
-/**
- * Adapter implementation for PaymentGateway
- */
-@Service
-@RequiredArgsConstructor
-public class PaymentGatewayAdapter implements PaymentGatewayPort {
-    
-    private final PaymentGatewayClient client;
-    
-    // Implement port methods here
-    // Example:
-    // @Override
-    // public PaymentResponse processPayment(PaymentRequest request) {
-    //     return client.processPayment(request);
-    // }
-}
-```
-
-## ✨ Features
-
-### OpenFeign Capabilities
-- ✅ **Declarative HTTP client** - Annotate interfaces, no implementation needed
-- ✅ **Request/Response mapping** - Automatic JSON serialization
-- ✅ **Load balancing** - Integration with Spring Cloud LoadBalancer
-- ✅ **Circuit breaker** - Resilience4j integration
-- ✅ **Logging** - Configurable request/response logging
-- ✅ **Error handling** - Custom error decoders
-- ✅ **Interceptors** - Add headers, authentication, etc.
-
-### Hexagonal Architecture
-- ✅ **Port** - Domain-level interface (technology-agnostic)
-- ✅ **Adapter** - Application-level implementation
-- ✅ **Client** - Infrastructure-level Feign interface
-- ✅ **Configuration** - Centralized client setup
-
-## 🔧 Configuration
-
-### Application Properties
-
-```yaml
-# application.yaml
-
-# External service configuration
-external:
-  payment-gateway:
-    url: https://api.paymentgateway.com
-    api-key: ${PAYMENT_API_KEY}
-    timeout:
-      connect: 5000
-      read: 10000
-
-# Feign configuration
-feign:
-  client:
-    config:
-      payment-gateway:
-        connectTimeout: 5000
-        readTimeout: 10000
-        loggerLevel: full
-
-# Logging
-logging:
-  level:
-    com.example.project.payment.infrastructure.external: DEBUG
-```
-
-## 🎯 Common Use Cases
-
-### 1. Payment Gateway Integration
-
-```java
-@FeignClient(name = "stripe", url = "${external.stripe.url}")
-public interface StripeClient {
-    
-    @PostMapping("/v1/charges")
-    ChargeResponse createCharge(@RequestBody ChargeRequest request);
-    
-    @GetMapping("/v1/charges/{id}")
-    ChargeResponse getCharge(@PathVariable String id);
-    
-    @PostMapping("/v1/refunds")
-    RefundResponse createRefund(@RequestBody RefundRequest request);
-}
-```
-
-### 2. External API Integration
-
-```java
-@FeignClient(name = "weather-api", url = "${external.weather.url}")
-public interface WeatherApiClient {
-    
-    @GetMapping("/current")
-    WeatherResponse getCurrentWeather(
-        @RequestParam String location,
-        @RequestParam String apiKey
+  @Bean
+  public Request.Options feignOptions() {
+    return new Request.Options(
+      15, TimeUnit.SECONDS,   // connect timeout
+      15, TimeUnit.SECONDS,   // read timeout
+      true
     );
+  }
 }
 ```
 
-### 3. Microservice Communication
+> **No `@Configuration` annotation** — the class is referenced directly via `configuration = PaymentGatewayConfig.class` in the `@FeignClient`, which is the standard OpenFeign pattern.
 
+### 4. Adapter (Infrastructure)
+
+**PaymentGatewayAdapter.java** (`infrastructure/adapters/paymentGateway/`):
 ```java
-@FeignClient(name = "user-service", url = "${services.user.url}")
-public interface UserServiceClient {
-    
-    @GetMapping("/api/users/{id}")
-    UserDto getUser(@PathVariable Long id);
-    
-    @PostMapping("/api/users")
-    UserDto createUser(@RequestBody CreateUserRequest request);
-}
-```
+package com.example.project.order.infrastructure.adapters.paymentGateway;
 
-### 4. Third-Party Service
-
-```java
-@FeignClient(name = "sendgrid", url = "${external.sendgrid.url}")
-public interface SendGridClient {
-    
-    @PostMapping("/v3/mail/send")
-    void sendEmail(
-        @RequestHeader("Authorization") String apiKey,
-        @RequestBody EmailRequest email
-    );
-}
-```
-
-## 🛡️ Error Handling
-
-### Custom Error Decoder
-
-```java
-@Configuration
-public class PaymentGatewayConfig {
-    
-    @Bean
-    public ErrorDecoder errorDecoder() {
-        return (methodKey, response) -> {
-            if (response.status() >= 400 && response.status() <= 499) {
-                return new PaymentClientException("Client error: " + response.reason());
-            }
-            if (response.status() >= 500 && response.status() <= 599) {
-                return new PaymentServerException("Server error: " + response.reason());
-            }
-            return new Exception("Generic error");
-        };
-    }
-}
-```
-
-### Fallback Support
-
-```java
-@FeignClient(
-    name = "payment-gateway",
-    url = "${external.payment-gateway.url}",
-    fallback = PaymentGatewayFallback.class
-)
-public interface PaymentGatewayClient {
-    @PostMapping("/payments")
-    PaymentResponse processPayment(@RequestBody PaymentRequest request);
-}
+import com.example.project.order.application.ports.PaymentGateway;
+import org.springframework.stereotype.Component;
 
 @Component
-public class PaymentGatewayFallback implements PaymentGatewayClient {
-    @Override
-    public PaymentResponse processPayment(PaymentRequest request) {
-        // Return fallback response
-        return PaymentResponse.error("Service temporarily unavailable");
+public class PaymentGatewayAdapter implements PaymentGateway {
+
+  private final PaymentGatewayFeignClient feignClient;
+
+  public PaymentGatewayAdapter(PaymentGatewayFeignClient feignClient) {
+    this.feignClient = feignClient;
+  }
+
+  @Override
+  public Object findAll() {
+    return feignClient.findAll();
+  }
+
+  @Override
+  public Object findById(Long id) {
+    return feignClient.findById(id);
+  }
+
+  @Override
+  public Object create(Object request) {
+    return feignClient.create(request);
+  }
+
+  @Override
+  public Object update(Long id, Object request) {
+    return feignClient.update(id, request);
+  }
+
+  @Override
+  public void delete(Long id) {
+    feignClient.delete(id);
+  }
+}
+```
+
+## Configuration Added
+
+The command appends the base URL to every environment's `urls.yaml`:
+
+```yaml
+# parameters/local/urls.yaml
+order:
+  payment-gateway:
+    base-url: http://localhost:8050   # value entered at prompt
+
+# parameters/develop/urls.yaml
+order:
+  payment-gateway:
+    base-url: https://dev-payment.company.com
+```
+
+Property key pattern: `<module-kebab>.<port-kebab>.base-url`
+
+## Usage in Code
+
+Inject the Port interface (not the FeignClient directly):
+
+```java
+@ApplicationComponent
+public class ProcessPaymentCommandHandler {
+
+    private final PaymentGateway paymentGateway;  // ← Port interface
+
+    public ProcessPaymentCommandHandler(PaymentGateway paymentGateway) {
+        this.paymentGateway = paymentGateway;
+    }
+
+    public void handle(ProcessPaymentCommand command) {
+        paymentGateway.create(command);
     }
 }
 ```
 
-## 🚀 Next Steps
+## Customization
 
-After generating the HTTP exchange:
+After generation, replace the generic `Object` signatures with typed DTOs:
 
-1. **Define the contract in the Port:**
-   ```java
-   public interface PaymentGatewayPort {
-       PaymentResponse processPayment(PaymentRequest request);
-       PaymentStatus checkStatus(String transactionId);
-   }
-   ```
+```java
+// Port
+PaymentResponse processPayment(PaymentRequest request);
 
-2. **Implement Feign client endpoints:**
-   ```java
-   @FeignClient(name = "payment-gateway", url = "${external.payment.url}")
-   public interface PaymentGatewayClient {
-       @PostMapping("/v1/payments")
-       PaymentResponse processPayment(@RequestBody PaymentRequest request);
-       
-       @GetMapping("/v1/payments/{id}/status")
-       PaymentStatus checkStatus(@PathVariable String id);
-   }
-   ```
+// FeignClient
+@PostMapping("/payments")
+PaymentResponse processPayment(@RequestBody PaymentRequest request);
 
-3. **Implement the Adapter:**
-   ```java
-   @Service
-   @RequiredArgsConstructor
-   public class PaymentGatewayAdapter implements PaymentGatewayPort {
-       private final PaymentGatewayClient client;
-       
-       @Override
-       public PaymentResponse processPayment(PaymentRequest request) {
-           return client.processPayment(request);
-       }
-       
-       @Override
-       public PaymentStatus checkStatus(String transactionId) {
-           return client.checkStatus(transactionId);
-       }
-   }
-   ```
+// Adapter
+@Override
+public PaymentResponse processPayment(PaymentRequest request) {
+    return feignClient.processPayment(request);
+}
+```
 
-4. **Configure the service URL:**
-   ```yaml
-   external:
-     payment:
-       url: https://api.payment-provider.com
-       api-key: ${PAYMENT_API_KEY}
-   ```
+## Prerequisites
 
-5. **Use the port in your domain:**
-   ```java
-   @Service
-   @RequiredArgsConstructor
-   public class ProcessOrderCommandHandler {
-       private final PaymentGatewayPort paymentGateway;
-       
-       public void handle(ProcessOrderCommand command) {
-           PaymentResponse payment = paymentGateway.processPayment(
-               new PaymentRequest(command.getAmount())
-           );
-           // Continue with business logic
-       }
-   }
-   ```
+- Be in a project created with `eva create`
+- Module must exist (`eva add module <module>`)
+- `spring-cloud-openfeign` dependency must be present (included by default in eva projects)
 
-## ⚠️ Prerequisites
+## See Also
 
-- Be in a project created with `eva4j create`
-- Module must exist
-- Spring Cloud OpenFeign dependency (automatically added)
-
-## 🔍 Validations
-
-The command validates:
-- ✅ Valid eva4j project
-- ✅ Client name is in PascalCase
-- ✅ Module exists
-- ✅ Feign is configured in the project
-
-## 📚 See Also
-
-- [generate-kafka-event](./GENERATE_KAFKA_EVENT.md) - Async communication
-- [add-module](./ADD_MODULE.md) - Create modules
-- [detach](./DETACH.md) - Extract to microservices
-
-## 🐛 Troubleshooting
-
-**Error: "Feign client not found"**
-- Solution: Ensure `@EnableFeignClients` is in your main Application class
-
-**Connection timeout errors**
-- Solution: Increase timeout in configuration:
-  ```yaml
-  feign:
-    client:
-      config:
-        default:
-          connectTimeout: 10000
-          readTimeout: 20000
-  ```
-
-**401/403 authentication errors**
-- Solution: Add authentication in RequestInterceptor
-  ```java
-  @Bean
-  public RequestInterceptor authInterceptor() {
-      return template -> {
-          template.header("Authorization", "Bearer " + getToken());
-      };
-  }
-  ```
-
-**Load balancer errors**
-- Solution: Specify URL directly or configure service discovery
+- [generate-kafka-event](./GENERATE_KAFKA_EVENT.md) — Async event publishing
+- [add-module](./ADD_MODULE.md) — Create a new module

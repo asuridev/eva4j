@@ -34,7 +34,7 @@ eva g temporal-flow order
 
 **Generates:**
 - `application/usecases/ProcessOrderWorkFlow.java` — `@WorkflowInterface`
-- `infrastructure/adapters/workflows/ProcessOrderWorkFlowImpl.java` — implementation with Saga
+- `application/usecases/ProcessOrderWorkFlowImpl.java` — implementation with Saga
 - `application/usecases/ProcessOrderWorkFlowService.java` — Spring service facade
 - Patches `shared/infrastructure/configurations/TemporalConfig.java` to register `ProcessOrderWorkFlowImpl`
 
@@ -47,7 +47,7 @@ eva g temporal-flow payment
 
 **Generates:**
 - `application/usecases/ProcessPaymentWorkFlow.java`
-- `infrastructure/adapters/workflows/ProcessPaymentWorkFlowImpl.java`
+- `application/usecases/ProcessPaymentWorkFlowImpl.java`
 - `application/usecases/ProcessPaymentWorkFlowService.java`
 - Patches `TemporalConfig.java`
 
@@ -94,52 +94,59 @@ public interface ProcessOrderWorkFlow {
 ### WorkFlow Implementation — `ProcessOrderWorkFlowImpl.java`
 
 ```java
-package com.example.project.order.infrastructure.adapters.workflows;
+package com.example.project.order.application.usecases;
 
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
 import io.temporal.workflow.Saga;
+import io.temporal.workflow.SignalMethod;
+import io.temporal.workflow.QueryMethod;
 import io.temporal.workflow.Workflow;
 
 import java.time.Duration;
 
 public class ProcessOrderWorkFlowImpl implements ProcessOrderWorkFlow {
 
+    private Saga.Options sagaOptions = new Saga.Options.Builder()
+        .setParallelCompensation(false)
+        .build();
+
+    private Saga saga = new Saga(sagaOptions);
+
     // Light activities (<30 s) — routed to LIGHT_TASK_QUEUE
     private final ActivityOptions lightActivityOptions = ActivityOptions.newBuilder()
-            .setStartToCloseTimeout(Duration.ofSeconds(30))
-            .setTaskQueue("LIGHT_TASK_QUEUE")
-            .setRetryOptions(RetryOptions.newBuilder()
-                    .setMaximumAttempts(3)
-                    .build())
-            .build();
+        .setStartToCloseTimeout(Duration.ofSeconds(30))
+        .setTaskQueue("LIGHT_TASK_QUEUE")
+        .setRetryOptions(
+            RetryOptions.newBuilder()
+                .setMaximumAttempts(2)
+                .setInitialInterval(Duration.ofSeconds(1))
+                .setMaximumInterval(Duration.ofSeconds(10))
+                .setBackoffCoefficient(2.0)
+                .build()
+        ).build();
 
     // Heavy activities (up to 2 min) — routed to HEAVY_TASK_QUEUE
     private final ActivityOptions heavyActivityOptions = ActivityOptions.newBuilder()
-            .setStartToCloseTimeout(Duration.ofSeconds(120))
-            .setTaskQueue("HEAVY_TASK_QUEUE")
-            .setRetryOptions(RetryOptions.newBuilder()
-                    .setMaximumAttempts(3)
-                    .build())
-            .build();
+        .setStartToCloseTimeout(Duration.ofSeconds(120))
+        .setTaskQueue("HEAVY_TASK_QUEUE")
+        .setRetryOptions(
+            RetryOptions.newBuilder()
+                .setMaximumAttempts(2)
+                .setInitialInterval(Duration.ofSeconds(1))
+                .setMaximumInterval(Duration.ofSeconds(10))
+                .setBackoffCoefficient(2.0)
+                .build()
+        ).build();
 
     private String status = "PENDING";
 
     @Override
-    public void start(String input) {
-        Saga saga = new Saga(new Saga.Options.Builder().setParallelCompensation(false).build());
+    public void start(String workFlowId) {
         try {
-            status = "IN_PROGRESS";
-            // TODO: execute activities and add compensations
-            // Example: MyActivity activity = Workflow.newActivityStub(MyActivity.class, lightActivityOptions);
-            //          saga.addCompensation(activity::compensate);
-            //          activity.execute(input);
-            status = "COMPLETED";
+            //todo: workflow logic
         } catch (Exception e) {
-            status = "COMPENSATING";
             saga.compensate();
-            status = "FAILED";
-            throw Workflow.wrap(e);
         }
     }
 

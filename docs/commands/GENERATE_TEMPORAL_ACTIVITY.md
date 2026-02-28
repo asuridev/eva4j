@@ -41,7 +41,7 @@ eva g temporal-activity notification
 **Generates:**
 - `notification/application/ports/SendConfirmationEmailActivity.java` — `@ActivityInterface`
 - `notification/infrastructure/adapters/activities/SendConfirmationEmailActivityImpl.java` — `@Component` implementing `LightActivity`
-- Patches `order/infrastructure/adapters/workflows/ProcessOrderWorkFlowImpl.java` with a stub field
+- Patches `order/application/usecases/ProcessOrderWorkFlowImpl.java` with a stub field
 
 ### Example 2: Heavy activity for file processing
 
@@ -89,7 +89,7 @@ public interface SendConfirmationEmailActivity {
      * activity types are registered on the same worker.
      */
     @ActivityMethod(name = "SendConfirmationEmail")
-    void execute(String input);
+    void execute(String flowId);
 }
 ```
 
@@ -115,7 +115,7 @@ public class SendConfirmationEmailActivityImpl
         implements SendConfirmationEmailActivity, LightActivity {
 
     @Override
-    public void execute(String input) {
+    public void execute(String flowId) {
         // TODO: implement activity logic
     }
 }

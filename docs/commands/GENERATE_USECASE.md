@@ -1,282 +1,216 @@
 # Command `generate usecase` (alias: `g usecase`)
 
-## 📋 Description
+## Description
 
-Generates CQRS use cases (Commands or Queries) with their respective handlers, following the Command Query Responsibility Segregation pattern.
+Generates CQRS use cases (Commands or Queries) with their handlers, following the Command Query Responsibility Segregation pattern.
 
-## 🎯 Purpose
+## Purpose
 
 Create individual use cases for specific business operations, maintaining clear separation between write operations (Commands) and read operations (Queries).
 
-## 📝 Syntax
+## Syntax
 
 ```bash
-eva4j generate usecase <UseCaseName> --type <command|query>
-eva4j g usecase <UseCaseName> --type <command|query>    # Short alias
+eva generate usecase <module> [name]
+eva g usecase <module> [name]    # Short alias
 ```
 
 ### Parameters
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `UseCaseName` | Yes | Name of the use case (PascalCase, e.g., UpdateCustomer, GetOrderById) |
-| `--type` | Yes | Type of use case: `command` (write) or `query` (read) |
+| `module` | Yes | Module where the use case will be created (e.g., `user`, `order`) |
+| `name` | No | Use case name in kebab-case or PascalCase — prompted if omitted |
 
-## 💡 Examples
+> **Interactive prompts:**
+> 1. **Use case name** — if not provided as argument (e.g., `create-user`, `find-user-by-id`)
+> 2. **Type** — `Command` (write) or `Query` (read)
 
-### Example 1: Update Command
+## Examples
 
-```bash
-eva4j g usecase UpdateCustomer --type command
-```
-
-**Generates:**
-- `application/commands/UpdateCustomerCommand.java` - Command with request data
-- `application/commands/UpdateCustomerCommandHandler.java` - Handler with business logic
-
-### Example 2: Delete Command
+### Example 1: Create command
 
 ```bash
-eva4j g usecase DeleteOrder --type command
+eva g usecase user create-user
+# Prompted for type → Command
 ```
 
-**Generates:**
-- `application/commands/DeleteOrderCommand.java`
-- `application/commands/DeleteOrderCommandHandler.java`
+Generates:
+- `application/commands/CreateUserCommand.java`
+- `application/usecases/CreateUserCommandHandler.java`
 
-### Example 3: Custom Query
+### Example 2: Find query
 
 ```bash
-eva4j g usecase GetCustomerByEmail --type query
+eva g usecase user find-user-by-id
+# Prompted for type → Query
 ```
 
-**Generates:**
-- `application/queries/GetCustomerByEmailQuery.java`
-- `application/queries/GetCustomerByEmailQueryHandler.java`
+Generates:
+- `application/queries/FindUserByIdQuery.java`
+- `application/usecases/FindUserByIdQueryHandler.java`
+- `application/dtos/FindUserByIdResponseDto.java`
 
-### Example 4: Search Query
+### Example 3: Module-specific commands
 
 ```bash
-eva4j g usecase SearchProducts --type query
+eva g usecase order cancel-order         # Command
+eva g usecase product update-stock       # Command
+eva g usecase order find-orders-by-customer  # Query
 ```
 
-**Generates:**
-- `application/queries/SearchProductsQuery.java`
-- `application/queries/SearchProductsQueryHandler.java`
+## Generated Code Structure
 
-## 📦 Generated Code Structure
+### Command
 
-### Command Example
-
-**UpdateCustomerCommand.java:**
+**CreateUserCommand.java** (`application/commands/`):
 ```java
-package com.example.project.customer.application.commands;
+package com.example.project.user.application.commands;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class UpdateCustomerCommand {
-    private Long id;
-    // Add your fields here
+public record CreateUserCommand(
+    // TODO: add command fields
+) {
 }
 ```
 
-**UpdateCustomerCommandHandler.java:**
+**CreateUserCommandHandler.java** (`application/usecases/`):
 ```java
-package com.example.project.customer.application.commands;
+package com.example.project.user.application.usecases;
 
-import com.example.project.customer.domain.models.Customer;
-import com.example.project.customer.domain.repositories.CustomerRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import com.example.project.user.application.commands.CreateUserCommand;
+import com.example.project.shared.domain.annotations.ApplicationComponent;
 
-@Service
-@RequiredArgsConstructor
-public class UpdateCustomerCommandHandler {
-    
-    private final CustomerRepository repository;
-    
-    @Transactional
-    public void handle(UpdateCustomerCommand command) {
-        // TODO: Implement update logic
-        Customer customer = repository.findById(command.getId())
-            .orElseThrow(() -> new RuntimeException("Customer not found"));
-        
-        // Update customer fields
-        
-        repository.save(customer);
+@ApplicationComponent
+public class CreateUserCommandHandler {
+
+    public CreateUserCommandHandler() {
+    }
+
+    public void handle(CreateUserCommand command) {
+        //todo: implement use case
     }
 }
 ```
 
-### Query Example
+### Query
 
-**GetCustomerByEmailQuery.java:**
+**FindUserByIdQuery.java** (`application/queries/`):
 ```java
-package com.example.project.customer.application.queries;
+package com.example.project.user.application.queries;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
-public class GetCustomerByEmailQuery {
-    private String email;
+public record FindUserByIdQuery(
+    // TODO: add query fields
+) {
 }
 ```
 
-**GetCustomerByEmailQueryHandler.java:**
+**FindUserByIdQueryHandler.java** (`application/usecases/`):
 ```java
-package com.example.project.customer.application.queries;
+package com.example.project.user.application.usecases;
 
-import com.example.project.customer.domain.models.Customer;
-import com.example.project.customer.domain.repositories.CustomerRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import com.example.project.user.application.queries.FindUserByIdQuery;
+import com.example.project.user.application.dtos.FindUserByIdResponseDto;
+import com.example.project.shared.domain.annotations.ApplicationComponent;
 
-@Service
-@RequiredArgsConstructor
-public class GetCustomerByEmailQueryHandler {
-    
-    private final CustomerRepository repository;
-    
-    @Transactional(readOnly = true)
-    public Customer handle(GetCustomerByEmailQuery query) {
-        // TODO: Implement query logic
-        return repository.findByEmail(query.getEmail())
-            .orElseThrow(() -> new RuntimeException("Customer not found"));
+@ApplicationComponent
+public class FindUserByIdQueryHandler {
+
+    public FindUserByIdQueryHandler() {
+    }
+
+    public FindUserByIdResponseDto handle(FindUserByIdQuery query) {
+        //todo: implement use case
+        return null;
     }
 }
 ```
 
-## ✨ Features
+**FindUserByIdResponseDto.java** (`application/dtos/`):
+```java
+package com.example.project.user.application.dtos;
 
-### Commands (Write Operations)
-- ✅ **@Transactional** - Ensures data consistency
-- ✅ **Repository injection** - Domain repository ready
-- ✅ **TODO comments** - Guides implementation
-- ✅ **Lombok annotations** - Reduces boilerplate
-
-### Queries (Read Operations)
-- ✅ **@Transactional(readOnly = true)** - Optimized for reads
-- ✅ **Repository injection** - Domain repository ready
-- ✅ **Return type flexibility** - Can return entities or DTOs
-- ✅ **Clean structure** - Follows CQRS pattern
-
-## 🎯 Common Use Cases
-
-### Customer Module
-```bash
-eva4j g usecase UpdateCustomer --type command
-eva4j g usecase DeactivateCustomer --type command
-eva4j g usecase GetCustomerByEmail --type query
-eva4j g usecase SearchCustomers --type query
-eva4j g usecase CountActiveCustomers --type query
+public record FindUserByIdResponseDto(
+    // TODO: add response fields
+) {
+}
 ```
 
-### Order Module
-```bash
-eva4j g usecase UpdateOrderStatus --type command
-eva4j g usecase CancelOrder --type command
-eva4j g usecase AddOrderItem --type command
-eva4j g usecase GetOrdersByCustomer --type query
-eva4j g usecase GetOrdersByDateRange --type query
-```
+## Key Design Decisions
 
-### Product Module
-```bash
-eva4j g usecase UpdateProductPrice --type command
-eva4j g usecase UpdateStock --type command
-eva4j g usecase DeactivateProduct --type command
-eva4j g usecase SearchProductsByCategory --type query
-eva4j g usecase GetLowStockProducts --type query
-```
+- **Pure Java records** — Commands and Queries are immutable records (no Lombok)
+- **`@ApplicationComponent`** — Custom annotation from `shared` that marks handlers for Spring DI; not `@Service`
+- **Handlers in `application/usecases/`** — All handlers live here regardless of type (Command or Query)
+- **Commands in `application/commands/`** — Command record classes
+- **Queries in `application/queries/`** — Query record classes
+- **DTOs in `application/dtos/`** — Response DTOs (queries only)
 
-## 🔄 CQRS Pattern Guidelines
+## CQRS Pattern Guidelines
 
 ### Commands (Writes)
 - **Purpose:** Change system state
-- **Transaction:** Required (`@Transactional`)
-- **Return:** Usually `void` or entity ID
+- **Return:** `void` or minimal confirmation
 - **Examples:** Create, Update, Delete, Activate, Deactivate
 
 ### Queries (Reads)
 - **Purpose:** Retrieve data without side effects
-- **Transaction:** Read-only (`@Transactional(readOnly = true)`)
-- **Return:** Entity, DTO, or List
-- **Examples:** Get, List, Search, Count, Find
+- **Return:** ResponseDto or `List<ResponseDto>`
+- **Examples:** FindById, FindAll, Search
 
-## 🚀 Next Steps
+## Common Use Cases
 
-After generating a use case:
+### User Module
+```bash
+eva g usecase user create-user         # Command
+eva g usecase user update-user         # Command
+eva g usecase user deactivate-user     # Command
+eva g usecase user find-user-by-id     # Query
+eva g usecase user find-user-by-email  # Query
+```
 
-1. **Implement the logic:**
-   - Edit the handler class
-   - Add business validations
-   - Implement the actual operation
+### Order Module
+```bash
+eva g usecase order place-order              # Command
+eva g usecase order cancel-order             # Command
+eva g usecase order find-order-by-id         # Query
+eva g usecase order find-orders-by-customer  # Query
+```
 
-2. **Add to controller (if needed):**
+### Product Module
+```bash
+eva g usecase product update-price     # Command
+eva g usecase product update-stock     # Command
+eva g usecase product find-by-category # Query
+eva g usecase product get-low-stock    # Query
+```
+
+## Next Steps After Generation
+
+1. **Add fields to the record:**
    ```java
-   @PostMapping("/update")
-   public ResponseEntity<Void> update(@RequestBody UpdateCustomerCommand command) {
-       handler.handle(command);
-       return ResponseEntity.ok().build();
+   public record CreateUserCommand(
+       String name,
+       String email
+   ) { }
+   ```
+
+2. **Implement the handler:**
+   ```java
+   public void handle(CreateUserCommand command) {
+       User user = new User(command.name(), command.email());
+       userRepository.save(user);
    }
    ```
 
-3. **Add validations to command:**
-   ```java
-   @NotNull
-   private Long id;
-   
-   @NotBlank
-   @Size(max = 100)
-   private String name;
-   ```
+3. **Wire into a Controller or another Handler** — inject the handler via constructor and call `handler.handle(command)`.
 
-4. **Create DTOs if needed:**
-   - Create response DTOs for queries
-   - Create mappers between entities and DTOs
+## Prerequisites
 
-## ⚠️ Prerequisites
+- Be in a project created with `eva create`
+- Module must exist (`eva add module <module>`)
+- Run the command from the project root
 
-- Be in a project created with `eva4j create`
-- Module must exist (created with `eva4j add module`)
-- Working directory should be the project root
+## See Also
 
-## 🔍 Validations
-
-The command validates:
-- ✅ Valid eva4j project
-- ✅ Use case name is in PascalCase
-- ✅ Type is either `command` or `query`
-- ✅ Module exists in the project
-
-## 📚 See Also
-
-- [generate-entities](./GENERATE_ENTITIES.md) - Generate complete CRUD
-- [generate-resource](./GENERATE_RESOURCE.md) - Generate REST controller
-- [add-module](./ADD_MODULE.md) - Create modules
-
-## 🐛 Troubleshooting
-
-**Error: "Invalid use case name"**
-- Solution: Use PascalCase naming (e.g., `UpdateCustomer`, not `updateCustomer` or `update-customer`)
-
-**Error: "Type must be command or query"**
-- Solution: Always specify `--type command` or `--type query`
-
-**Files not created in correct location**
-- Solution: Run command from project root directory
-- Check that you're in a valid eva4j project
-
-**Repository not found after generation**
-- Solution: Generate entities first with `eva4j g entities`, or create repository interface manually
+- [generate-entities](./GENERATE_ENTITIES.md) — Generate complete domain model from YAML
+- [generate-resource](./GENERATE_RESOURCE.md) — REST controller with 5 CRUD endpoints
+- [add-module](./ADD_MODULE.md) — Create a new module

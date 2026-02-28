@@ -25,7 +25,7 @@ The command generates Spring Kafka `@KafkaListener` components that automaticall
 ## Syntax
 
 ```bash
-eva4j generate kafka-listener <module>
+eva generate kafka-listener <module>
 ```
 
 ### Parameters
@@ -50,7 +50,7 @@ After running the command, you'll be prompted to:
 ### 1. Kafka Client Must Be Installed
 
 ```bash
-eva4j add kafka-client
+eva add kafka-client
 ```
 
 This configures:
@@ -72,7 +72,7 @@ topics:
 
 **Tip:** Generate topics using:
 ```bash
-eva4j generate kafka-event <module> <event-name>
+eva generate kafka-event <module> <event-name>
 ```
 
 ---
@@ -83,7 +83,7 @@ eva4j generate kafka-event <module> <event-name>
 
 ```bash
 # Create listeners in 'user' module
-eva4j generate kafka-listener user
+eva generate kafka-listener user
 
 # Select topics from interactive menu:
 # ✓ user-created (user.events.created)
@@ -146,7 +146,7 @@ public class UserUserCreatedListener {
 
 ```bash
 # Run command again to add more listeners
-eva4j generate kafka-listener order
+eva generate kafka-listener order
 
 # Select additional topics:
 # ✓ order-shipped (order.events.shipped)
@@ -171,12 +171,12 @@ order/infrastructure/kafkaListener/
 
 ```bash
 # In user module
-eva4j generate kafka-listener user
+eva generate kafka-listener user
 # Select: user-created
 # Generates: UserUserCreatedListener.java
 
 # In notification module
-eva4j generate kafka-listener notification
+eva generate kafka-listener notification
 # Select: user-created
 # Generates: NotificationUserCreatedListener.java
 ```
@@ -239,11 +239,11 @@ public class UserCreatedListener {
 
 ```bash
 # Notification module listens to user-created
-eva4j generate kafka-listener notification
+eva generate kafka-listener notification
 # Select: user-created
 
 # Analytics module also listens to user-created
-eva4j generate kafka-listener analytics
+eva generate kafka-listener analytics
 # Select: user-created
 ```
 
@@ -330,7 +330,7 @@ topics:
 ```
 User runs command
     ↓
-Validates eva4j project
+Validates eva project
     ↓
 Checks Kafka client installed
     ↓
@@ -488,7 +488,7 @@ void handleUserCreatedListener(EventEnvelope<Map<String, Object>> event, Acknowl
 ### 1. **Notification Service**
 
 ```bash
-eva4j generate kafka-listener notification
+eva generate kafka-listener notification
 
 # Listen to events from other services:
 # ✓ user-created (send welcome email)
@@ -499,7 +499,7 @@ eva4j generate kafka-listener notification
 ### 2. **Analytics/Audit Service**
 
 ```bash
-eva4j generate kafka-listener analytics
+eva generate kafka-listener analytics
 
 # Listen to all domain events:
 # ✓ user-created
@@ -512,7 +512,7 @@ eva4j generate kafka-listener analytics
 ### 3. **Saga Orchestration**
 
 ```bash
-eva4j generate kafka-listener order
+eva generate kafka-listener order
 
 # Listen to events from other services:
 # ✓ payment-processed (complete order)
@@ -523,7 +523,7 @@ eva4j generate kafka-listener order
 ### 4. **Data Synchronization**
 
 ```bash
-eva4j generate kafka-listener search
+eva generate kafka-listener search
 
 # Keep search index updated:
 # ✓ product-created (index product)
@@ -576,14 +576,14 @@ public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerCont
 
 **Solution:**
 ```bash
-eva4j add kafka-client
+eva add kafka-client
 ```
 
 ### ❌ "No topics found in kafka.yaml"
 
 **Solution:** Generate topics first:
 ```bash
-eva4j generate kafka-event user user-created
+eva generate kafka-event user user-created
 ```
 
 Or manually add to `kafka.yaml`:
@@ -596,12 +596,12 @@ topics:
 
 **Solution:** Verify module exists:
 ```bash
-eva4j info
+eva info
 ```
 
 If missing, create module:
 ```bash
-eva4j add module <module-name>
+eva add module <module-name>
 ```
 
 ### ❌ Events not being consumed
