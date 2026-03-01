@@ -29,7 +29,7 @@ aggregates:
         relationships:
           - type: OneToOne
             target: UserProfile
-            mappedBy: User
+            mappedBy: user
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
       
