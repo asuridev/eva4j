@@ -5,7 +5,7 @@
 aggregates:
   - name: ShoppingCart
     entities:
-      - name: shoppingCart
+      - name: ShoppingCart
         isRoot: true
         tableName: shopping_carts
         auditable: true
@@ -39,7 +39,7 @@ aggregates:
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
       
-      - name: cartItem
+      - name: CartItem
         tableName: cart_items
         auditable: true
         fields:

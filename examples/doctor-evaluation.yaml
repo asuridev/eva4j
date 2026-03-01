@@ -5,7 +5,7 @@
 aggregates:
   - name: Evaluation
     entities:
-      - name: evaluation
+      - name: Evaluation
         isRoot: true
         tableName: evaluations
         auditable: true
@@ -28,7 +28,7 @@ aggregates:
             cascade: [ PERSIST, MERGE, REMOVE ]
             fetch: LAZY
 
-      - name: evaluationDoctor
+      - name: EvaluationDoctor
         auditable: true
         tableName: evaluation_doctors
         fields:
@@ -50,7 +50,7 @@ aggregates:
             type: List<Degrees>
 
 
-      - name: evaluationBranch
+      - name: EvaluationBranch
         tableName: evaluation_branchs
         auditable: true
         fields:

@@ -5,7 +5,7 @@
 aggregates:
   - name: User
     entities:
-      - name: user
+      - name: User
         isRoot: true
         tableName: users
         auditable: true

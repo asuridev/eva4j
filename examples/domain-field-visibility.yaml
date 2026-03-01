@@ -6,7 +6,7 @@ aggregates:
   # User Management Aggregate
   - name: User
     entities:
-      - name: user
+      - name: User
         isRoot: true
         tableName: users
         audit:
@@ -57,7 +57,7 @@ aggregates:
   # Order Management Aggregate
   - name: Order
     entities:
-      - name: order
+      - name: Order
         isRoot: true
         tableName: orders
         audit:
@@ -97,7 +97,7 @@ aggregates:
             mappedBy: order
             cascade: [PERSIST, MERGE, REMOVE]
       
-      - name: orderItem
+      - name: OrderItem
         tableName: order_items
         fields:
           - name: id
@@ -125,7 +125,7 @@ aggregates:
   # Product Catalog Aggregate
   - name: Product
     entities:
-      - name: product
+      - name: Product
         isRoot: true
         tableName: products
         audit:
@@ -166,7 +166,7 @@ aggregates:
   # Session Management Aggregate
   - name: Session
     entities:
-      - name: session
+      - name: Session
         isRoot: true
         tableName: sessions
         fields:

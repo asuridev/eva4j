@@ -6,7 +6,7 @@ aggregates:
   # AGREGADO 1: Customer
   - name: Customer
     entities:
-      - name: customer
+      - name: Customer
         isRoot: true
         tableName: customers
         auditable: true
@@ -30,7 +30,7 @@ aggregates:
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
       
-      - name: address
+      - name: Address
         tableName: customer_addresses
         fields:
           - name: id
@@ -77,7 +77,7 @@ aggregates:
   # AGREGADO 2: Supplier
   - name: Supplier
     entities:
-      - name: supplier
+      - name: Supplier
         isRoot: true
         tableName: suppliers
         auditable: true
@@ -97,7 +97,7 @@ aggregates:
           - name: rating
             type: Integer
       
-      - name: contract
+      - name: Contract
         tableName: contracts
         auditable: true
         fields:
@@ -133,7 +133,7 @@ aggregates:
   # AGREGADO 3: Inventory
   - name: Inventory
     entities:
-      - name: inventory
+      - name: Inventory
         isRoot: true
         tableName: inventory
         auditable: true
@@ -169,7 +169,7 @@ aggregates:
             cascade: [PERSIST, MERGE]
             fetch: LAZY
       
-      - name: stockMovement
+      - name: StockMovement
         tableName: stock_movements
         auditable: true
         fields:

@@ -6,7 +6,7 @@
 aggregates:
   - name: Product
     entities:
-      - name: product
+      - name: Product
         isRoot: true
         tableName: products
         auditable: true

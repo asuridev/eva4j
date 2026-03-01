@@ -5,7 +5,7 @@
 aggregates:
   - name: Document
     entities:
-      - name: document
+      - name: Document
         isRoot: true
         tableName: documents
         auditable: true
@@ -48,7 +48,7 @@ aggregates:
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
       
-      - name: revision
+      - name: Revision
         tableName: document_revisions
         auditable: true
         fields:
@@ -66,7 +66,7 @@ aggregates:
             type: String
        
       
-      - name: attachment
+      - name: Attachment
         tableName: document_attachments
         auditable: true
         fields:

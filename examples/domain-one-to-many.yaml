@@ -5,7 +5,7 @@
 aggregates:
   - name: Order
     entities:
-      - name: order
+      - name: Order
         isRoot: true
         tableName: orders
         audit:

@@ -5,7 +5,7 @@
 aggregates:
   - name: BlogPost
     entities:
-      - name: blogPost
+      - name: BlogPost
         isRoot: true
         tableName: blog_posts
         auditable: true
@@ -41,7 +41,7 @@ aggregates:
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
       
-      - name: comment
+      - name: Comment
         tableName: comments
         auditable: true
         fields:

@@ -11,7 +11,7 @@
 aggregates:
   - name: Project
     entities:
-      - name: project
+      - name: Project
         isRoot: true
         tableName: projects
         audit:
