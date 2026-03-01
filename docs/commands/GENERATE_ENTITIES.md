@@ -71,7 +71,7 @@ src/main/java/<package>/<module>/domain.yaml
 aggregates:                          # List of aggregates in the module
   - name: Order                      # Aggregate name (PascalCase)
     entities:                        # Entities of the aggregate
-      - name: order                  # Entity name (camelCase)
+      - name: Order                  # Entity name (PascalCase)
         isRoot: true                 # true = aggregate root
         tableName: orders            # SQL table name (optional)
         audit:                       # Auditing (optional)
@@ -89,7 +89,7 @@ aggregates:                          # List of aggregates in the module
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
 
-      - name: orderItem              # Secondary entity (no isRoot or isRoot: false)
+      - name: OrderItem              # Secondary entity (no isRoot or isRoot: false)
         tableName: order_items
         fields:
           - name: id
@@ -358,7 +358,7 @@ When `trackUser` is enabled, eva4j automatically generates:
 
 ```yaml
 entities:
-  - name: order
+  - name: Order
     isRoot: true
     tableName: orders
     audit:
@@ -641,7 +641,7 @@ aggregates:
           - name: reason
             type: String
     entities:
-      - name: order
+      - name: Order
         # ...
 ```
 
@@ -705,7 +705,7 @@ A `domain.yaml` can contain multiple aggregates. Each one generates its own set 
 aggregates:
   - name: Customer
     entities:
-      - name: customer
+      - name: Customer
         isRoot: true
         fields:
           - name: id
@@ -715,7 +715,7 @@ aggregates:
 
   - name: Product
     entities:
-      - name: product
+      - name: Product
         isRoot: true
         fields:
           - name: id
@@ -779,7 +779,7 @@ For each aggregate, approximately the following files are generated:
 aggregates:
   - name: Order
     entities:
-      - name: order
+      - name: Order
         isRoot: true
         tableName: orders
         audit:
@@ -804,7 +804,7 @@ aggregates:
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
 
-      - name: orderItem
+      - name: OrderItem
         tableName: order_items
         fields:
           - name: id
@@ -852,7 +852,7 @@ aggregates:
 aggregates:
   - name: User
     entities:
-      - name: user
+      - name: User
         isRoot: true
         tableName: users
         audit:
