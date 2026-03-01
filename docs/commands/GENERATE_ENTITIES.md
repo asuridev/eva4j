@@ -395,7 +395,7 @@ When you define `OneToMany` with `mappedBy`, eva4j automatically generates `@Man
 ```yaml
 # ✅ Only this is needed
 entities:
-  - name: order
+  - name: Order
     isRoot: true
     relationships:
       - type: OneToMany
