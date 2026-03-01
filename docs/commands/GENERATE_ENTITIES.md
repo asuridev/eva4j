@@ -630,7 +630,7 @@ Events are declared under the aggregate (at the same level as `entities:`, `enum
 aggregates:
   - name: Order
     events:
-      - name: OrderPlaced        # "Event" suffix is added automatically
+      - name: OrderPlaced
         fields:
           - name: customerId
             type: String
@@ -650,8 +650,8 @@ aggregates:
 | File | Description |
 |------|-------------|
 | `shared/domain/DomainEvent.java` | Abstract base class (generated once per project) |
-| `domain/models/events/OrderPlacedEvent.java` | Concrete event extending `DomainEvent` |
-| `domain/models/events/OrderCancelledEvent.java` | Concrete event |
+| `domain/models/events/OrderPlaced.java` | Concrete event extending `DomainEvent` |
+| `domain/models/events/OrderCancelled.java` | Concrete event |
 | `raise()` / `pullDomainEvents()` in the aggregate root | Event infrastructure in the entity |
 | `OrderRepositoryImpl.java` | Calls `eventPublisher.publishEvent()` when saving |
 | `OrderDomainEventHandler.java` | Class with `@TransactionalEventListener` per event |
@@ -659,11 +659,11 @@ aggregates:
 ### Generated event
 
 ```java
-public final class OrderPlacedEvent extends DomainEvent {
+public final class OrderPlaced extends DomainEvent {
     private final String customerId;
     private final BigDecimal totalAmount;
 
-    public OrderPlacedEvent(String customerId, BigDecimal totalAmount) {
+    public OrderPlaced(String customerId, BigDecimal totalAmount) {
         this.customerId = customerId;
         this.totalAmount = totalAmount;
     }
@@ -680,7 +680,7 @@ public class Order {
 
     public void place(String customerId, BigDecimal totalAmount) {
         // business logic...
-        raise(new OrderPlacedEvent(customerId, totalAmount));
+        raise(new OrderPlaced(customerId, totalAmount));
     }
 
     protected void raise(DomainEvent event) {
