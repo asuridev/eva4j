@@ -455,7 +455,100 @@ aggregates:
 
 ---
 
-## 🚨 Errores Comunes a Evitar
+## �️ Soft Delete
+
+Cuando una entidad tiene `hasSoftDelete: true`, eva4j genera eliminación lógica en lugar de física.
+
+### Configuración en domain.yaml
+
+```yaml
+entities:
+  - name: product
+    isRoot: true
+    tableName: products
+    hasSoftDelete: true          # ✅ Activa soft delete
+    audit:
+      enabled: true
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+```
+
+### Comportamiento generado
+
+```java
+// Entidad JPA — filtrado automático con @SQLRestriction
+@Entity
+@SQLRestriction("deleted_at IS NULL")
+public class ProductJpa extends AuditableEntity {
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+}
+```
+
+```java
+// Entidad de dominio — método de negocio
+public class Product {
+    private LocalDateTime deletedAt;
+
+    public void softDelete() {
+        if (this.deletedAt != null) {
+            throw new IllegalStateException("Product is already deleted");
+        }
+        this.deletedAt = LocalDateTime.now();
+    }
+
+    public boolean isDeleted() {
+        return this.deletedAt != null;
+    }
+}
+```
+
+### Reglas para Agentes
+
+- **NUNCA** usar `repository.deleteById()` cuando hay soft delete
+- **SIEMPRE** usar `entity.softDelete()` + `repository.save(entity)`
+- **NUNCA** exponer `deletedAt` en ResponseDtos
+- **SIEMPRE** usar `@SQLRestriction("deleted_at IS NULL")` en la entidad JPA
+
+---
+
+## ⏱️ Temporal Workflows
+
+Cuando se agrega soporte de Temporal con `eva add temporal-client`, se genera infraestructura para workflows duraderos.
+
+### Archivos generados por `eva g temporal-flow <module>`
+
+```
+[module]/
+├── application/workflows/
+│   ├── OrderWorkflow.java          # Interface (@WorkflowInterface)
+│   └── OrderWorkflowImpl.java      # Implementación (determinista)
+└── infrastructure/temporal/
+    ├── activities/
+    │   ├── OrderActivity.java          # Interface (@ActivityInterface)
+    │   └── OrderActivityImpl.java      # Implementación (con I/O)
+    └── workers/
+        └── OrderWorker.java            # Registro del worker
+```
+
+### Principios clave
+
+- Los **Workflows deben ser deterministas** — sin `Math.random()`, `new Date()`, ni I/O
+- Toda operación con efectos secundarios (DB, HTTP, emails) va en **Activities**
+- Los **Use Cases** orquestan los workflows; las **Activities** ejecutan infraestructura
+- Configuración de conexión en `resources/parameters/{env}/temporal.yaml`
+
+### Templates relacionados en eva4j
+
+- `templates/temporal-flow/` — workflow interface e implementación
+- `templates/temporal-activity/` — activity interface, implementación y worker
+
+---
+
+## �🚨 Errores Comunes a Evitar
 
 ### ❌ NO Crear Constructor Vacío en Dominio
 
@@ -722,13 +815,13 @@ HTTP Response (sin createdBy/updatedBy)
 
 ## 🧪 Testing
 
-### Tests de Dominio
+### Tests de Dominio (Unidad Pura)
 
 ```java
 @Test
 void shouldCreateUserWithValidData() {
     User user = new User("john", "john@example.com");
-    
+
     assertEquals("john", user.getUsername());
     assertEquals("john@example.com", user.getEmail());
 }
@@ -736,12 +829,81 @@ void shouldCreateUserWithValidData() {
 @Test
 void shouldValidateBusinessRules() {
     User user = new User("john", "john@example.com");
-    
+
     assertThrows(IllegalArgumentException.class, () -> {
         user.changeEmail("invalid-email");
     });
 }
 ```
+
+### Object Mother Pattern
+
+```java
+// src/test/java/[package]/user/domain/UserMother.java
+public class UserMother {
+
+    public static User valid() {
+        return new User("john_doe", "john@example.com");
+    }
+
+    public static User withEmail(String email) {
+        return new User("john_doe", email);
+    }
+}
+```
+
+### Repositorio Fake (In-Memory)
+
+Para testear Use Cases sin base de datos:
+
+```java
+public class UserRepositoryFake implements UserRepository {
+    private final Map<String, User> store = new HashMap<>();
+
+    @Override
+    public User save(User user) {
+        store.put(user.getId(), user);
+        return user;
+    }
+
+    @Override
+    public Optional<User> findById(String id) {
+        return Optional.ofNullable(store.get(id));
+    }
+
+    public int count() { return store.size(); }
+}
+```
+
+### Tests de Use Cases
+
+```java
+class CreateUserCommandHandlerTest {
+    private final UserRepositoryFake userRepository = new UserRepositoryFake();
+    private final CreateUserCommandHandler handler =
+        new CreateUserCommandHandler(userRepository);
+
+    @Test
+    void shouldCreateUser() {
+        CreateUserCommand command = new CreateUserCommand("john", "john@example.com");
+
+        String userId = handler.handle(command);
+
+        assertNotNull(userId);
+        assertEquals(1, userRepository.count());
+    }
+}
+```
+
+### Estrategia por Capa
+
+| Capa | Tipo de Test | Framework |
+|------|--------------|-----------|
+| Domain entities | Unidad pura | JUnit 5 |
+| Use cases | Unidad con Fakes | JUnit 5 + Fake repos |
+| Application mappers | Unidad | JUnit 5 |
+| Repository implementations | Integración | Testcontainers |
+| REST controllers | Integración | MockMvc |
 
 ---
 
@@ -758,23 +920,44 @@ void shouldValidateBusinessRules() {
 
 Al generar o modificar código, verificar:
 
+**Entidades de Dominio:**
 - [ ] Entidades de dominio **sin constructor vacío**
 - [ ] Entidades de dominio **sin setters públicos**
 - [ ] Métodos de negocio con **validaciones explícitas**
+- [ ] Value Objects **inmutables**
+- [ ] Sin anotaciones JSR-303 en entidades de dominio
+
+**Entidades JPA:**
 - [ ] Entidades JPA con **Lombok y herencia correcta**
+- [ ] `@SQLRestriction("deleted_at IS NULL")` cuando `hasSoftDelete: true`
+- [ ] No incluye campos de auditoría heredados en `@Builder`
+
+**Mappers:**
 - [ ] Mappers **excluyen campos de auditoría**
 - [ ] Mappers **excluyen campos readOnly en creación**
 - [ ] Mappers **excluyen campos hidden en respuestas**
+- [ ] Relaciones bidireccionales con métodos `assign*()`
+
+**DTOs:**
 - [ ] DTOs de respuesta **sin createdBy/updatedBy**
 - [ ] DTOs de respuesta **sin campos hidden**
 - [ ] DTOs de creación **sin campos readOnly**
-- [ ] Relaciones bidireccionales con métodos `assign*()`
-- [ ] Value Objects **inmutables**
-- [ ] Configuración de auditoría cuando `trackUser: true`
+- [ ] Usando Java Records
+
+**Validaciones:**
 - [ ] Validaciones JSR-303 **solo en Command y CreateDto, nunca en dominio**
+- [ ] `@Valid` en parámetros de endpoints REST
+
+**Auditoría:**
+- [ ] Configuración de auditoría cuando `trackUser: true`
+- [ ] `@EnableJpaAuditing` con `auditorAwareRef = "auditorProvider"` en Application
+
+**Soft Delete (cuando aplica):**
+- [ ] Usar `entity.softDelete()` + `repository.save()` — nunca `deleteById()`
+- [ ] `deletedAt` no expuesto en ResponseDto
 
 ---
 
-**Última actualización:** 2026-02-21  
-**Versión de eva4j:** 1.x  
+**Última actualización:** 2026-03-02  
+**Versión de eva4j:** 1.0.12  
 **Estado:** Documento de referencia para agentes IA

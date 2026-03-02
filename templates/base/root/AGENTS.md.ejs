@@ -73,7 +73,7 @@ eva4j genera proyectos Spring Boot siguiendo **arquitectura hexagonal (puertos y
     │   │   ├── <%= applicationClassName %>.java  # Spring Boot entry point
     │   │   ├── common/            # Infrastructure (config, exceptions, security)
     │   │   ├── shared/            # Cross-cutting domain (base entities, events)
-    │   │   └── [modules]/         # Business modules (after `eva4j add module`)
+    │   │   └── [modules]/         # Business modules (after `eva add module`)
     │   │       └── user/          # Example module
     │   │           ├── domain/
     │   │           │   ├── models/
@@ -119,7 +119,7 @@ eva4j genera proyectos Spring Boot siguiendo **arquitectura hexagonal (puertos y
 
 Each module (e.g., `user`, `order`, `product`) is:
 - **Self-contained**: Own domain, application, and infrastructure layers
-- **Independent**: Can be extracted to microservice with `eva4j detach`
+- **Independent**: Can be extracted to microservice with `eva detach`
 - **Bounded Context**: Represents a business capability
 - **Spring Modulith Module**: Boundaries enforced at runtime
 
@@ -260,7 +260,7 @@ The `domain.yaml` file is the **single source of truth** for your domain model. 
 - JPA entities (with Lombok, @Entity, @Table)
 - Repository interfaces and implementations
 - Mappers (bidirectional domain ↔ JPA)
-- CRUD operations (when using `eva4j g resource`)
+- CRUD operations (when using `eva g resource`)
 
 ### Basic Structure
 
@@ -335,6 +335,73 @@ aggregates:
 | `List<Type>`     | `List<Type>`     | Collections                    |
 | `EnumName`       | `EnumName`       | Reference to enum in aggregate |
 | `ValueObjName`   | `ValueObjName`   | Reference to value object      |
+
+### Field Properties
+
+Each field in `domain.yaml` supports the following properties:
+
+| Propiedad | Tipo | Default | Descripción |
+|-----------|------|---------|-------------|
+| `name` | String | — | Nombre del campo (obligatorio) |
+| `type` | String | — | Tipo de dato Java (obligatorio) |
+| `annotations` | Array | `[]` | Anotaciones JPA personalizadas |
+| `isValueObject` | Boolean | `false` | Marca explícita de Value Object |
+| `isEmbedded` | Boolean | `false` | Marca explícita de `@Embedded` |
+| `enumValues` | Array | `[]` | Valores inline de enum |
+| `readOnly` | Boolean | `false` | Excluye del constructor de negocio y CreateDto |
+| `hidden` | Boolean | `false` | Excluye del ResponseDto |
+| `validations` | Array | `[]` | Anotaciones JSR-303 aplicadas en Command y CreateDto |
+| `reference` | Object | `null` | Referencia semántica a otro agregado (genera Javadoc) |
+
+#### Flags de Visibilidad: `readOnly` y `hidden`
+
+**`readOnly: true`** — Campos calculados/derivados:
+- ❌ Excluido de: constructor de negocio, CreateDto
+- ✅ Incluido en: constructor completo (reconstrucción), ResponseDto
+
+**`hidden: true`** — Campos sensibles/internos:
+- ❌ Excluido de: ResponseDto
+- ✅ Incluido en: constructor de negocio, CreateDto
+
+**Matriz de comportamiento:**
+
+| Campo | Constructor Negocio | CreateDto | ResponseDto |
+|-------|:-------------------:|:---------:|:-----------:|
+| Normal | ✅ | ✅ | ✅ |
+| `readOnly: true` | ❌ | ❌ | ✅ |
+| `hidden: true` | ✅ | ✅ | ❌ |
+| `readOnly` + `hidden` | ❌ | ❌ | ❌ |
+
+```yaml
+# Ejemplo completo con todos los flags
+entities:
+  - name: order
+    fields:
+      - name: orderNumber
+        type: String                    # Normal - aparece en todos lados
+
+      - name: totalAmount
+        type: BigDecimal
+        readOnly: true                  # Calculado - no en constructor ni CreateDto
+
+      - name: processingToken
+        type: String
+        hidden: true                    # Sensible - no en ResponseDto
+
+      - name: customerEmail
+        type: String
+        validations:
+          - "@NotBlank"
+          - "@Email"                    # Validaciones JSR-303 en Command y CreateDto
+
+      - name: externalOrderId
+        type: String
+        reference:
+          aggregate: ExternalSystem     # Genera Javadoc de referencia semántica
+          description: "ID del pedido en sistema externo"
+```
+
+> **⚠️ IMPORTANTE**: Las anotaciones `validations` se aplican **SOLO** en los Commands y CreateDtos — **NUNCA** en las entidades de dominio.
 
 ### Relationships
 
@@ -689,56 +756,68 @@ public enum OrderStatus {
 ### Project Setup
 ```bash
 # Create new project
-eva4j create my-project
+eva create my-project
 
 # Add a new module
-eva4j add module order
+eva add module order
 
 # View project configuration
-eva4j info
+eva info
 ```
 
 ### Code Generation (must have domain.yaml)
 ```bash
 # Generate entities from domain.yaml
-eva4j generate entities order
-eva4j g entities order         # Alias
+eva generate entities order
+eva g entities order            # Alias
 
 # Generate CRUD REST API
-eva4j g resource order          # Creates controller + DTOs + CRUD handlers
+eva g resource order            # Creates controller + DTOs + CRUD handlers
 
 # Generate custom use case
-eva4j g usecase order CreateCustomOrder
+eva g usecase order CreateCustomOrder
 ```
 
 ### Event-Driven Features
 ```bash
 # Add Kafka client
-eva4j add kafka-client
+eva add kafka-client
 
 # Publish events
-eva4j g kafka-event order order-created
+eva g kafka-event order order-created
 
 # Consume events
-eva4j g kafka-listener notification
+eva g kafka-listener notification
 ```
 
 ### External API Integration
 ```bash
 # Add HTTP client for external service
-eva4j g http-exchange order payment-service
+eva g http-exchange order payment-service
 ```
 
 ### Record Generation
 ```bash
 # Generate record from JSON (clipboard or --json)
-eva4j g record
+eva g record
+```
+
+### Temporal Workflows
+```bash
+# Add Temporal workflow engine dependency
+eva add temporal-client
+
+# Generate workflow definition
+eva g temporal-flow order
+
+# Generate activity implementation
+eva g temporal-activity order
 ```
 
 ### Microservice Extraction
 ```bash
 # Extract module to independent microservice
-eva4j detach order              # Creates ../order_msvc/ project
+eva detach order                # Creates ../order_msvc/ project
 ```
 
 ---
@@ -855,6 +934,51 @@ public OrderJpa toJpa(Order domain) {
 
 **Razón:** Los campos de auditoría son heredados de clases base y JPA Auditing los popula automáticamente.
 
+### Mappers - Exclusión de campos `readOnly` y `hidden`
+
+**En métodos de creación** (`fromCommand`, `fromDto`) — excluir campos `readOnly`:
+```java
+// ✅ CORRECTO - fromCommand NO incluye campos readOnly
+public Order fromCommand(CreateOrderCommand command) {
+    return new Order(
+        command.customerId(),
+        command.orderDate()
+        // totalAmount NO se incluye: es readOnly (calculado)
+    );
+}
+
+// ❌ INCORRECTO - readOnly en constructor de negocio
+public Order fromCommand(CreateOrderCommand command) {
+    return new Order(
+        command.customerId(),
+        command.orderDate(),
+        command.totalAmount()  // ❌ totalAmount es readOnly
+    );
+}
+```
+
+**En métodos de respuesta** (`toDto`, `toResponseDto`) — excluir campos `hidden`:
+```java
+// ✅ CORRECTO - toDto NO incluye campos hidden
+public OrderResponseDto toDto(Order domain) {
+    return new OrderResponseDto(
+        domain.getId(),
+        domain.getOrderNumber(),
+        domain.getTotalAmount()
+        // processingToken NO se incluye: es hidden (sensible)
+    );
+}
+
+// ❌ INCORRECTO - hidden en ResponseDto
+public OrderResponseDto toDto(Order domain) {
+    return new OrderResponseDto(
+        domain.getId(),
+        domain.getOrderNumber(),
+        domain.getProcessingToken()  // ❌ processingToken es hidden
+    );
+}
+```
+
 ### Filtro de Campos en Templates
 
 Los templates excluyen automáticamente campos de auditoría al generar mappers:
@@ -928,7 +1052,7 @@ aggregates:
 
 **Regenerate**:
 ```bash
-eva4j g entities order
+eva g entities order
 ```
 
 ### 2. Adding a New Enum
@@ -950,13 +1074,13 @@ aggregates:
 
 **Regenerate**:
 ```bash
-eva4j g entities order
+eva g entities order
 ```
 
 ### 3. Adding a Custom Use Case
 
 ```bash
-eva4j g usecase order CancelOrder
+eva g usecase order CancelOrder
 ```
 
 Creates:
@@ -989,7 +1113,7 @@ public class CancelOrderCommandHandler implements CommandHandler<CancelOrderComm
 ### 4. Adding Event Publishing
 
 ```bash
-eva4j g kafka-event order order-cancelled
+eva g kafka-event order order-cancelled
 ```
 
 **Publish event** in use case:
@@ -1030,7 +1154,7 @@ public class CancelOrderCommandHandler implements CommandHandler<CancelOrderComm
 ### 5. Adding Event Listener
 
 ```bash
-eva4j g kafka-listener notification
+eva g kafka-listener notification
 # Select topics: order-cancelled
 ```
 
@@ -1240,6 +1364,181 @@ HTTP Response (sin createdBy/updatedBy)
 
 ---
 
+## Soft Delete
+
+Cuando una entidad tiene `hasSoftDelete: true` en `domain.yaml`, eva4j genera eliminación lógica en lugar de física.
+
+### Configuración en domain.yaml
+
+```yaml
+entities:
+  - name: product
+    isRoot: true
+    tableName: products
+    hasSoftDelete: true          # ✅ Activa soft delete
+    audit:
+      enabled: true
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+```
+
+### Comportamiento generado
+
+```java
+// Entidad JPA — anotada con @SQLRestriction para filtrado automático
+@Entity
+@SQLRestriction("deleted_at IS NULL")
+public class ProductJpa extends AuditableEntity {
+    @Id
+    private String id;
+    
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;   // null = activo, fecha = eliminado
+}
+```
+
+```java
+// Entidad de dominio — método de negocio para eliminar
+public class Product {
+    private LocalDateTime deletedAt;
+
+    public void softDelete() {
+        if (this.deletedAt != null) {
+            throw new IllegalStateException("Product is already deleted");
+        }
+        this.deletedAt = LocalDateTime.now();
+    }
+
+    public boolean isDeleted() {
+        return this.deletedAt != null;
+    }
+}
+```
+
+### Reglas para Agentes con Soft Delete
+
+- **NUNCA** usar `repository.deleteById()` — usar `entity.softDelete()` + `repository.save(entity)`
+- **NUNCA** exponer `deletedAt` en ResponseDtos (campo interno)
+- **SIEMPRE** usar `@SQLRestriction("deleted_at IS NULL")` para filtrado automático en JPA
+- Los repositorios personalizados deben incluir el filtro si usan queries nativas
+
+---
+
+## Temporal Workflows
+
+Cuando se agrega soporte de Temporal con `eva add temporal-client`, se genera infraestructura para workflows duraderos.
+
+### Generación de archivos
+
+```bash
+# 1. Agregar dependencias de Temporal al proyecto
+eva add temporal-client
+
+# 2. Generar workflow para un módulo
+eva g temporal-flow order
+
+# 3. Generar actividad para un módulo
+eva g temporal-activity order
+```
+
+### Archivos generados
+
+```
+[module]/
+├── application/
+│   └── workflows/
+│       ├── OrderWorkflow.java          # Interface del workflow (@WorkflowInterface)
+│       └── OrderWorkflowImpl.java      # Implementación
+└── infrastructure/
+    └── temporal/
+        ├── activities/
+        │   ├── OrderActivity.java      # Interface de actividad (@ActivityInterface)
+        │   └── OrderActivityImpl.java  # Implementación de actividad
+        └── workers/
+            └── OrderWorker.java        # Registro del worker en Spring
+```
+
+### Patrón de uso
+
+**Workflow Interface**:
+```java
+@WorkflowInterface
+public interface OrderWorkflow {
+    @WorkflowMethod
+    String processOrder(String orderId);
+}
+```
+
+**Activity Interface**:
+```java
+@ActivityInterface
+public interface OrderActivity {
+    @ActivityMethod
+    void validateOrder(String orderId);
+
+    @ActivityMethod
+    void chargePayment(String orderId);
+
+    @ActivityMethod
+    void fulfillOrder(String orderId);
+}
+```
+
+**Workflow Implementation** (determinista — sin I/O directo):
+```java
+public class OrderWorkflowImpl implements OrderWorkflow {
+    private final OrderActivity activity = Workflow.newActivityStub(
+        OrderActivity.class,
+        ActivityOptions.newBuilder()
+            .setStartToCloseTimeout(Duration.ofSeconds(30))
+            .build()
+    );
+
+    @Override
+    public String processOrder(String orderId) {
+        activity.validateOrder(orderId);
+        activity.chargePayment(orderId);
+        activity.fulfillOrder(orderId);
+        return "COMPLETED";
+    }
+}
+```
+
+**Invocar desde un Use Case**:
+```java
+@Service
+public class StartOrderProcessingCommandHandler
+    implements CommandHandler<StartOrderProcessingCommand, String> {
+
+    private final WorkflowClient workflowClient;
+
+    @Override
+    public String handle(StartOrderProcessingCommand command) {
+        OrderWorkflow workflow = workflowClient.newWorkflowStub(
+            OrderWorkflow.class,
+            WorkflowOptions.newBuilder()
+                .setWorkflowId("order-" + command.orderId())
+                .setTaskQueue("order-task-queue")
+                .build()
+        );
+        return WorkflowClient.start(workflow::processOrder, command.orderId());
+    }
+}
+```
+
+### Reglas para Agentes con Temporal
+
+- Los workflows deben ser **deterministas** — sin `Math.random()`, sin `new Date()`, sin I/O
+- Toda operación con efectos secundarios (DB, HTTP, emails) va en **Activities**, no en Workflows
+- El **Worker** debe registrar tanto el workflow como las activities al arrancar
+- Configuración de conexión en `resources/parameters/{env}/temporal.yaml`
+- Los Use Cases **orquestan** workflows; los Activities **ejecutan** lógica de infraestructura
+
+---
+
 ## Configuration Management
 
 ### Environment-Specific Configuration
@@ -1392,6 +1691,7 @@ public record UserResponseDto(
 3. **SIEMPRE** crear métodos de negocio para modificar estado
 4. **SIEMPRE** validar en métodos de negocio, no en constructores
 5. **SIEMPRE** mantener inmutabilidad en Value Objects
+6. **NUNCA** agregar anotaciones JSR-303 (`@NotNull`, `@Size`) en entidades de dominio
 
 ### Al Generar Código JPA
 
@@ -1402,19 +1702,30 @@ public record UserResponseDto(
    - `audit.trackUser: true`: extender `FullAuditableEntity`
 3. **NUNCA** incluir campos de auditoría heredados en `@Builder`
 4. **SIEMPRE** usar `@NoArgsConstructor` para JPA
+5. **SIEMPRE** agregar `@SQLRestriction("deleted_at IS NULL")` cuando `hasSoftDelete: true`
 
 ### Al Generar Mappers
 
-1. **NUNCA** mapear campos de auditoría (createdAt, updatedAt, createdBy, updatedBy)
-2. **SIEMPRE** filtrar campos antes de usar `.builder()`
-3. **SIEMPRE** mapear bidireccionalidad en relaciones
+1. **NUNCA** mapear campos de auditoría (`createdAt`, `updatedAt`, `createdBy`, `updatedBy`)
+2. **NUNCA** mapear campos `readOnly` en métodos de creación (`fromCommand`, `fromDto`)
+3. **NUNCA** mapear campos `hidden` en métodos de respuesta (`toDto`, `toResponseDto`)
+4. **SIEMPRE** filtrar campos antes de usar `.builder()`
+5. **SIEMPRE** mapear bidireccionalidad en relaciones
 
 ### Al Generar DTOs
 
 1. **NUNCA** exponer `createdBy` y `updatedBy` en respuestas
-2. **SIEMPRE** exponer `createdAt` y `updatedAt`
-3. **SIEMPRE** usar Java Records para DTOs
-4. **SIEMPRE** filtrar campos al crear contextos de template
+2. **NUNCA** incluir campos `readOnly` en CreateDto
+3. **NUNCA** incluir campos `hidden` en ResponseDto
+4. **SIEMPRE** exponer `createdAt` y `updatedAt` cuando hay auditoría
+5. **SIEMPRE** usar Java Records para DTOs
+
+### Al Agregar Validaciones
+
+1. **SIEMPRE** agregar validaciones JSR-303 **solo** en Commands y CreateDtos
+2. **NUNCA** agregar `@Valid` en entidades de dominio
+3. **SIEMPRE** agregar `@Valid` en el parámetro del endpoint REST que recibe el DTO
+4. Los mensajes de error de validación los maneja el `@ControllerAdvice` global generado en `common/`
 
 ---
 
@@ -1422,15 +1733,43 @@ public record UserResponseDto(
 
 Al generar o modificar código, verificar:
 
-- [ ] Entidades de dominio **sin constructor vacío**
-- [ ] Entidades de dominio **sin setters públicos**
-- [ ] Métodos de negocio con **validaciones explícitas**
-- [ ] Entidades JPA con **Lombok y herencia correcta**
-- [ ] Mappers **excluyen campos de auditoría**
-- [ ] DTOs de respuesta **sin createdBy/updatedBy**
-- [ ] Relaciones bidireccionales con métodos `assign*()`
-- [ ] Value Objects **inmutables**
-- [ ] Configuración de auditoría cuando `audit.trackUser: true`
+**Entidades de Dominio:**
+- [ ] Sin constructor vacío
+- [ ] Sin setters públicos
+- [ ] Métodos de negocio con validaciones explícitas
+- [ ] Value Objects inmutables
+- [ ] Sin anotaciones JSR-303 en dominio
+
+**Entidades JPA:**
+- [ ] Usa Lombok (`@Getter`, `@Setter`, `@Builder`, `@NoArgsConstructor`)
+- [ ] Extiende la clase base correcta según auditoría (`AuditableEntity` / `FullAuditableEntity`)
+- [ ] `@SQLRestriction("deleted_at IS NULL")` cuando `hasSoftDelete: true`
+- [ ] No incluye campos de auditoría heredados en `@Builder`
+
+**Mappers:**
+- [ ] Excluyen campos de auditoría (`createdAt`, `updatedAt`, `createdBy`, `updatedBy`)
+- [ ] Excluyen campos `readOnly` en métodos de creación
+- [ ] Excluyen campos `hidden` en métodos de respuesta
+- [ ] Mapean bidireccionalidad en relaciones con `assign*()`
+
+**DTOs:**
+- [ ] ResponseDto sin `createdBy`/`updatedBy`
+- [ ] ResponseDto sin campos `hidden`
+- [ ] CreateDto sin campos `readOnly`
+- [ ] Usan Java Records
+
+**Validaciones:**
+- [ ] JSR-303 solo en Command y CreateDto, nunca en dominio
+- [ ] `@Valid` presente en parámetros de endpoints REST
+
+**Auditoría:**
+- [ ] Configurada correctamente cuando `audit.trackUser: true`
+- [ ] `UserContextFilter` y `UserContextHolder` presentes en `common/`
+- [ ] `@EnableJpaAuditing` con `auditorAwareRef = "auditorProvider"` en Application.java
+
+**Soft Delete (cuando aplica):**
+- [ ] Usar `entity.softDelete()` + `repository.save()` — nunca `deleteById()`
+- [ ] `deletedAt` no expuesto en ResponseDto
 
 ---
 
@@ -1440,7 +1779,7 @@ Al generar o modificar código, verificar:
 
 1. **domain.yaml is the source of truth** for domain models
 2. **Never edit generated files** directly (domain/models/entities, infrastructure/database/entities)
-3. **Always regenerate** after modifying domain.yaml: `eva4j g entities <module>`
+3. **Always regenerate** after modifying domain.yaml: `eva g entities <module>`
 4. **Hand-written code** goes in:
    - Application layer (use cases, commands, queries)
    - Domain services
@@ -1463,6 +1802,205 @@ Al generar o modificar código, verificar:
 - ❌ Repository implementations (infrastructure/database/repositories)
 - ❌ Mappers (infrastructure/database/mappers)
 
+---
+
+## 🧪 Testing
+
+### Tests de Dominio (Unidad)
+
+Las entidades de dominio se testean sin ningún framework — solo Java puro:
+
+```java
+class OrderTest {
+
+    @Test
+    void shouldCreateOrderWithValidData() {
+        Order order = new Order("customer-123", LocalDateTime.now());
+
+        assertEquals("customer-123", order.getCustomerId());
+        assertNotNull(order.getOrderDate());
+    }
+
+    @Test
+    void shouldConfirmOrder() {
+        Order order = new Order("customer-123", LocalDateTime.now());
+
+        order.confirm();
+
+        assertEquals(OrderStatus.CONFIRMED, order.getStatus());
+    }
+
+    @Test
+    void shouldNotConfirmCancelledOrder() {
+        Order order = new Order("customer-123", LocalDateTime.now());
+        order.cancel();
+
+        assertThrows(IllegalStateException.class, order::confirm);
+    }
+}
+```
+
+### Object Mother Pattern (Test Data Builders)
+
+Crear clases `Mother` para construir objetos de prueba reutilizables:
+
+```java
+// src/test/java/[package]/order/domain/OrderMother.java
+public class OrderMother {
+
+    public static Order draft() {
+        return new Order("customer-123", LocalDateTime.now());
+    }
+
+    public static Order confirmed() {
+        Order order = draft();
+        order.confirm();
+        return order;
+    }
+
+    public static Order cancelled() {
+        Order order = draft();
+        order.cancel();
+        return order;
+    }
+
+    public static Order withCustomer(String customerId) {
+        return new Order(customerId, LocalDateTime.now());
+    }
+}
+```
+
+**Uso en tests**:
+```java
+@Test
+void shouldNotCancelDeliveredOrder() {
+    Order delivered = OrderMother.withStatus(OrderStatus.DELIVERED);
+
+    assertThrows(IllegalStateException.class, () -> delivered.cancel());
+}
+```
+
+### Repositorio Fake (In-Memory)
+
+Para testear Use Cases sin base de datos, usar implementaciones in-memory:
+
+```java
+// src/test/java/[package]/order/infrastructure/OrderRepositoryFake.java
+public class OrderRepositoryFake implements OrderRepository {
+    private final Map<String, Order> store = new HashMap<>();
+
+    @Override
+    public Order save(Order order) {
+        store.put(order.getId(), order);
+        return order;
+    }
+
+    @Override
+    public Optional<Order> findById(String id) {
+        return Optional.ofNullable(store.get(id));
+    }
+
+    @Override
+    public List<Order> findAll() {
+        return new ArrayList<>(store.values());
+    }
+
+    @Override
+    public void deleteById(String id) {
+        store.remove(id);
+    }
+
+    // Helper para assertions en tests
+    public int count() {
+        return store.size();
+    }
+
+    public boolean contains(String id) {
+        return store.containsKey(id);
+    }
+}
+```
+
+### Tests de Use Cases
+
+```java
+class CreateOrderCommandHandlerTest {
+
+    private final OrderRepositoryFake orderRepository = new OrderRepositoryFake();
+    private final CreateOrderCommandHandler handler =
+        new CreateOrderCommandHandler(orderRepository);
+
+    @Test
+    void shouldCreateOrder() {
+        CreateOrderCommand command = new CreateOrderCommand("customer-123");
+
+        String orderId = handler.handle(command);
+
+        assertNotNull(orderId);
+        assertEquals(1, orderRepository.count());
+        assertTrue(orderRepository.contains(orderId));
+    }
+}
+```
+
+### Tests de Integración (con Testcontainers)
+
+Para tests de integración con base de datos real:
+
+```java
+@SpringBootTest
+@Testcontainers
+class OrderRepositoryImplTest {
+
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16")
+        .withDatabaseName("test_db")
+        .withUsername("test")
+        .withPassword("test");
+
+    @DynamicPropertySource
+    static void overrideProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+    }
+
+    @Autowired
+    private OrderRepository orderRepository;
+
+    @Test
+    void shouldPersistAndRetrieveOrder() {
+        Order order = OrderMother.draft();
+        Order saved = orderRepository.save(order);
+
+        Optional<Order> found = orderRepository.findById(saved.getId());
+
+        assertTrue(found.isPresent());
+        assertEquals(saved.getId(), found.get().getId());
+    }
+}
+```
+
+### Estrategia de Testing por Capa
+
+| Capa | Tipo de Test | Framework |
+|------|-------------|-----------|
+| Domain entities | Unidad pura | JUnit 5 |
+| Use cases (Command/Query handlers) | Unidad con Fakes | JUnit 5 + Fake repos |
+| Application mappers | Unidad | JUnit 5 |
+| Repository implementations | Integración | Testcontainers |
+| REST controllers | Integración | @WebMvcTest / MockMvc |
+
+### Reglas para Agentes al generar Tests
+
+- **SIEMPRE** usar Object Mother pattern para datos de prueba
+- **SIEMPRE** usar Fake repositories en tests de use cases (no mocks)
+- **NUNCA** poner lógica de negocio en los tests — solo verificar comportamiento
+- **NUNCA** testear getters/setters — testear comportamiento de negocio
+- Validaciones JSR-303 se verifican en tests de controladores con `@Valid`, no en dominio
+
+---
+
 ### Documentation References
 
 - **[DOMAIN_YAML_GUIDE.md](https://github.com/asuridev/eva4j)**: Complete domain.yaml syntax reference
@@ -1475,29 +2013,36 @@ Al generar o modificar código, verificar:
 
 ```bash
 # Project management
-eva4j create <project>              # Create new project
-eva4j add module <name>             # Add module
-eva4j info                          # View config
+eva create <project>                # Create new project
+eva add module <name>               # Add module
+eva info                            # View config
 
 # Code generation
-eva4j g entities <module>           # Generate from domain.yaml
-eva4j g resource <module>           # Generate CRUD REST
-eva4j g usecase <module> <name>     # Add custom use case
-eva4j g record                      # Generate record from JSON
+eva g entities <module>             # Generate from domain.yaml
+eva g resource <module>             # Generate CRUD REST
+eva g usecase <module> <name>       # Add custom use case
+eva g record                        # Generate record from JSON
 
 # Event-driven
-eva4j add kafka-client              # Enable Kafka
-eva4j g kafka-event <mod> <event>   # Publish events
-eva4j g kafka-listener <module>     # Consume events
+eva add kafka-client                # Enable Kafka
+eva g kafka-event <mod> <event>     # Publish events
+eva g kafka-listener <module>       # Consume events
 
 # External integration
-eva4j g http-exchange <mod> <api>   # External API client
+eva g http-exchange <mod> <api>     # External API client
+
+# Temporal workflows
+eva add temporal-client             # Enable Temporal
+eva g temporal-flow <module>        # Generate workflow definition
+eva g temporal-activity <module>    # Generate activity
 
 # Microservices
-eva4j detach <module>               # Extract to microservice
+eva detach <module>                 # Extract to microservice
 ```
 
 ---
 
-**Generated by eva4j CLI** - Version <%= version || '1.0.0' %>  
-For more information, visit: https://github.com/asuridev/eva4j
+**Generado por eva4j CLI** — Versión `<%= version || '1.0.0' %>`  
+**Proyecto**: `<%= artifactId %>` | **Paquete base**: `<%= packageName %>`  
+**Fecha de generación**: `<%= createdDate %>`  
+Para más información: https://github.com/asuridev/eva4j
