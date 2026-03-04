@@ -40,6 +40,7 @@ aggregates:
           - name: loginCount
             type: Integer
             readOnly: true
+            defaultValue: 0   # Initialized to 0 on creation
           
           # Readonly field - NOT in constructor or CreateDto
           # Use case: Calculated timestamp
@@ -80,11 +81,13 @@ aggregates:
           - name: totalAmount
             type: BigDecimal
             readOnly: true
+            defaultValue: "0.00"  # Starts at zero before items are added
           
           # Readonly field - count of items
           - name: itemCount
             type: Integer
             readOnly: true
+            defaultValue: 0   # Starts at zero
           
           # Hidden field - internal processing flag
           - name: processingToken
@@ -116,6 +119,7 @@ aggregates:
           - name: subtotal
             type: BigDecimal
             readOnly: true
+            defaultValue: "0.00"  # Calculated on creation
         
         relationships:
           - type: ManyToOne
@@ -147,6 +151,7 @@ aggregates:
           - name: stockLevel
             type: Integer
             readOnly: true
+            defaultValue: 0   # New products start with zero stock
           
           # Readonly field - last updated stock timestamp
           - name: stockUpdatedAt
@@ -191,6 +196,7 @@ aggregates:
             type: Boolean
             hidden: true
             readOnly: true
+            defaultValue: false  # Sessions start as not revoked
           
           - name: createdAt
             type: LocalDateTime

@@ -967,6 +967,98 @@ private Integer age;
 
 ---
 
+## 16. `defaultValue` para campos `readOnly` (Implementado)
+
+Permite especificar un valor inicial para campos `readOnly` directamente en `domain.yaml`. El valor se emite en el **constructor de creación** de la entidad de dominio y como field initializer con `@Builder.Default` en la entidad JPA.
+
+### Sintaxis
+
+```yaml
+entities:
+  - name: order
+    fields:
+      - name: status
+        type: OrderStatus
+        readOnly: true
+        defaultValue: PENDING          # Enum value
+      
+      - name: totalAmount
+        type: BigDecimal
+        readOnly: true
+        defaultValue: "0.00"           # BigDecimal literal
+      
+      - name: itemCount
+        type: Integer
+        readOnly: true
+        defaultValue: 0                # Integer literal
+      
+      - name: isActive
+        type: Boolean
+        readOnly: true
+        defaultValue: true             # Boolean literal
+```
+
+### Código Generado — Dominio
+
+```java
+// Constructor de creación — defaultValue asignado automáticamente
+public Order(String orderNumber, String customerId) {
+    this.orderNumber = orderNumber;
+    this.customerId = customerId;
+    // readOnly fields initialized with defaultValue:
+    this.status = OrderStatus.PENDING;
+    this.totalAmount = new BigDecimal("0.00");
+    this.itemCount = 0;
+    this.isActive = true;
+}
+```
+
+### Código Generado — JPA
+
+```java
+@Builder.Default
+private OrderStatus status = OrderStatus.PENDING;
+
+@Builder.Default
+private BigDecimal totalAmount = new BigDecimal("0.00");
+
+@Builder.Default
+private Integer itemCount = 0;
+```
+
+### Tipos soportados
+
+| Tipo Java | Ejemplo YAML | Java emitido |
+|-----------|-------------|---------------|
+| `String` | `defaultValue: hello` | `"hello"` |
+| `Integer` / `Long` | `defaultValue: 0` | `0` / `0L` |
+| `Boolean` | `defaultValue: false` | `false` |
+| `BigDecimal` | `defaultValue: "0.00"` | `new BigDecimal("0.00")` |
+| `LocalDateTime` | `defaultValue: now` | `LocalDateTime.now()` |
+| `LocalDate` | `defaultValue: now` | `LocalDate.now()` |
+| `Instant` | `defaultValue: now` | `Instant.now()` |
+| `UUID` | `defaultValue: random` | `UUID.randomUUID()` |
+| Enum | `defaultValue: ACTIVE` | `EnumType.ACTIVE` |
+
+### Reglas
+
+- `defaultValue` **solo es válido** en campos con `readOnly: true`. Si se usa en un campo no-readOnly, se emite un warning y se ignora.
+- El campo **sigue siendo readOnly** — no aparece en el constructor de negocio ni en `CreateDto`.
+- En campos con `autoInit` (enum con `initialValue`), `defaultValue` es ignorado — `autoInit` tiene precedencia.
+
+### Archivos Modificados
+
+| Archivo | Cambio |
+|---|---|
+| `src/utils/yaml-to-entity.js` | ✅ `computeJavaDefaultValue()` + `defaultValue` en `parseProperty()` |
+| `templates/aggregate/AggregateRoot.java.ejs` | ✅ Emite `this.field = defaultValue` en constructor de creación |
+| `templates/aggregate/DomainEntity.java.ejs` | ✅ Mismo cambio para entidades secundarias |
+| `templates/aggregate/JpaAggregateRoot.java.ejs` | ✅ `@Builder.Default` + field initializer |
+| `templates/aggregate/JpaEntity.java.ejs` | ✅ Mismo cambio para entidades JPA secundarias |
+| `examples/domain-field-visibility.yaml` | ✅ Ejemplos con `defaultValue` en campos readOnly |
+
+---
+
 ## 15. Transactional Outbox Pattern
 
 ### Descripción
@@ -1067,9 +1159,10 @@ Domain Events (ítem 1) implementados y funcionando — este ítem solo añade p
 | 13 | Auditoria completa | Impl. | -- | ✅ Implementado |
 | 14 | Validaciones JSR-303 | Impl. | -- | ✅ Implementado |
 | 15 | Transactional Outbox Pattern | Alta | Alta | Pendiente |
+| 16 | `defaultValue` para campos `readOnly` | Impl. | -- | ✅ Implementado |
 
 ---
 
-**Ultima actualizacion:** 2026-02-25
+**Ultima actualizacion:** 2026-03-04
 **Version de eva4j:** 1.x
 **Estado:** Documento de planificacion y referencia

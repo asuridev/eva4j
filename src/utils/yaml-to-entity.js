@@ -242,8 +242,71 @@ function buildAnnotationString(validation) {
   return params.length === 0 ? `@${type}` : `@${type}(${params.join(', ')})`;
 }
 
+/**
+ * Compute the Java literal for a defaultValue declared in domain.yaml.
+ * Returns a string ready to be emitted in a template (e.g. `0`, `"foo"`, `Status.ACTIVE`).
+ * Returns null for unsupported combinations — callers should guard before emitting.
+ *
+ * @param {*}       rawValue  - The raw value from YAML (string, number, boolean)
+ * @param {string}  javaType  - The resolved Java type (e.g. "String", "BigDecimal")
+ * @param {boolean} isEnum    - Whether the field type is an enum
+ * @returns {string|null}
+ */
+function computeJavaDefaultValue(rawValue, javaType, isEnum) {
+  if (rawValue === null || rawValue === undefined) return null;
+
+  const strValue = String(rawValue);
+
+  // Enum type: emit EnumType.VALUE
+  if (isEnum) {
+    return `${javaType}.${strValue}`;
+  }
+
+  switch (javaType) {
+    case 'String':
+      return `"${strValue}"`;
+    case 'Boolean':
+      return strValue.toLowerCase() === 'true' ? 'true' : 'false';
+    case 'Integer':
+    case 'int':
+      return strValue;
+    case 'Long':
+    case 'long':
+      return `${strValue}L`;
+    case 'Double':
+    case 'double':
+    case 'Float':
+    case 'float':
+      return strValue;
+    case 'BigDecimal':
+      return `new BigDecimal("${strValue}")`;
+    case 'LocalDateTime':
+      if (strValue === 'now') return 'LocalDateTime.now()';
+      return null; // arbitrary datetime strings not supported
+    case 'LocalDate':
+      if (strValue === 'now') return 'LocalDate.now()';
+      return null;
+    case 'LocalTime':
+      if (strValue === 'now') return 'LocalTime.now()';
+      return null;
+    case 'Instant':
+      if (strValue === 'now') return 'Instant.now()';
+      return null;
+    case 'UUID':
+      if (strValue === 'random') return 'UUID.randomUUID()';
+      return null;
+    default:
+      // Unknown type — cannot safely emit a literal
+      return null;
+  }
+}
+
 function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
-  const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues, readOnly = false, hidden = false, validations = [], reference = null } = propData;
+  const { name, type, annotations = [], isValueObject = false, isEmbedded = false, enumValues, readOnly = false, hidden = false, validations = [], reference = null, defaultValue = null } = propData;
+
+  if (defaultValue !== null && !readOnly) {
+    console.warn(`⚠️  Field "${name}": "defaultValue" is only meaningful for readOnly fields. It will be ignored since readOnly is not set.`);
+  }
 
   if (reference !== null) {
     if (typeof reference !== 'object' || !reference.aggregate || typeof reference.aggregate !== 'string') {
@@ -308,7 +371,11 @@ function parseProperty(propData, valueObjectNames = [], aggregateEnums = []) {
     transitionMeta,
     autoInit,
     autoInitValue,
-    reference
+    reference,
+    defaultValue,
+    javaDefaultValue: (readOnly && !autoInit && defaultValue !== null)
+      ? computeJavaDefaultValue(defaultValue, javaType, !!enumValues || isEnumType)
+      : null
   };
 }
 

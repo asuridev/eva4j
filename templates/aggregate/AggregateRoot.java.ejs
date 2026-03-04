@@ -84,7 +84,8 @@ public class <%= name %> {
 
 <% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly && !f.autoInit); %>
 <% const autoInitFields = fields.filter(f => f.autoInit); %>
-<% if (creationFields.length > 0 || autoInitFields.length > 0) { %>
+<% const defaultValueFields = fields.filter(f => f.readOnly && !f.autoInit && f.javaDefaultValue); %>
+<% if (creationFields.length > 0 || autoInitFields.length > 0 || defaultValueFields.length > 0) { %>
     // Constructor for new entity creation (without id, audit fields, readOnly and auto-initialized fields)
     public <%= name %>(<% let paramIdx = 0; %><% creationFields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %>) {
 <% creationFields.forEach(field => { %>
@@ -92,6 +93,9 @@ public class <%= name %> {
 <% }); %>
 <% autoInitFields.forEach(field => { %>
         this.<%= field.name %> = <%- field.javaType %>.<%= field.autoInitValue %>;
+<% }); %>
+<% defaultValueFields.forEach(field => { %>
+        this.<%= field.name %> = <%- field.javaDefaultValue %>;
 <% }); %>
     }
 <% } %>

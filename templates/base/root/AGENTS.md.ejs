@@ -350,6 +350,7 @@ Each field in `domain.yaml` supports the following properties:
 | `enumValues` | Array | `[]` | Valores inline de enum |
 | `readOnly` | Boolean | `false` | Excluye del constructor de negocio y CreateDto |
 | `hidden` | Boolean | `false` | Excluye del ResponseDto |
+| `defaultValue` | String/Number/Boolean | `null` | Valor inicial en el constructor de creación (solo para `readOnly`) |
 | `validations` | Array | `[]` | Anotaciones JSR-303 aplicadas en Command y CreateDto |
 | `reference` | Object | `null` | Referencia semántica a otro agregado (genera Javadoc) |
 
@@ -369,8 +370,44 @@ Each field in `domain.yaml` supports the following properties:
 |-------|:-------------------:|:---------:|:-----------:|
 | Normal | ✅ | ✅ | ✅ |
 | `readOnly: true` | ❌ | ❌ | ✅ |
+| `readOnly` + `defaultValue` | ⚡ Asignado con default | ❌ | ✅ |
 | `hidden: true` | ✅ | ✅ | ❌ |
 | `readOnly` + `hidden` | ❌ | ❌ | ❌ |
+
+#### `defaultValue` - Valor Inicial para campos `readOnly`
+
+Cuando un campo `readOnly` tiene un valor inicial predecible, se puede declarar con `defaultValue`. El generador emite la asignación en el **constructor de creación** del dominio y `@Builder.Default` en la entidad JPA.
+
+```yaml
+fields:
+  - name: totalAmount
+    type: BigDecimal
+    readOnly: true
+    defaultValue: "0.00"        # ✅ Acumulador inicializado
+
+  - name: status
+    type: OrderStatus
+    readOnly: true
+    defaultValue: PENDING        # ✅ Estado inicial del enum
+
+  - name: itemCount
+    type: Integer
+    readOnly: true
+    defaultValue: 0              # ✅ Contador inicializado
+```
+
+```java
+// Constructor de creación — defaultValues aplicados automáticamente
+public Order(String orderNumber, String customerId) {
+    this.orderNumber = orderNumber;
+    this.customerId = customerId;
+    this.totalAmount = new BigDecimal("0.00");  // ← defaultValue
+    this.status = OrderStatus.PENDING;           // ← defaultValue
+    this.itemCount = 0;                          // ← defaultValue
+}
+```
+
+> **Restricción:** `defaultValue` **solo aplica** a campos con `readOnly: true`. Usarlo en un campo no-readOnly genera un warning y es ignorado.
 
 ```yaml
 # Ejemplo completo con todos los flags

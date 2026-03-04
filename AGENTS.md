@@ -659,6 +659,7 @@ Los campos en domain.yaml soportan las siguientes propiedades:
 | `enumValues` | Array | `[]` | Valores inline de enum |
 | **`readOnly`** | Boolean | `false` | **Excluye del constructor de negocio y CreateDto** |
 | **`hidden`** | Boolean | `false` | **Excluye del ResponseDto** |
+| **`defaultValue`** | String/Number/Boolean | `null` | **Valor inicial en el constructor de creación (solo para `readOnly`)** |
 | **`validations`** | Array | `[]` | **Anotaciones JSR-303 en el Command y CreateDto** |
 | **`reference`** | Object | `null` | **Declara referencia semántica a otro agregado (genera comentario Javadoc)** |
 
@@ -694,8 +695,56 @@ fields:
 |-------|---------------------|-----------|-------------|
 | Normal | ✅ | ✅ | ✅ |
 | `readOnly: true` | ❌ | ❌ | ✅ |
+| `readOnly` + `defaultValue` | ⚡ Asignado con default | ❌ | ✅ |
 | `hidden: true` | ✅ | ✅ | ❌ |
 | Ambos flags | ❌ | ❌ | ❌ |
+
+#### 🎯 `defaultValue` - Valor Inicial para campos `readOnly`
+
+Cuando un campo `readOnly` tiene un valor inicial predecible (ej: contadores, estados iniciales), se puede declarar en `domain.yaml` con `defaultValue`. El generador emite la asignación en el **constructor de creación** del dominio y `@Builder.Default` en la entidad JPA.
+
+```yaml
+fields:
+  - name: totalAmount
+    type: BigDecimal
+    readOnly: true
+    defaultValue: "0.00"        # ✅ Acumulador inicializado
+
+  - name: status
+    type: OrderStatus
+    readOnly: true
+    defaultValue: PENDING        # ✅ Estado inicial del enum
+
+  - name: itemCount
+    type: Integer
+    readOnly: true
+    defaultValue: 0              # ✅ Contador inicializado
+```
+
+```java
+// Constructor de creación — defaultValues aplicados
+public Order(String orderNumber, String customerId) {
+    this.orderNumber = orderNumber;
+    this.customerId = customerId;
+    this.totalAmount = new BigDecimal("0.00");  // ← defaultValue
+    this.status = OrderStatus.PENDING;           // ← defaultValue
+    this.itemCount = 0;                          // ← defaultValue
+}
+```
+
+```java
+// JPA — @Builder.Default para respetar el valor en el builder
+@Builder.Default
+private BigDecimal totalAmount = new BigDecimal("0.00");
+
+@Enumerated(EnumType.STRING)
+@Builder.Default
+private OrderStatus status = OrderStatus.PENDING;
+```
+
+**Restricción:** `defaultValue` **solo aplica** a campos con `readOnly: true`. Usarlo en un campo no-readOnly genera un warning y es ignorado.
+
+---
 
 **Ejemplo práctico:**
 ```yaml
