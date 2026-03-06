@@ -312,12 +312,29 @@ aggregates:
     
     enums:                         # Enumerations
       - name: OrderStatus
+        initialValue: DRAFT          # Optional: auto-initializes field; excluded from CreateDto
+        transitions:                 # Optional: generates transition methods on root entity
+          - from: DRAFT
+            to: CONFIRMED
+            method: confirm
+          - from: [DRAFT, CONFIRMED]
+            to: CANCELLED
+            method: cancel
         values:
           - DRAFT
           - CONFIRMED
           - SHIPPED
           - DELIVERED
           - CANCELLED
+    
+    events:                          # Domain Events emitted by this aggregate
+      - name: OrderConfirmedEvent
+        fields:
+          - name: orderId
+            type: String
+          - name: confirmedAt
+            type: LocalDateTime
+        # kafka: true                # Optional — publishes to Kafka via MessageBroker
 ```
 
 ### Supported Field Types
@@ -1322,6 +1339,257 @@ relationships:
 - `ManyToOne` - Relación muchos a uno
 - `ManyToMany` - Relación muchos a muchos (evitar si es posible)
 
+### Validaciones JSR-303 (`validations`)
+
+Se declaran en el campo y se aplican **únicamente** en el `Command` y `CreateDto`. **Nunca** en entidades de dominio.
+
+```yaml
+fields:
+  - name: email
+    type: String
+    validations:
+      - type: NotBlank
+        message: "Email es requerido"
+      - type: Email
+        message: "Email inválido"
+
+  - name: username
+    type: String
+    validations:
+      - type: Size
+        min: 3
+        max: 50
+
+  - name: age
+    type: Integer
+    validations:
+      - type: Min
+        value: 18
+
+  - name: price
+    type: BigDecimal
+    validations:
+      - type: Positive
+
+  - name: code
+    type: String
+    validations:
+      - type: Pattern
+        regexp: "^[A-Z]{3}-[0-9]{4}$"
+        message: "Formato inválido"
+```
+
+**Anotaciones disponibles:** `NotNull`, `NotBlank`, `NotEmpty`, `Email`, `Size` (min/max), `Min` (value), `Max` (value), `Pattern` (regexp), `Digits` (integer/fraction), `Positive`, `PositiveOrZero`, `Negative`, `Past`, `Future`, `AssertTrue`, `AssertFalse`.
+
+**Código generado en `Create<Aggregate>Command.java`:**
+```java
+public record Create<%= applicationClassName.replace('Application','') %>Command(
+    @NotBlank(message = "Email es requerido")
+    @Email(message = "Email inválido")
+    String email,
+
+    @Size(min = 3, max = 50)
+    String username
+) implements Command {}
+```
+
+### Referencias entre Agregados (`reference`)
+
+Declara que un campo es un ID de otro agregado. El tipo Java **no cambia** — sigue siendo `String`, `Long`, etc. — pero genera un comentario Javadoc. **No genera `@ManyToOne`** (correcto en DDD).
+
+```yaml
+fields:
+  - name: customerId
+    type: String
+    reference:
+      aggregate: Customer    # Nombre del agregado referenciado (PascalCase)
+      module: customers      # Módulo donde vive (opcional si es el mismo)
+
+  - name: productId
+    type: String
+    reference:
+      aggregate: Product
+      module: catalog
+```
+
+**Código generado:**
+```java
+// En Order.java (domain entity)
+/** Cross-aggregate reference → Customer (module: customers) */
+private String customerId;
+
+// En OrderJpa.java
+@Column(name = "customer_id")
+/** Cross-aggregate reference → Customer (module: customers) */
+private String customerId;
+```
+
+### Value Objects con Métodos de Negocio
+
+Los Value Objects pueden declarar métodos directamente en `domain.yaml`:
+
+```yaml
+valueObjects:
+  - name: Money
+    fields:
+      - name: amount
+        type: BigDecimal
+      - name: currency
+        type: String
+    methods:
+      - name: add
+        returnType: Money
+        parameters:
+          - name: other
+            type: Money
+        body: "return new Money(this.amount.add(other.getAmount()), this.currency);"
+      - name: isPositive
+        returnType: boolean
+        parameters: []
+        body: "return this.amount.compareTo(BigDecimal.ZERO) > 0;"
+```
+
+Genera en `Money.java`:
+```java
+public Money add(Money other) {
+    return new Money(this.amount.add(other.getAmount()), this.currency);
+}
+
+public boolean isPositive() {
+    return this.amount.compareTo(BigDecimal.ZERO) > 0;
+}
+```
+
+### Enums con Ciclo de Vida (Transitions)
+
+Cuando un enum representa un ciclo de vida de negocio, declara `transitions` e `initialValue`:
+
+```yaml
+enums:
+  - name: OrderStatus
+    initialValue: PENDING        # Auto-inicializa en constructor; campo tratado como readOnly
+    transitions:
+      - from: PENDING
+        to: CONFIRMED
+        method: confirm
+      - from: CONFIRMED
+        to: SHIPPED
+        method: ship
+      - from: SHIPPED
+        to: DELIVERED
+        method: deliver
+      - from: [PENDING, CONFIRMED]   # múltiples orígenes
+        to: CANCELLED
+        method: cancel
+        guard: "this.status == OrderStatus.DELIVERED"  # lanza BusinessException si se cumple
+    values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+```
+
+**En el enum generado (`OrderStatus.java`):**
+```java
+public enum OrderStatus {
+    PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED;
+
+    private static final Map<OrderStatus, Set<OrderStatus>> VALID_TRANSITIONS = ...;
+
+    public boolean canTransitionTo(OrderStatus target) { ... }
+    public OrderStatus transitionTo(OrderStatus target) { ... } // throws InvalidStateTransitionException
+}
+```
+
+**En la entidad raíz (`Order.java`):**
+```java
+// Constructor de creación — NO recibe status (auto-inicializado a PENDING)
+public Order(String orderNumber, String customerId) {
+    this.orderNumber = orderNumber;
+    this.customerId = customerId;
+    this.status = OrderStatus.PENDING;  // ← initialValue
+}
+
+// Métodos de transición generados
+public void confirm() { this.status = this.status.transitionTo(OrderStatus.CONFIRMED); }
+public void ship()    { this.status = this.status.transitionTo(OrderStatus.SHIPPED); }
+public void deliver() { this.status = this.status.transitionTo(OrderStatus.DELIVERED); }
+public void cancel() {
+    if (this.status == OrderStatus.DELIVERED) {
+        throw new BusinessException("Cannot execute 'cancel': business rule violated");
+    }
+    this.status = this.status.transitionTo(OrderStatus.CANCELLED);
+}
+
+// Helpers de consulta
+public boolean isPending()   { return this.status == OrderStatus.PENDING; }
+public boolean canConfirm()  { return this.status.canTransitionTo(OrderStatus.CONFIRMED); }
+// ... uno por cada valor / transición
+```
+
+### Domain Events (`events[]`)
+
+```yaml
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        # ...
+    events:
+      - name: OrderConfirmedEvent
+        fields:
+          - name: orderId
+            type: String
+          - name: confirmedAt
+            type: LocalDateTime
+        # kafka: true            # Optional — generates messageBroker.sendOrderConfirmedEvent()
+      
+      - name: OrderShippedEvent
+        kafka: true              # Publishes to Kafka after commit
+        fields:
+          - name: orderId
+            type: String
+          - name: trackingNumber
+            type: String
+```
+
+**Archivos generados:**
+
+`OrderConfirmedEvent.java` — en `domain/models/events/`:
+```java
+public final class OrderConfirmedEvent extends DomainEvent {
+    private final String orderId;
+    private final LocalDateTime confirmedAt;
+
+    public OrderConfirmedEvent(String aggregateId, String orderId, LocalDateTime confirmedAt) {
+        super(aggregateId);
+        this.orderId = orderId;
+        this.confirmedAt = confirmedAt;
+    }
+    // getters
+}
+```
+
+`OrderDomainEventHandler.java` — en `application/usecases/`:
+```java
+@Component
+public class OrderDomainEventHandler {
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handle(OrderConfirmedEvent event) { /* lógica post-commit */ }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handle(OrderShippedEvent event) {
+        messageBroker.sendOrderShippedEvent(event);  // kafka: true
+    }
+}
+```
+
+**Publicar desde la entidad raíz** usando `raise()` heredado:
+```java
+public void confirm() {
+    this.status = this.status.transitionTo(OrderStatus.CONFIRMED);
+    raise(new OrderConfirmedEvent(this.id, this.id, LocalDateTime.now()));
+}
+```
+
 ### Estrategias de Cascade
 
 ```yaml
@@ -1721,6 +1989,15 @@ public record UserResponseDto(
 
 ## 🎯 Mejores Prácticas para Agentes
 
+### Al Generar domain.yaml (Flujo SDD)
+
+1. **SIEMPRE** incluir campo `id` en todas las entidades
+2. **SI** el módulo requiere ciclo de vida → usar `transitions` + `initialValue` en el enum
+3. **SI** un Value Object tiene comportamiento → declarar `methods` en `domain.yaml`
+4. **SI** ocurren hechos relevantes de negocio → declarar `events[]` en el agregado
+5. **SI** el evento debe propagarse a otros servicios → agregar `kafka: true` al evento
+6. **DESPUÉS** de generar el `domain.yaml` → ejecutar `eva g entities <module>`
+
 ### Al Generar Código de Dominio
 
 1. **NUNCA** crear constructor vacío en entidades de dominio
@@ -1807,6 +2084,12 @@ Al generar o modificar código, verificar:
 **Soft Delete (cuando aplica):**
 - [ ] Usar `entity.softDelete()` + `repository.save()` — nunca `deleteById()`
 - [ ] `deletedAt` no expuesto en ResponseDto
+
+**Características Avanzadas (cuando aplica):**
+- [ ] Enum con ciclo de vida → `transitions` + `initialValue`, no setters
+- [ ] Value Object con comportamiento → `methods` en domain.yaml
+- [ ] Evento de dominio → `events[]`, publicar con `raise()` en método de negocio
+- [ ] Evento con Kafka → `kafka: true` en el evento
 
 ---
 

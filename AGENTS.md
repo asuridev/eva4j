@@ -451,6 +451,96 @@ aggregates:
           - ACTIVE
           - INACTIVE
           - SUSPENDED
+    
+    events:
+      - name: UserRegisteredEvent
+        fields:
+          - name: userId
+            type: String
+        # kafka: true  # opcional — publica a Kafka tras commit
+```
+
+---
+
+## ⚡ Características Avanzadas del domain.yaml
+
+### Value Objects con Métodos
+
+Los Value Objects pueden declarar métodos de negocio directamente en `domain.yaml`:
+
+```yaml
+valueObjects:
+  - name: Money
+    fields:
+      - name: amount
+        type: BigDecimal
+      - name: currency
+        type: String
+    methods:
+      - name: add
+        returnType: Money
+        parameters:
+          - name: other
+            type: Money
+        body: "return new Money(this.amount.add(other.getAmount()), this.currency);"
+      - name: isPositive
+        returnType: boolean
+        parameters: []
+        body: "return this.amount.compareTo(BigDecimal.ZERO) > 0;"
+```
+
+### Enums con Ciclo de Vida (Transitions)
+
+Cuando un enum representa estados de negocio, declara `transitions` e `initialValue`:
+
+```yaml
+enums:
+  - name: OrderStatus
+    initialValue: PENDING        # Auto-inicializa en constructor; excluido del CreateDto
+    transitions:
+      - from: PENDING
+        to: CONFIRMED
+        method: confirm
+      - from: CONFIRMED
+        to: SHIPPED
+        method: ship
+      - from: [PENDING, CONFIRMED]   # múltiples orígenes
+        to: CANCELLED
+        method: cancel
+        guard: "this.status == OrderStatus.DELIVERED"  # lanza BusinessException si se cumple
+    values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+```
+
+Genera automáticamente **en la entidad raíz**: `confirm()`, `ship()`, `cancel()`, helpers `isPending()`, `isConfirmed()`, `canConfirm()`, `canCancel()`.  
+Genera automáticamente **en el enum**: `VALID_TRANSITIONS`, `canTransitionTo()`, `transitionTo()` (lanza `InvalidStateTransitionException` si la transición no es válida).
+
+**Nota:** El campo con `initialValue` se trata como `readOnly: true` — no aparece en el constructor de negocio ni en el `CreateDto`.
+
+### Eventos de Dominio (`events[]`)
+
+```yaml
+aggregates:
+  - name: Order
+    entities: [...]
+    events:
+      - name: OrderConfirmedEvent
+        fields:
+          - name: orderId
+            type: String
+          - name: confirmedAt
+            type: LocalDateTime
+        kafka: true              # opcional — genera publicación a MessageBroker
+```
+
+Genera `OrderConfirmedEvent.java` (en `domain/models/events/`) que extiende `DomainEvent`, y `OrderDomainEventHandler.java` (en `application/usecases/`) con `@TransactionalEventListener(AFTER_COMMIT)`.
+
+Publicar desde la entidad raíz usando `raise()` heredado:
+
+```java
+public void confirm() {
+    this.status = this.status.transitionTo(OrderStatus.CONFIRMED);
+    raise(new OrderConfirmedEvent(this.id, this.id, LocalDateTime.now()));
+}
 ```
 
 ---
@@ -768,6 +858,87 @@ entities:
         hidden: true
 ```
 
+### Validaciones JSR-303 (`validations`)
+
+Se declaran en el campo y se aplican **únicamente** en el `Command` y `CreateDto` de la capa de aplicación. **Nunca** en las entidades de dominio.
+
+```yaml
+fields:
+  - name: email
+    type: String
+    validations:
+      - type: NotBlank
+        message: "Email es requerido"
+      - type: Email
+        message: "Email inválido"
+
+  - name: username
+    type: String
+    validations:
+      - type: Size
+        min: 3
+        max: 50
+        message: "Username entre 3 y 50 caracteres"
+
+  - name: age
+    type: Integer
+    validations:
+      - type: Min
+        value: 18
+      - type: Max
+        value: 120
+
+  - name: price
+    type: BigDecimal
+    validations:
+      - type: Positive
+```
+
+**Anotaciones disponibles:** `NotNull`, `NotBlank`, `NotEmpty`, `Email`, `Size` (min/max), `Min` (value), `Max` (value), `Pattern` (regexp), `Digits` (integer/fraction), `Positive`, `PositiveOrZero`, `Negative`, `Past`, `Future`, `AssertTrue`, `AssertFalse`.
+
+**Código generado en `CreateUserCommand.java`:**
+```java
+public record CreateUserCommand(
+    @NotBlank(message = "Email es requerido")
+    @Email(message = "Email inválido")
+    String email,
+
+    @Size(min = 3, max = 50, message = "Username entre 3 y 50 caracteres")
+    String username
+) implements Command {}
+```
+
+### Referencias entre Agregados (`reference`)
+
+Declara explícitamente que un campo es un ID de otro agregado. El tipo Java **no cambia** — sigue siendo `String`, `Long`, etc. — pero se genera un comentario Javadoc que documenta la dependencia. **No genera `@ManyToOne`** (correcto en DDD: cada agregado es una unidad transaccional independiente).
+
+```yaml
+fields:
+  - name: customerId
+    type: String
+    reference:
+      aggregate: Customer    # Nombre del agregado referenciado (PascalCase)
+      module: customers      # Módulo donde vive (opcional si es el mismo módulo)
+
+  - name: productId
+    type: String
+    reference:
+      aggregate: Product
+      module: catalog
+```
+
+**Código generado:**
+```java
+// En Order.java (domain entity)
+/** Cross-aggregate reference → Customer (module: customers) */
+private String customerId;
+
+// En OrderJpa.java
+@Column(name = "customer_id")
+/** Cross-aggregate reference → Customer (module: customers) */
+private String customerId;
+```
+
 ### Tipos de Relaciones
 
 - `OneToOne` - Relación uno a uno
@@ -778,6 +949,14 @@ entities:
 ---
 
 ## 🎯 Mejores Prácticas para Agentes
+
+### Al Generar domain.yaml (Flujo SDD)
+
+1. **SIEMPRE** incluir campo `id` en todas las entidades
+2. **SI** el módulo requiere ciclo de vida → usar `transitions` + `initialValue` en el enum
+3. **SI** un valor tiene lógica de negocio → declararlo como `valueObject` con `methods`
+4. **SI** ocurren hechos relevantes de negocio → declarar `events[]` en el agregado
+5. **DESPUÉS** de generar el `domain.yaml` → ejecutar `eva g entities <module>`
 
 ### Al Generar Código de Dominio
 
@@ -1004,6 +1183,12 @@ Al generar o modificar código, verificar:
 **Soft Delete (cuando aplica):**
 - [ ] Usar `entity.softDelete()` + `repository.save()` — nunca `deleteById()`
 - [ ] `deletedAt` no expuesto en ResponseDto
+
+**Características Avanzadas (cuando aplica):**
+- [ ] Enum con ciclo de vida → usar `transitions` + `initialValue`, no setters manuales
+- [ ] Value Object con comportamiento → declarar `methods` en lugar de lógica en entidad
+- [ ] Evento de dominio → declarar en `events[]`, publicar con `raise()` en método de negocio
+- [ ] Evento con Kafka → agregar `kafka: true` al evento
 
 ---
 
