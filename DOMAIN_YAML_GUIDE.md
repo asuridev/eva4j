@@ -49,9 +49,9 @@ Las entidades de dominio generadas siguen estrictamente los principios de Domain
 - ✅ Protección de invariantes del dominio
 
 **✅ Constructores sin Validaciones Automáticas:**
-- Los constructores asignan valores directamente sin validaciones automáticas
-- Las validaciones se implementarán en un release futuro mediante configuración en domain.yaml
-- Por ahora, las validaciones deben implementarse manualmente en métodos de negocio según sea necesario
+- Los constructores asignan valores directamente sin validaciones de Bean Validation
+- Las validaciones JSR-303 se declaran en `domain.yaml` y se aplican en la capa de aplicación (Command y CreateDto), no en el dominio
+- Las reglas de invariantes de dominio deben implementarse manualmente en los métodos de negocio
 
 **📦 Inmutabilidad de Value Objects:**
 - Campos declarados como `final`
@@ -132,16 +132,27 @@ aggregates:
       # Enumeraciones del dominio
       - name: EnumName
         values: []
+    
+    events:
+      # Eventos de dominio que emite este agregado
+      - name: NombreEventoOcurrido
+        fields: []
+        # kafka: true  # opcional — genera publicación a Kafka vía MessageBroker
 ```
 
 ### Ubicación del archivo
 
 ```
 tu-proyecto/
-└── modules/
-    └── tu-modulo/
-        └── domain.yaml    ← Aquí
+└── src/
+    └── main/
+        └── java/
+            └── com/example/myapp/   ← packagePath (ej: com.example.myapp)
+                └── orders/          ← moduleName
+                    └── domain.yaml  ← Aquí
 ```
+
+Eva4j espera el `domain.yaml` dentro de la carpeta del módulo, que se encuentra bajo la ruta del package Java. Esta ubicación es creada automáticamente al ejecutar `eva add module <nombre>`.
 
 ---
 
@@ -1353,11 +1364,57 @@ valueObjects:
         type: String
 ```
 
+### Value Objects con métodos de negocio
+
+Los Value Objects pueden declarar métodos de negocio directamente en el `domain.yaml`. Estos se generan como métodos públicos en la clase del Value Object.
+
+```yaml
+valueObjects:
+  - name: Money
+    fields:
+      - name: amount
+        type: BigDecimal
+      - name: currency
+        type: String
+    methods:
+      - name: add
+        returnType: Money
+        parameters:
+          - name: other
+            type: Money
+        body: "return new Money(this.amount.add(other.getAmount()), this.currency);"
+      
+      - name: isPositive
+        returnType: boolean
+        parameters: []
+        body: "return this.amount.compareTo(BigDecimal.ZERO) > 0;"
+```
+
+**Código generado:**
+```java
+public Money add(Money other) {
+    return new Money(this.amount.add(other.getAmount()), this.currency);
+}
+
+public boolean isPositive() {
+    return this.amount.compareTo(BigDecimal.ZERO) > 0;
+}
+```
+
+**Propiedades de un método:**
+
+| Propiedad | Descripción |
+|-----------|-------------|
+| `name` | Nombre del método |
+| `returnType` | Tipo de retorno Java |
+| `parameters` | Array de `{ name, type }` |
+| `body` | Cuerpo del método (string Java) |
+
 ---
 
 ## Enums
 
-### Definición
+### Definición básica
 
 ```yaml
 enums:
@@ -1411,6 +1468,199 @@ enums:
   - name: ShippingMethod
     values: [STANDARD, EXPRESS, OVERNIGHT]
 ```
+
+---
+
+### Enums con Transiciones de Estado
+
+Cuando un enum representa un ciclo de vida de negocio, puede declarar `transitions` e `initialValue`. Eva4j genera automáticamente los métodos de transición, guards, helpers de consulta y el mapa de transiciones válidas.
+
+#### Sintaxis
+
+```yaml
+enums:
+  - name: OrderStatus
+    initialValue: PENDING        # ← Estado inicial (se asigna en el constructor de creación)
+    transitions:
+      - from: PENDING
+        to: CONFIRMED
+        method: confirm
+
+      - from: CONFIRMED
+        to: SHIPPED
+        method: ship
+
+      - from: SHIPPED
+        to: DELIVERED
+        method: deliver
+
+      - from: [PENDING, CONFIRMED]   # múltiples estados origen
+        to: CANCELLED
+        method: cancel
+        guard: "this.status == OrderStatus.DELIVERED"  # lanza BusinessException si se cumple
+
+    values:
+      - PENDING
+      - CONFIRMED
+      - SHIPPED
+      - DELIVERED
+      - CANCELLED
+```
+
+#### Propiedades de transición
+
+| Propiedad | Tipo | Descripción |
+|-----------|------|-------------|
+| `from` | String \| Array | Estado(s) de origen válidos |
+| `to` | String | Estado destino |
+| `method` | String | Nombre del método que ejecuta la transición |
+| `guard` | String | Condición Java que lanza `BusinessException` si se cumple (opcional) |
+
+#### Qué genera
+
+**En el enum (`OrderStatus.java`):**
+```java
+public enum OrderStatus {
+    PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED;
+
+    private static final Map<OrderStatus, Set<OrderStatus>> VALID_TRANSITIONS;
+    // ... mapa estático inicializado
+
+    public boolean canTransitionTo(OrderStatus target) { ... }
+    public OrderStatus transitionTo(OrderStatus target) { ... } // lanza InvalidStateTransitionException
+}
+```
+
+**En la entidad raíz (`Order.java`):**
+```java
+// El constructor de creación NO recibe status (se auto-inicializa a PENDING)
+public Order(String orderNumber, String customerId) {
+    this.orderNumber = orderNumber;
+    this.customerId = customerId;
+    this.status = OrderStatus.PENDING;  // ← initialValue aplicado
+}
+
+// Métodos de transición generados
+public void confirm() { this.status = this.status.transitionTo(OrderStatus.CONFIRMED); }
+public void ship()    { this.status = this.status.transitionTo(OrderStatus.SHIPPED); }
+public void deliver() { this.status = this.status.transitionTo(OrderStatus.DELIVERED); }
+public void cancel() {
+    if (this.status == OrderStatus.DELIVERED) {
+        throw new BusinessException("Cannot execute 'cancel': business rule violated");
+    }
+    this.status = this.status.transitionTo(OrderStatus.CANCELLED);
+}
+
+// Helpers de consulta de estado
+public boolean isPending()   { return this.status == OrderStatus.PENDING; }
+public boolean isConfirmed() { return this.status == OrderStatus.CONFIRMED; }
+// ... uno por cada valor del enum
+
+// Helpers de disponibilidad de transición
+public boolean canConfirm() { return this.status.canTransitionTo(OrderStatus.CONFIRMED); }
+public boolean canCancel()  { return this.status.canTransitionTo(OrderStatus.CANCELLED); }
+// ... uno por cada método de transición
+```
+
+**Nota:** El campo con `initialValue` se trata implícitamente como `readOnly: true` — no aparece en el constructor de negocio ni en el `CreateDto`.
+
+---
+
+## Eventos de Dominio
+
+Los eventos de dominio representan hechos significativos que ocurren dentro del agregado. Eva4j genera las clases de evento y el handler para publicarlos automáticamente tras commit de transacción.
+
+### Sintaxis
+
+```yaml
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+    
+    events:
+      - name: OrderConfirmedEvent        # PascalCase, idealmente en pasado
+        fields:
+          - name: orderId
+            type: String
+          - name: confirmedAt
+            type: LocalDateTime
+      
+      - name: OrderShippedEvent
+        kafka: true                      # opcional — genera publicación a Kafka
+        fields:
+          - name: orderId
+            type: String
+          - name: trackingNumber
+            type: String
+```
+
+### Propiedades de un evento
+
+| Propiedad | Tipo | Descripción |
+|-----------|------|-------------|
+| `name` | String | Nombre de la clase del evento (PascalCase) |
+| `fields` | Array | Campos que transporta el evento |
+| `kafka` | Boolean | Si `true`, genera llamada a `messageBroker.send{EventName}()` |
+
+### Archivos generados
+
+Para cada evento, eva4j genera dos archivos:
+
+**1. `OrderConfirmedEvent.java`** — en `domain/models/events/`
+```java
+public final class OrderConfirmedEvent extends DomainEvent {
+    private final String orderId;
+    private final LocalDateTime confirmedAt;
+
+    public OrderConfirmedEvent(String aggregateId, String orderId, LocalDateTime confirmedAt) {
+        super(aggregateId);
+        this.orderId = orderId;
+        this.confirmedAt = confirmedAt;
+    }
+
+    public String getOrderId() { return orderId; }
+    public LocalDateTime getConfirmedAt() { return confirmedAt; }
+}
+```
+
+**2. `OrderDomainEventHandler.java`** — en `application/usecases/`
+```java
+@Component
+public class OrderDomainEventHandler {
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handle(OrderConfirmedEvent event) {
+        // Lógica post-commit — ej: notificaciones, métricas
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handle(OrderShippedEvent event) {
+        messageBroker.sendOrderShippedEvent(event);  // kafka: true
+    }
+}
+```
+
+### Cómo publicar un evento
+
+Los eventos se publican desde métodos de negocio de la entidad raíz usando el método heredado `raise()`:
+
+```java
+// En Order.java (entidad de dominio)
+public void confirm() {
+    this.status = this.status.transitionTo(OrderStatus.CONFIRMED);
+    raise(new OrderConfirmedEvent(this.id, this.id, LocalDateTime.now()));
+}
+```
+
+> **Nota:** `raise()` es provisto por la clase base de dominio. La publicación real ocurre tras el commit de la transacción gracias a `@TransactionalEventListener(AFTER_COMMIT)`.
 
 ---
 
@@ -2598,22 +2848,26 @@ eva4j generate entities <module-name>
 ### ✅ Soportado
 
 - Agregados con entidad raíz y secundarias
-- Value Objects embebidos
-- Enums con valores
-- Relaciones OneToMany, ManyToOne, OneToOne
+- Value Objects embebidos (con `methods` opcionales)
+- Enums simples y con transiciones de estado (`transitions`, `initialValue`)
+- Relaciones OneToMany, ManyToOne, OneToOne (bidireccionales automáticas)
 - Tipos primitivos y de fecha Java
-- Colecciones de primitivos y VOs
+- Colecciones de primitivos y VOs (`List<T>`)
 - IDs: String (UUID), Long/Integer (IDENTITY)
 - Cascade y Fetch personalizados
+- Validaciones JSR-303 en Command y CreateDto
+- Auditoría automática (`audit.enabled`, `audit.trackUser`)
+- Control de visibilidad de campos (`readOnly`, `hidden`, `defaultValue`)
+- Referencias cross-agregado (`reference:`)
+- Domain Events (`events:` con soporte opcional de Kafka)
+- Soft delete a nivel de módulo (configurado en `eva add module`)
 
 ### 🚧 Próximamente
 
-- Validaciones JSR-303
-- Auditoría automática
-- Soft delete
-- Query methods personalizados
-- Índices y constraints
-- Herencia de entidades
+- Query methods personalizados en repositorios
+- Índices y constraints de BD declarados en YAML
+- Herencia de entidades JPA
+- Soporte de `Instant` como tipo de campo (actualmente solo para `defaultValue`)
 
 ---
 
@@ -2629,7 +2883,7 @@ R: Los enums son globales al módulo, solo usa el nombre: `type: OrderStatus`
 R: Sí, pero debes definirlo en cada agregado (por ahora).
 
 **P: ¿Qué pasa si regenero el código?**  
-R: Se sobrescriben los archivos. Modifica solo en templates, no en código generado.
+R: Eva4j usa checksums SHA-256 para detectar archivos que fueron modificados manualmente. Los archivos con cambios manuales **no se sobreescriben** — se muestra un aviso y se omiten. Usa `--force` para forzar la sobreescritura de todos los archivos.
 
 **P: ¿Puedo personalizar las entidades generadas?**  
 R: Sí, modifica las plantillas en `templates/aggregate/`.
@@ -2638,10 +2892,9 @@ R: Sí, modifica las plantillas en `templates/aggregate/`.
 
 ## Recursos Adicionales
 
-- [Guía de Implementación](IMPLEMENTATION_SUMMARY.md)
-- [Guía de Testing](TESTING_GUIDE.md)
 - [Referencia Rápida](QUICK_REFERENCE.md)
-- [Documentación DDD](https://martinfowler.com/bliki/DomainDrivenDesign.html)
+- [Guía de Agentes IA](AGENTS.md)
+- [Características Futuras](FUTURE_FEATURES.md)
 
 ---
 
