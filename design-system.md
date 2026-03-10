@@ -11,9 +11,9 @@
 - [Visión](#visión)
 - [Motivación](#motivación)
 - [Principio Central](#principio-central)
-- [Los Tres Artefactos](#los-tres-artefactos)
+- [Los Dos Artefactos](#los-dos-artefactos)
 - [Anatomía de system.yaml](#anatomía-de-systemyaml)
-- [Anatomía de integration.yaml](#anatomía-de-integrationyaml)
+- [Puertos Secundarios en domain.yaml](#puertos-secundarios-en-domainyaml)
 - [Relación entre los Archivos](#relación-entre-los-archivos)
 - [Flujo de Trabajo](#flujo-de-trabajo)
 - [Comandos Nuevos](#comandos-nuevos)
@@ -86,20 +86,18 @@ La propuesta introduce un enfoque **System-First**: el diseño comienza definien
 ## Principio Central
 
 > El `system.yaml` describe **qué módulos existen y cómo se comunican**.  
-> El `domain.yaml` describe **qué es el dominio de cada módulo**.  
-> El `integration.yaml` describe **cómo cada módulo habla con el mundo exterior**.
+> El `domain.yaml` describe **qué es el dominio de cada módulo y qué puertos secundarios necesita**.
 
-Los tres archivos son independientes y evolucionan en momentos distintos, pero tienen una relación de coherencia que eva4j puede validar.
+Los dos archivos son independientes y evolucionan en momentos distintos, pero tienen una relación de coherencia que eva4j puede validar.
 
 ---
 
-## Los Tres Artefactos
+## Los Dos Artefactos
 
 | Archivo | Nivel | Responde a | Lo define |
 |---|---|---|---|
 | `system.yaml` | Sistema | ¿Qué módulos existen? ¿Qué fluye entre ellos? ¿Qué exponen? | Arquitecto / diseñador del sistema |
-| `domain.yaml` | Módulo | ¿Qué entidades, reglas y eventos tiene este módulo? | Desarrollador del módulo |
-| `integration.yaml` | Módulo | ¿Cómo se comunica este módulo con el sistema? | Desarrollador del módulo |
+| `domain.yaml` | Módulo | ¿Qué entidades, reglas, eventos y puertos secundarios tiene este módulo? | Desarrollador del módulo |
 
 ---
 
@@ -129,26 +127,62 @@ modules:
   - name: orders
     description: "Gestión del ciclo de vida de pedidos"
     exposes:
-      - GET  /orders/{id}          # Obtener detalle de un pedido
-      - GET  /orders               # Listar pedidos con filtros y paginación
-      - POST /orders               # Crear nuevo pedido
-      - PUT  /orders/{id}/confirm  # Confirmar pedido pendiente
-      - PUT  /orders/{id}/cancel   # Cancelar pedido (PENDING o CONFIRMED)
+      - method: GET
+        path: /orders/{id}
+        useCase: GetOrder
+        description: "Obtener detalle de un pedido"
+      - method: GET
+        path: /orders
+        useCase: FindAllOrders
+        description: "Listar pedidos con filtros y paginación"
+      - method: POST
+        path: /orders
+        useCase: CreateOrder
+        description: "Crear nuevo pedido"
+      - method: PUT
+        path: /orders/{id}/confirm
+        useCase: ConfirmOrder
+        description: "Confirmar pedido pendiente"
+      - method: PUT
+        path: /orders/{id}/cancel
+        useCase: CancelOrder
+        description: "Cancelar pedido (PENDING o CONFIRMED)"
 
   - name: customers
     description: "Registro y gestión de clientes"
     exposes:
-      - GET  /customers/{id}       # Obtener cliente por ID
-      - GET  /customers            # Listar clientes con filtros
-      - POST /customers            # Registrar nuevo cliente
-      - PUT  /customers/{id}       # Actualizar datos del cliente
+      - method: GET
+        path: /customers/{id}
+        useCase: GetCustomer
+        description: "Obtener cliente por ID"
+      - method: GET
+        path: /customers
+        useCase: FindAllCustomers
+        description: "Listar clientes con filtros"
+      - method: POST
+        path: /customers
+        useCase: CreateCustomer
+        description: "Registrar nuevo cliente"
+      - method: PUT
+        path: /customers/{id}
+        useCase: UpdateCustomer
+        description: "Actualizar datos del cliente"
 
   - name: payments
     description: "Procesamiento de pagos"
     exposes:
-      - POST /payments             # Iniciar procesamiento de pago
-      - GET  /payments/{id}        # Consultar estado de un pago
-      - POST /payments/{id}/refund # Solicitar reembolso
+      - method: POST
+        path: /payments
+        useCase: CreatePayment
+        description: "Iniciar procesamiento de pago"
+      - method: GET
+        path: /payments/{id}
+        useCase: GetPayment
+        description: "Consultar estado de un pago"
+      - method: POST
+        path: /payments/{id}/refund
+        useCase: RefundPayment
+        description: "Solicitar reembolso"
 
   - name: notifications
     description: "Envío de notificaciones"
@@ -193,7 +227,9 @@ integrations:
 ### Reglas del `system.yaml`
 
 - Solo describe **qué existe** y **qué fluye** — no sabe nada de entidades, campos ni lógica de negocio
-- Los endpoints en `exposes:` son referencias documentales y sirven para validar los `calls.using:`
+- Los endpoints en `exposes:` usan sintaxis objeto: `method`, `path`, `useCase` (obligatorio) y `description`
+- El campo `useCase` permite a `eva system init` pre-generar la sección `endpoints:` completa en `domain.yaml`
+- Los endpoints en `exposes:` sirven también para validar los `calls.using:`
 - Los módulos en `consumers:` deben existir en `modules:`
 - Los eventos en `consumers:` deben tener exactamente un `producer:`
 
@@ -243,14 +279,26 @@ modules:
   - name: orders
     description: "Gestión del ciclo de vida de pedidos"
     exposes:
-      - POST /orders               # Crear nuevo pedido
-      - PUT  /orders/{id}/confirm  # Confirmar pedido pendiente
-      - PUT  /orders/{id}/cancel   # Cancelar pedido
+      - method: POST
+        path: /orders
+        useCase: CreateOrder
+        description: "Crear nuevo pedido"
+      - method: PUT
+        path: /orders/{id}/confirm
+        useCase: ConfirmOrder
+        description: "Confirmar pedido pendiente"
+      - method: PUT
+        path: /orders/{id}/cancel
+        useCase: CancelOrder
+        description: "Cancelar pedido"
 
   - name: payments
     description: "Procesamiento de pagos"
     exposes:
-      - POST /payments             # Iniciar procesamiento de pago
+      - method: POST
+        path: /payments
+        useCase: CreatePayment
+        description: "Iniciar procesamiento de pago"
 
   - name: notifications
     description: "Envío de notificaciones"
@@ -321,39 +369,31 @@ integrations:
 
 ---
 
-## Anatomía de `integration.yaml`
+## Puertos Secundarios en `domain.yaml`
 
-Vive en la **raíz de cada módulo** (`src/modules/<module>/integration.yaml`). Se genera parcialmente desde el `system.yaml` y se refina manualmente con los detalles de contrato.
+Los **puertos secundarios** son interfaces del dominio que representan dependencias hacia otros módulos. Al ser propiedad del dominio en arquitectura hexagonal, se declaran en `domain.yaml` bajo la sección `ports:`:
 
 ```yaml
-# orders/integration.yaml
-module: orders
+# orders/domain.yaml (fragmento)
+aggregates:
+  - name: Order
+    entities: [...]
+    events:
+      - name: OrderPlacedEvent
+        fields:
+          - name: orderId
+            type: String
+          - name: customerId
+            type: String
+        kafka: true
 
-publishes:
-  - event: OrderPlacedEvent        # debe existir en orders/domain.yaml events[]
-    topic: ORDER_PLACED
-  - event: OrderCancelledEvent
-    topic: ORDER_CANCELLED
-
-consumes:
-  - event: PaymentProcessedEvent
-    topic: PAYMENT_PROCESSED
-    from: payments
-    handler: UpdateOrderPaymentStatusHandler
-    fields:                        # campos del evento que orders necesita
-      - name: orderId
-        type: String
-      - name: status
-        type: String               # como String para no acoplar el enum de payments
-
-calls:
-  - port: CustomerService
-    target: customers
+ports:                                    # puertos secundarios del módulo
+  - name: CustomerService
+    target: customers                     # módulo destino — validado contra system.yaml modules:
     methods:
       - name: findCustomerById
         http: GET /customers/{id}
-        response: CustomerDto      # DTO local definido por orders
-        fields:
+        response:
           - name: id
             type: String
           - name: fullName
@@ -362,18 +402,20 @@ calls:
             type: String
 ```
 
-### Lo que `eva system init` pre-genera en `integration.yaml`
+### Por qué `ports:` pertenece al dominio
 
-A partir del `system.yaml`, se conoce sin necesidad de diseño de dominio:
+En arquitectura hexagonal, la **interfaz del puerto secundario es propiedad del dominio** — el dominio define qué necesita, la infraestructura decide cómo obtenerlo (Feign, RestTemplate, stub). Declararlos en `domain.yaml` es semánticamente correcto y consistente con el precedente establecido por `reference:` en los campos.
 
-- `consumes:` → los topics y el módulo origen (de `integrations.async`)
-- `calls:` → el puerto y el módulo destino (de `integrations.sync`)
+### Lo que `eva g entities` genera a partir de `ports:`
 
-Lo que el desarrollador **añade manualmente** después:
+- **Interfaz del puerto** en `domain/repositories/` → `CustomerService.java`
+- **DTO de respuesta local** en `application/dtos/` → `CustomerDto.java`
+- **Implementación Feign** en `infrastructure/adapters/` → `CustomerServiceFeignAdapter.java`
 
-- `publishes:` → depende de los eventos declarados en `domain.yaml`
-- `fields:` en `consumes:` → qué parte del evento le interesa a este módulo
-- `fields:` en `calls:` → el shape del DTO de respuesta que espera recibir
+### Validación cruzada
+
+> `ports[].target` en `domain.yaml` **debe existir** en `system.yaml → modules`.  
+> `eva system validate` detecta referencias rotas entre módulos.
 
 ---
 
@@ -384,27 +426,19 @@ Lo que el desarrollador **añade manualmente** después:
 ```
 system.yaml
     │
-    ├─── genera bootstrap de ──►  domain.yaml (esqueleto vacío, por módulo)
+    └─── genera bootstrap de ──►  domain.yaml (esqueleto con endpoints: pre-generado)
+
+
+domain.yaml (events[] + ports[])
     │
-    └─── genera parcialmente ──►  integration.yaml (consumes + calls pre-llenados)
-
-
-domain.yaml (events[])
-    │
-    └─── informa ──────────────►  integration.yaml (publishes:)
-                                  [el desarrollador lo completa manualmente]
-
-
-domain.yaml (use cases)
-    │
-    └─── hace emerger ─────────►  integration.yaml (calls:)
-                                  [emerge al diseñar los use cases del dominio]
+    └─── genera código de ──────►  eva g entities <module>
+                                   → entidades, repos, mappers, kafka events, feign clients
 ```
 
 ### Dependencia dura validable
 
-> Los eventos en `integration.yaml → publishes:` **deben existir** en `domain.yaml → events[]`.  
-> `eva g integration <module>` valida esta coherencia antes de generar código.
+> `ports[].target` en `domain.yaml` **debe existir** en `system.yaml → modules`.  
+> `eva system validate` detecta referencias rotas entre módulos.
 
 ---
 
@@ -425,38 +459,28 @@ domain.yaml (use cases)
 │     eva system init                                                      │
 │       → proyecto base (build.gradle, Application.java, shared/)         │
 │       → módulo vacío por cada entrada en modules:                       │
-│       → domain.yaml esqueleto (comentado, listo para diseñar)           │
-│       → integration.yaml pre-llenado (consumes + calls del system.yaml) │
+│       → domain.yaml esqueleto con endpoints: pre-generado (del system.yaml) │
+│       → integration.yaml pre-llenado (consumes + calls del system.yaml)     │
 └──────────────────────────────────────┬──────────────────────────────────┘
                                        │
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  3. MODELADO DE DOMINIO  (por módulo, de forma independiente)            │
 │                                                                          │
-│     [Editar orders/domain.yaml]                                          │
-│     [Editar payments/domain.yaml]                                        │
-│     [Editar customers/domain.yaml]                                       │
+│     [Editar orders/domain.yaml]    →  aggregates + events + ports:      │
+│     [Editar payments/domain.yaml]  →  aggregates + events + ports:      │
+│     [Editar customers/domain.yaml] →  aggregates + events               │
 └──────────────────────────────────────┬──────────────────────────────────┘
                                        │
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  4. REFINAMIENTO DE INTEGRACIÓN  (por módulo)                            │
+│  4. GENERACIÓN DE CÓDIGO                                                 │
 │                                                                          │
-│     [Completar integration.yaml con publishes: y fields:]               │
-│     - publishes: deriva de los events[] definidos en domain.yaml        │
-│     - fields en consumes: define qué datos del evento necesita          │
-│     - fields en calls: define el shape del DTO de respuesta esperado    │
-└──────────────────────────────────────┬──────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  5. GENERACIÓN DE CÓDIGO                                                 │
-│                                                                          │
-│     eva g entities orders        →  entidades, repos, mappers           │
+│     eva g entities orders   →  entidades, repos, mappers,               │
+│                                 kafka events, feign clients (ports:)    │
 │     eva g entities payments                                              │
-│     eva g integration orders     →  kafka producers, listeners, feign   │
-│     eva g integration payments                                           │
-│     eva system diagram           →  diagrama Mermaid del sistema        │
+│     eva g entities customers                                             │
+│     eva system diagram      →  diagrama Mermaid del sistema             │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -466,14 +490,13 @@ domain.yaml (use cases)
 
 | Comando | Descripción |
 |---|---|
-| `eva system validate` | Valida coherencia del `system.yaml` (referencias rotas, ciclos, eventos sin consumidor) |
-| `eva system init` | Bootstrap completo: proyecto + módulos + `domain.yaml` esqueleto + `integration.yaml` pre-llenado |
+| `eva system validate` | Valida coherencia del `system.yaml` (referencias rotas, ciclos, eventos sin consumidor, `ports[].target` inexistentes) |
+| `eva system init` | Bootstrap completo: proyecto + módulos + `domain.yaml` esqueleto con `endpoints:` pre-generado |
 | `eva system diagram` | Genera diagrama Mermaid del grafo de módulos y comunicaciones |
-| `eva g integration <module>` | Genera el código de infraestructura a partir de `integration.yaml` (kafka, feign clients) |
 
 ### Relación con comandos existentes
 
-Los comandos actuales (`eva g kafka-event`, `eva g kafka-listener`, `eva g http-exchange`) seguirían funcionando para casos puntuales. El nuevo `eva g integration <module>` los orquestaría todos a partir del `integration.yaml`, sin prompts interactivos.
+Los comandos actuales (`eva g kafka-event`, `eva g kafka-listener`, `eva g http-exchange`) seguirían funcionando para casos puntuales. El comando `eva g entities <module>` ahora también genera el código de infraestructura derivado de `ports:` (feign clients) y `events[]` (kafka producers/consumers), sin prompts interactivos.
 
 ---
 
@@ -487,6 +510,7 @@ Los comandos actuales (`eva g kafka-event`, `eva g kafka-listener`, `eva g http-
 | Evento consumido sin productor | `consumes` un `StockUpdatedEvent` que ningún módulo publica |
 | Endpoint referenciado no expuesto | `calls.using: GET /customers/profile` pero `customers` no lo declara en `exposes:` |
 | Dependencia circular síncrona | `orders` llama a `payments` y `payments` llama a `orders` |
+| Puerto con módulo inexistente | `domain.yaml → ports[].target: inventario` pero `inventario` no está en `system.yaml → modules:` |
 | Evento sin consumidores | Un evento publicado que nadie consume (advertencia, no error) |
 
 ---
@@ -503,7 +527,7 @@ Toda la topología del sistema — qué módulos existen, qué publican, qué co
 Los comandos actuales (`eva g kafka-event`, `eva g kafka-listener`, `eva g http-exchange`) requieren responder preguntas cada vez que se ejecutan. Con `integration.yaml`, `eva g integration <module>` genera todo de una vez, sin interacción, reproducible y apto para CI/CD.
 
 ### 4. Contratos explícitos entre módulos
-El `integration.yaml` fuerza a declarar explícitamente qué campos de un evento consume cada módulo. Esto hace visibles las dependencias de datos entre módulos y reduce el acoplamiento implícito.
+Los `events[]` en `domain.yaml` del productor definen el contrato completo del evento. Los `ports:` en `domain.yaml` del consumidor declaran explícitamente qué campos del servicio remoto necesita. Esto hace visibles las dependencias de datos entre módulos y reduce el acoplamiento implícito.
 
 ### 5. Detección temprana de inconsistencias
 `eva system validate` detecta problemas de arquitectura (referencias rotas, dependencias circulares, contratos mal definidos) antes de generar código y antes de desplegar, cuando el costo de corregirlos es mínimo.
@@ -513,9 +537,8 @@ El mismo flujo funciona para un sistema con 3 módulos o con 30. El `system.yaml
 
 ### 7. Separación de responsabilidades clara
 Cada archivo tiene una responsabilidad única y bien definida:
-- `system.yaml` → **qué existe** (arquitectura)
-- `domain.yaml` → **qué es** (negocio)
-- `integration.yaml` → **cómo habla** (infraestructura)
+- `system.yaml` → **qué existe** (arquitectura — módulos y comunicación)
+- `domain.yaml` → **qué es y qué necesita** (negocio + puertos secundarios)
 
 Un cambio de dominio no toca `system.yaml`. Un cambio de arquitectura no toca `domain.yaml`. Las responsabilidades no se mezclan.
 
@@ -538,12 +561,11 @@ Un agente de IA hoy necesita responder preguntas como: ¿qué hace este módulo?
 
 ### Los YAMLs como contexto perfecto para un agente
 
-Los tres archivos juntos son **densos en significado y mínimos en ruido**. Un agente puede leerlos y tener comprensión completa de un módulo en ~100 líneas de YAML, en lugar de miles de líneas de Java:
+Los dos archivos juntos son **densos en significado y mínimos en ruido**. Un agente puede leerlos y tener comprensión completa de un módulo en ~100 líneas de YAML, en lugar de miles de líneas de Java:
 
 ```
-system.yaml      →  "qué soy dentro del sistema y con quién hablo"
-domain.yaml      →  "qué reglas de negocio tengo"
-integration.yaml →  "qué contratos tengo hacia afuera"
+system.yaml   →  "qué soy dentro del sistema y con quién hablo"
+domain.yaml   →  "qué reglas de negocio tengo y qué necesito de otros módulos"
 ```
 
 ### División natural de trabajo humano-agente
@@ -554,8 +576,8 @@ El enfoque habilita una colaboración por capas donde el humano opera en el nive
 |---|---|
 | Define `system.yaml` (visión arquitectural) | Valida coherencia del grafo, detecta dependencias circulares, sugiere módulos faltantes |
 | Revisa y aprueba | Genera `domain.yaml` de cada módulo (entidades, campos, relaciones, enums, eventos) |
-| Refina `domain.yaml` (ajusta reglas de negocio) | Genera `integration.yaml` completo (infiere `publishes:` de los `events[]`, completa `fields:` de `consumes:`) |
-| Revisa y aprueba | Ejecuta `eva g entities` + `eva g integration` — código completo listo para compilar |
+| Refina `domain.yaml` (ajusta reglas de negocio y puertos) | Completa `domain.yaml` con `ports:` y ajusta `events[]` |
+| Revisa y aprueba | Ejecuta `eva g entities` por módulo — código completo listo para compilar |
 
 ### Instrucciones precisas y verificables para el agente
 
@@ -574,7 +596,7 @@ El modelo YAML como fuente de verdad hace que cada cambio sea mínimo y rastreab
 ```
 Cambio de negocio:      editar domain.yaml   →  eva g entities orders
 Nuevo evento:           editar system.yaml   →  eva system validate
-                        editar integration   →  eva g integration orders payments
+                        editar domain.yaml   →  eva g entities orders
 Nueva feature completa: agente recibe domain.yaml actual + descripción del cambio
                         propone domain.yaml actualizado (diff mínimo)
                         humano aprueba  →  eva g entities
@@ -587,13 +609,12 @@ Cada iteración tiene un **artefacto de revisión claro** (el YAML diff) antes d
 Combinados, los cuatro archivos forman el contexto completo para cualquier agente que se incorpore al proyecto:
 
 ```
-AGENTS.md          →  "cómo se hace en eva4j"          (patrones globales)
-system.yaml        →  "qué existe en este proyecto"     (topología del sistema)
-domain.yaml        →  "qué es este módulo"              (negocio del módulo)
-integration.yaml   →  "cómo habla este módulo"          (contratos del módulo)
+AGENTS.md     →  "cómo se hace en eva4j"              (patrones globales)
+system.yaml   →  "qué existe en este proyecto"         (topología del sistema)
+domain.yaml   →  "qué es este módulo y cómo habla"    (negocio + puertos)
 ```
 
-Un agente que recibe estos cuatro archivos tiene todo lo que necesita para contribuir al proyecto **sin sesión de onboarding**.
+Un agente que recibe estos tres archivos tiene todo lo que necesita para contribuir al proyecto **sin sesión de onboarding**.
 
 ### Generación en cascada desde una sola sesión
 
@@ -603,11 +624,10 @@ El flujo completo puede ejecutarse colaborativamente en una sola conversación c
 1. Humano describe el negocio en lenguaje natural
 2. Agente propone system.yaml
 3. Humano refina system.yaml  →  eva system validate
-4. Agente genera domain.yaml de cada módulo
+4. Agente genera domain.yaml de cada módulo (entities + events + ports)
 5. Humano revisa y ajusta
-6. Agente completa integration.yaml
-7. eva g entities + eva g integration
-8. Sistema funcionando
+6. eva g entities por módulo  →  código completo generado
+7. Sistema funcionando
 ```
 
 ---
@@ -709,7 +729,7 @@ Genera el system.yaml completo respetando:
 ┌──────────────────────────────────────────────────────────────────┐
 │  6. BOOTSTRAP                                                     │
 │     eva system init  →  proyecto + módulos + domain.yaml          │
-│                          + integration.yaml pre-llenados          │
+│                          (con endpoints: pre-generados)           │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -751,8 +771,9 @@ Sin una referencia técnica precisa, el agente puede generar YAML semánticament
    ¿Los `domain.yaml` son siempre derivados del `system.yaml` (un cambio en uno requiere actualizar el otro), o el `system.yaml` solo se usa para el arranque inicial y después cada módulo evoluciona libremente?  
    *Recomendación actual: bootstrap inicial. Los módulos evolucionan de forma autónoma.*
 
-2. **¿Cómo manejar eventos cuyos campos no están definidos en `system.yaml`?**  
-   El `system.yaml` no conoce los campos de los eventos (ese es territorio del dominio). ¿El `integration.yaml → consumes[].fields` es suficiente como contrato, o hace falta un schema compartido?
+2. ~~**¿Cómo manejar eventos cuyos campos no están definidos en `system.yaml`?**~~  
+   ~~El `system.yaml` no conoce los campos de los eventos (ese es territorio del dominio). ¿El `integration.yaml → consumes[].fields` es suficiente como contrato, o hace falta un schema compartido?~~  
+   **Resuelto:** los campos del evento se declaran en `domain.yaml → events[].fields` del módulo productor. El consumidor los conoce al leer el `domain.yaml` del productor. No hace falta un schema compartido separado.
 
 3. **¿Soporte para múltiples entornos en `system.yaml`?**  
    Los `baseUrl` de los `calls:` son distintos por entorno. ¿Se resuelve con variables de entorno, o el `system.yaml` puede tener secciones por entorno?
@@ -760,8 +781,9 @@ Sin una referencia técnica precisa, el agente puede generar YAML semánticament
 4. **¿Qué pasa con módulos que no están en `system.yaml` pero ya existen?**  
    Para proyectos existentes, ¿hay un comando `eva system scan` que genere el `system.yaml` a partir de la estructura actual?
 
-5. **Granularidad de `exposes:`**  
-   ¿Los endpoints en `exposes:` solo son documentales, o en el futuro podrían incluir request/response bodies para generar también los DTOs del controller?
+5. ~~**Granularidad de `exposes:`**~~  
+   ~~¿Los endpoints en `exposes:` solo son documentales, o en el futuro podrían incluir request/response bodies para generar también los DTOs del controller?~~  
+   **Resuelto:** sintaxis objeto obligatoria con `method`, `path`, `useCase` y `description`. El campo `useCase` permite a `eva system init` pre-generar la sección `endpoints:` completa en `domain.yaml`; el desarrollador solo rellena `aggregates:`.
 
 ---
 
