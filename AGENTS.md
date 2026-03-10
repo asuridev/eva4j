@@ -460,6 +460,8 @@ aggregates:
         # kafka: true  # opcional — publica a Kafka tras commit
 ```
 
+El `domain.yaml` también soporta una sección `endpoints:` opcional (sibling de `aggregates:`) para declarar los endpoints REST. Ver sección [⚡ Características Avanzadas](#-características-avanzadas-del-domainyaml) para detalles.
+
 ---
 
 ## ⚡ Características Avanzadas del domain.yaml
@@ -956,7 +958,18 @@ private String customerId;
 2. **SI** el módulo requiere ciclo de vida → usar `transitions` + `initialValue` en el enum
 3. **SI** un valor tiene lógica de negocio → declararlo como `valueObject` con `methods`
 4. **SI** ocurren hechos relevantes de negocio → declarar `events[]` en el agregado
-5. **DESPUÉS** de generar el `domain.yaml` → ejecutar `eva g entities <module>`
+5. **SI** el módulo expone endpoints REST específicos → declarar `endpoints:` con versiones y operaciones
+6. **DESPUÉS** de generar el `domain.yaml` → ejecutar `eva g entities <module>`
+
+### Al Usar `endpoints:` en domain.yaml
+
+1. **SIEMPRE** declarar `endpoints:` cuando el API REST tiene comportamientos custom (confirmar, cancelar, activar, etc.)
+2. **NUNCA** usar `endpoints:` si solo necesitas CRUD estándar — el flujo interactivo es más simple
+3. **SIEMPRE** usar PascalCase para los nombres de `useCase` (ej: `ConfirmOrder`, no `confirmOrder`)
+4. **CONOCER** cuáles son los 5 use cases estándar por aggregate: `Create{E}`, `Update{E}`, `Delete{E}`, `Get{E}`, `FindAll{E}s` — estos generan implementación completa
+5. **SABER** que cualquier otro nombre genera un **scaffold** con `UnsupportedOperationException` — el desarrollador debe implementar el handler
+6. **APLICAR** la regla anti-duplicado: si el mismo useCase aparece en v1 y v2, se genera solo una vez
+7. **NOMBRAR** los controladores según la convención: `{Aggregate}{VersionCapitalized}Controller` (ej: `OrderV1Controller`)
 
 ### Al Generar Código de Dominio
 
@@ -1189,6 +1202,7 @@ Al generar o modificar código, verificar:
 - [ ] Value Object con comportamiento → declarar `methods` en lugar de lógica en entidad
 - [ ] Evento de dominio → declarar en `events[]`, publicar con `raise()` en método de negocio
 - [ ] Evento con Kafka → agregar `kafka: true` al evento
+- [ ] Endpoints REST específicos → declarar `endpoints:` con versiones y operaciones; usar nombres estándar para implementación completa
 
 ---
 

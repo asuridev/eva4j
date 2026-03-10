@@ -13,6 +13,7 @@
 - [Validaciones JSR-303](#validaciones-jsr-303)
 - [Relaciones](#relaciones)
 - [Tipos de Datos](#tipos-de-datos)
+- [Sección endpoints](#sección-endpoints)
 - [Ejemplos Completos](#ejemplos-completos)
 
 ---
@@ -2438,6 +2439,155 @@ Genera:
 @Builder.Default
 private List<AddressJpa> addresses = new ArrayList<>();
 ```
+
+---
+
+## Sección endpoints
+
+La sección `endpoints:` es **opcional** y se declara como clave hermana de `aggregates:` en el YAML. Cuando está presente, controla **qué use cases y controladores REST se generan**. Cuando está ausente, el generador usa el flujo interactivo tradicional (5 CRUD fijos por aggregate root).
+
+### Comportamiento condicional
+
+| Condición | Comportamiento |
+|-----------|---------------|
+| `endpoints:` **ausente** | Pregunta interactiva "¿Generar CRUD?" → genera 5 use cases estándar |
+| `endpoints:` **presente** | Genera automáticamente solo los use cases declarados en `operations[]` |
+
+### Sintaxis
+
+```yaml
+# Sección endpoints: sibling de aggregates:
+endpoints:
+  basePath: /orders            # Ruta base (incluida en @RequestMapping "/api/{version}{basePath}")
+  versions:
+    - version: v1              # Versión del API (ej: v1, v2, v1-beta)
+      operations:
+        - method: GET          # HTTP method (GET, POST, PUT, PATCH, DELETE)
+          path: /{id}          # Path relativo al basePath (/ para la raíz)
+          useCase: GetOrder    # Nombre del use case (PascalCase)
+          description: "Obtener pedido por ID"   # Descripción para Swagger
+```
+
+### Campos de `endpoints:`
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `basePath` | String | Sí | Ruta base del recurso (ej: `/orders`) |
+| `versions` | Array | Sí | Lista de versiones de API |
+| `versions[].version` | String | Sí | Identificador de versión (ej: `v1`) |
+| `versions[].operations` | Array | Sí | Lista de endpoints a generar |
+| `operations[].method` | String | Sí | Verbo HTTP: `GET`, `POST`, `PUT`, `PATCH`, `DELETE` |
+| `operations[].path` | String | Sí | Path relativo (ej: `/`, `/{id}`, `/{id}/confirm`) |
+| `operations[].useCase` | String | Sí | Nombre del use case en PascalCase |
+| `operations[].description` | String | No | Descripción para la anotación `@Operation` de Swagger |
+
+### Tipo inferido (`type`)
+
+El tipo del use case se infiere automáticamente del método HTTP:
+
+| HTTP method | Tipo inferido | Genera |
+|-------------|--------------|--------|
+| `GET` | `query` | `{UseCaseName}Query` + `{UseCaseName}QueryHandler` |
+| `POST`, `PUT`, `PATCH`, `DELETE` | `command` | `{UseCaseName}Command` + `{UseCaseName}CommandHandler` |
+
+### Use cases estándar vs. scaffold
+
+| Categoría | Nombres Match | Generado |
+|-----------|---------------|---------|
+| **Estándar** | `Create{Aggregate}`, `Update{Aggregate}`, `Delete{Aggregate}`, `Get{Aggregate}`, `FindAll{Aggregate}s` | Implementación completa con lógica de repositorio |
+| **Scaffold** | Cualquier otro nombre (`ConfirmOrder`, `ActivateProduct`, etc.) | Clase con `// TODO` — el desarrollador completa la lógica |
+
+Los use cases estándar reutilizan los templates CRUD existentes (implementación idéntica al flujo sin `endpoints:`). Los scaffolds generan archivos con `UnsupportedOperationException` y comentarios guía.
+
+### Regla anti-duplicado (multi-versión)
+
+Cuando el mismo `useCase` aparece en múltiples versiones (ej: `CreateProduct` en v1 y v2), el generador crea el Command/Query + Handler **solo una vez** (en la primera versión donde aparece). Los controladores de las versiones posteriores importan y referencian el mismo use case sin regenerarlo.
+
+```yaml
+endpoints:
+  basePath: /products
+  versions:
+    - version: v1
+      operations:
+        - { method: POST, path: /, useCase: CreateProduct }   # ← genera CreateProductCommand + Handler
+
+    - version: v2
+      operations:
+        - { method: POST, path: /, useCase: CreateProduct }   # ← NO regenera, solo referencia en V2Controller
+        - { method: PUT, path: /{id}/activate, useCase: ActivateProduct }  # ← nuevo scaffold
+```
+
+### Nombres de controladores generados
+
+Con `endpoints:`, el controlador se nombra `{Aggregate}{VersionCapitalized}Controller`:
+
+| Aggregate | Version | Clase generada | Archivo |
+|-----------|---------|---------------|---------|
+| `Order` | `v1` | `OrderV1Controller` | `controllers/order/v1/OrderV1Controller.java` |
+| `Product` | `v2` | `ProductV2Controller` | `controllers/product/v2/ProductV2Controller.java` |
+
+> Sin `endpoints:`, el controlador se llama `{Aggregate}Controller` y usa la versión ingresada en el prompt.
+
+### Ejemplo básico (una versión)
+
+```yaml
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        fields:
+          - { name: id, type: String }
+          - { name: orderNumber, type: String }
+          - { name: status, type: OrderStatus, readOnly: true }
+
+    enums:
+      - name: OrderStatus
+        initialValue: PENDING
+        values: [PENDING, CONFIRMED, SHIPPED, CANCELLED]
+
+endpoints:
+  basePath: /orders
+  versions:
+    - version: v1
+      operations:
+        - { method: GET,    path: /{id}, useCase: GetOrder,    description: "Obtener pedido" }
+        - { method: GET,    path: /,     useCase: FindAllOrders, description: "Listar pedidos" }
+        - { method: POST,   path: /,     useCase: CreateOrder, description: "Crear pedido" }
+        - { method: DELETE, path: /{id}, useCase: DeleteOrder, description: "Eliminar pedido" }
+        - { method: PUT,    path: /{id}/confirm, useCase: ConfirmOrder, description: "Confirmar pedido" }
+```
+
+**Archivos generados:**
+```
+application/
+  commands/
+    CreateOrderCommand.java          ← estándar (completo)
+    DeleteOrderCommand.java          ← estándar (completo)
+    ConfirmOrderCommand.java         ← scaffold (TODO)
+  queries/
+    GetOrderQuery.java               ← estándar (completo)
+    FindAllOrdersQuery.java          ← NOTA: no es estándar (estándar sería FindAllOrders s)
+                                       → scaffold (TODO)
+  usecases/
+    CreateOrderCommandHandler.java   ← estándar
+    DeleteOrderCommandHandler.java   ← estándar
+    ConfirmOrderCommandHandler.java  ← scaffold
+    GetOrderQueryHandler.java        ← estándar
+    FindAllOrdersQueryHandler.java   ← scaffold
+  dtos/
+    OrderResponseDto.java
+  mappers/
+    OrderApplicationMapper.java
+infrastructure/rest/controllers/order/
+  v1/
+    OrderV1Controller.java           ← controller con 5 métodos declarados
+```
+
+### Ejemplo multi-versión
+
+Ver [`examples/domain-endpoints-versioned.yaml`](examples/domain-endpoints-versioned.yaml) para un ejemplo completo con v1 y v2, incluyendo la regla anti-duplicado y scaffolds.
 
 ---
 

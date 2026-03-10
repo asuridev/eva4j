@@ -1,0 +1,144 @@
+# EJEMPLO: ENDPOINTS CON VERSIONADO MÚLTIPLE (v1 + v2)
+# Demuestra cómo v1 y v2 coexisten generando controladores independientes.
+#
+# REGLA ANTI-DUPLICADO:
+#   Si un useCase declarado en v2 ya fue generado en v1, el generador
+#   omite la creación del Command/Query + Handler y SOLO agrega la
+#   referencia en el controlador de v2.
+#
+# RESULTADO:
+#   - 1 controlador por versión (ProductV1Controller, ProductV2Controller)
+#   - Use cases propios de cada versión generados una sola vez
+#   - Use cases compartidos referenciados sin regenerar
+
+aggregates:
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        tableName: products
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+            validations:
+              - type: NotBlank
+          - name: description
+            type: String
+          - name: price
+            type: BigDecimal
+            validations:
+              - type: Positive
+          - name: stock
+            type: Integer
+            readOnly: true
+            defaultValue: 0
+          - name: active
+            type: Boolean
+            readOnly: true
+            defaultValue: true
+
+endpoints:
+  basePath: /products
+  versions:
+    # ── v1: CRUD estándar ──────────────────────────────────────────────────
+    - version: v1
+      operations:
+        - method: GET
+          path: /{id}
+          description: "Obtener producto por ID"
+          useCase: FindProductById      # completo
+
+        - method: GET
+          path: /
+          description: "Listar productos activos"
+          useCase: FindAllProducts      # completo
+
+        - method: POST
+          path: /
+          description: "Crear producto"
+          useCase: CreateProduct        # completo
+
+        - method: PUT
+          path: /{id}
+          description: "Actualizar datos del producto"
+          useCase: UpdateProduct        # completo
+
+        - method: DELETE
+          path: /{id}
+          description: "Eliminar producto"
+          useCase: DeleteProduct        # completo
+
+    # ── v2: nuevas operaciones + reuso de use cases de v1 ─────────────────
+    - version: v2
+      operations:
+        - method: GET
+          path: /{id}
+          description: "Producto con categorías y variantes embebidas"
+          useCase: FindProductByIdV2    # NUEVO handler — shape de respuesta distinto
+
+        - method: GET
+          path: /
+          description: "Listado con filtros avanzados y metadata extendida"
+          useCase: FindAllProductsV2    # NUEVO handler — parámetros de búsqueda distintos
+
+        - method: POST
+          path: /
+          description: "Crear producto (misma lógica que v1)"
+          useCase: CreateProduct        # REUTILIZA v1 — no regenera handler
+
+        - method: PUT
+          path: /{id}
+          description: "Actualizar producto (misma lógica que v1)"
+          useCase: UpdateProduct        # REUTILIZA v1 — no regenera handler
+
+        - method: DELETE
+          path: /{id}
+          description: "Eliminar producto (misma lógica que v1)"
+          useCase: DeleteProduct        # REUTILIZA v1 — no regenera handler
+
+        - method: PUT
+          path: /{id}/activate
+          description: "Activar un producto desactivado"
+          useCase: ActivateProduct      # NUEVO scaffold — TODO: product.activate()
+
+        - method: PUT
+          path: /{id}/deactivate
+          description: "Desactivar un producto activo"
+          useCase: DeactivateProduct    # NUEVO scaffold — TODO: product.deactivate()
+
+# Archivos generados:
+#
+# infrastructure/rest/controllers/product/
+#   ├── v1/ProductV1Controller.java     ← 5 endpoints (v1)
+#   └── v2/ProductV2Controller.java     ← 7 endpoints (v2)
+#
+# application/commands/ (solo use cases ÚNICOS — sin duplicados)
+#   ├── CreateProductCommand.java
+#   ├── UpdateProductCommand.java
+#   ├── DeleteProductCommand.java
+#   ├── ActivateProductCommand.java     ← solo v2
+#   └── DeactivateProductCommand.java   ← solo v2
+#
+# application/queries/ (solo use cases ÚNICOS)
+#   ├── FindProductByIdQuery.java
+#   ├── FindAllProductsQuery.java
+#   ├── FindProductByIdV2Query.java     ← solo v2
+#   └── FindAllProductsV2Query.java     ← solo v2
+#
+# application/usecases/
+#   ├── CreateProductCommandHandler.java     ← completo
+#   ├── UpdateProductCommandHandler.java     ← completo
+#   ├── DeleteProductCommandHandler.java     ← completo
+#   ├── ActivateProductCommandHandler.java   ← scaffold + TODO
+#   ├── DeactivateProductCommandHandler.java ← scaffold + TODO
+#   ├── FindProductByIdQueryHandler.java     ← completo
+#   ├── FindAllProductsQueryHandler.java     ← completo
+#   ├── FindProductByIdV2QueryHandler.java   ← completo (shape distinto)
+#   └── FindAllProductsV2QueryHandler.java   ← completo (filtros extendidos)
+#
+# CreateProduct, UpdateProduct, DeleteProduct aparecen en v2 pero ya
+# existen de v1 → ProductV2Controller los inyecta sin regenerar handlers.

@@ -1,0 +1,133 @@
+<%
+// ── Classify operations for selective imports ────────────────────────────
+const uniqueOpsMap = new Map();
+operations.forEach(op => { if (!uniqueOpsMap.has(op.useCase)) uniqueOpsMap.set(op.useCase, op); });
+const uniqueOps = Array.from(uniqueOpsMap.values());
+
+const hasCreate  = uniqueOps.some(op => op.isStandard && op.standardType === 'create');
+const hasUpdate  = uniqueOps.some(op => op.isStandard && op.standardType === 'update');
+const hasDelete  = uniqueOps.some(op => op.isStandard && op.standardType === 'delete');
+const hasGetById = uniqueOps.some(op => op.isStandard && op.standardType === 'getById');
+const hasFindAll = uniqueOps.some(op => op.isStandard && op.standardType === 'findAll');
+
+const customCmdUCs   = uniqueOps.filter(op => !op.isStandard && op.type === 'command');
+const customQueryUCs = uniqueOps.filter(op => !op.isStandard && op.type === 'query');
+-%>
+package <%= packageName %>.<%= moduleName %>.infrastructure.rest.controllers.<%= resourceNameCamel %>.<%= apiVersion %>;
+
+<% if (hasCreate) { -%>
+import <%= packageName %>.<%= moduleName %>.application.commands.Create<%= aggregateName %>Command;
+<% } -%>
+<% if (hasUpdate) { -%>
+import <%= packageName %>.<%= moduleName %>.application.commands.Update<%= aggregateName %>Command;
+<% } -%>
+<% if (hasDelete) { -%>
+import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggregateName %>Command;
+<% } -%>
+<% if (hasGetById) { -%>
+import <%= packageName %>.<%= moduleName %>.application.queries.Get<%= aggregateName %>Query;
+<% } -%>
+<% if (hasFindAll) { -%>
+import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
+<% } -%>
+<% customCmdUCs.forEach(function(op) { -%>
+import <%= packageName %>.<%= moduleName %>.application.commands.<%= op.useCase %>Command;
+<% }); -%>
+<% customQueryUCs.forEach(function(op) { -%>
+import <%= packageName %>.<%= moduleName %>.application.queries.<%= op.useCase %>Query;
+<% }); -%>
+<% if (hasGetById || hasFindAll) { -%>
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+<% } -%>
+<% if (hasFindAll) { -%>
+import <%= packageName %>.shared.application.dtos.PagedResponse;
+<% } -%>
+import <%= packageName %>.shared.infrastructure.configurations.useCaseConfig.UseCaseMediator;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/<%= apiVersion %><%= basePath %>")
+@Slf4j
+@Tag(name = "<%= aggregateName %>", description = "<%= aggregateName %> Management API")
+public class <%= controllerName %> {
+
+    private final UseCaseMediator useCaseMediator;
+
+    public <%= controllerName %>(UseCaseMediator useCaseMediator) {
+        this.useCaseMediator = useCaseMediator;
+    }
+<% operations.forEach(function(op) { %>
+    /**
+     * <%= op.description || op.useCase %>
+     */
+    @<%- op.httpAnnotation %>(<% if (op.path && op.path !== '/') { %>"<%= op.path %>"<% } %>)
+    @ResponseStatus(<%= op.httpStatus %>)
+    @Operation(summary = "<%= op.description || op.useCase %>")
+<%  if (op.isStandard && op.standardType === 'create') { %>
+    public void <%= op.methodName %>(@Valid @RequestBody Create<%= aggregateName %>Command command) {
+        log.info("Creating <%= aggregateName %>: {}", command);
+        useCaseMediator.dispatch(command);
+    }
+<%  } else if (op.isStandard && op.standardType === 'getById') { %>
+    public <%= aggregateName %>ResponseDto <%= op.methodName %>(@PathVariable <%- idType %> id) {
+        log.info("Finding <%= aggregateName %> by id: {}", id);
+        return useCaseMediator.dispatch(new Get<%= aggregateName %>Query(id));
+    }
+<%  } else if (op.isStandard && op.standardType === 'findAll') { %>
+    public PagedResponse<<%= aggregateName %>ResponseDto> <%= op.methodName %>(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "id") String sortBy,
+            @RequestParam(defaultValue = "ASC") String sortDirection) {
+        log.info("Finding all <%= aggregateName %>s — page={}, size={}, sortBy={}, sortDirection={}",
+                page, size, sortBy, sortDirection);
+        return useCaseMediator.dispatch(new FindAll<%= aggregateName %>sQuery(page, size, sortBy, sortDirection));
+    }
+<%  } else if (op.isStandard && op.standardType === 'delete') { %>
+    public void <%= op.methodName %>(@PathVariable <%- idType %> id) {
+        log.info("Deleting <%= aggregateName %> id: {}", id);
+        useCaseMediator.dispatch(new Delete<%= aggregateName %>Command(id));
+    }
+<%  } else if (op.isStandard && op.standardType === 'update') { %>
+    public void <%= op.methodName %>(
+            @PathVariable <%- idType %> id,
+            @RequestBody Update<%= aggregateName %>Command command) {
+        log.info("Updating <%= aggregateName %> id: {}", id);
+        useCaseMediator.dispatch(new Update<%= aggregateName %>Command(
+                id<% if (commandFields && commandFields.length > 0) { %>,<% } %>
+<% (commandFields || []).forEach(function(field, idx) { %>
+                command.<%= field.name %>()<% if (idx < commandFields.length - 1 || (oneToManyRelationships && oneToManyRelationships.length > 0) || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
+<% }); %>
+<% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
+<% oneToManyRelationships.forEach(function(rel, idx) { %>
+                command.<%= rel.fieldName %>()<% if (idx < oneToManyRelationships.length - 1 || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
+<% }); %>
+<% } %>
+<% if (oneToOneRelationships && oneToOneRelationships.length > 0) { %>
+<% oneToOneRelationships.forEach(function(rel, idx) { %>
+                command.<%= rel.fieldName %>()<% if (idx < oneToOneRelationships.length - 1) { %>,<% } %>
+<% }); %>
+<% } %>
+        ));
+    }
+<%  } else if (op.type === 'command') { %>
+    // TODO: Review the fields declared in <%= op.useCase %>Command and adapt the method signature if needed
+    public void <%= op.methodName %>(<% if (op.hasPathVar) { %>@PathVariable <%- op.idType %> <%= op.pathVarName %>, <% } %>@Valid @RequestBody <%= op.useCase %>Command command) {
+        log.info("Handling <%= op.useCase %>: {}", command);
+        useCaseMediator.dispatch(command);
+    }
+<%  } else { %>
+    // TODO: Review the parameters in <%= op.useCase %>Query and replace Object with the actual return type
+    public Object <%= op.methodName %>(<% if (op.hasPathVar) { %>@PathVariable <%- op.idType %> <%= op.pathVarName %><% } %>) {
+        log.info("Handling <%= op.useCase %>");
+        return useCaseMediator.dispatch(new <%= op.useCase %>Query(<% if (op.hasPathVar) { %><%= op.pathVarName %><% } %>));
+    }
+<%  } -%>
+<% }); %>
+}

@@ -1,0 +1,135 @@
+# EJEMPLO: ENDPOINTS DECLARATIVOS — CASO BÁSICO (una versión)
+# Módulo de pedidos con operaciones específicas del negocio.
+#
+# COMPORTAMIENTO CONDICIONAL:
+#
+#   SIN sección endpoints: → genera 5 CRUD fijos por defecto:
+#       CreateOrder, UpdateOrder, DeleteOrder,
+#       FindOrderById, FindAllOrders
+#
+#   CON sección endpoints: → genera ÚNICAMENTE las operaciones
+#       declaradas en operations[] — ni más, ni menos.
+#
+# TYPE INFERIDO desde method:
+#   GET              → query
+#   POST/PUT/DELETE/PATCH → command
+#
+# SCAFFOLD vs COMPLETO:
+#   Use cases estándar (Create*, Update*, Delete*, FindById*, FindAll*):
+#     → implementación completa con lógica de repositorio
+#   Use cases custom (ConfirmOrder, CancelOrder, etc.):
+#     → scaffold con // TODO apuntando al método de negocio sugerido
+
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Order number is required"
+          - name: customerId
+            type: String
+            reference:
+              aggregate: Customer
+              module: customers
+          - name: status
+            type: OrderStatus
+            readOnly: true
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+            defaultValue: "0.00"
+
+    enums:
+      - name: OrderStatus
+        initialValue: PENDING
+        transitions:
+          - from: PENDING
+            to: CONFIRMED
+            method: confirm
+          - from: [PENDING, CONFIRMED]
+            to: CANCELLED
+            method: cancel
+        values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+
+    events:
+      - name: OrderPlacedEvent
+        fields:
+          - name: orderId
+            type: String
+          - name: customerId
+            type: String
+        kafka: true
+
+# ─── Sección endpoints ─────────────────────────────────────────────────────
+# Presente  → genera solo los use cases declarados
+# Ausente   → comportamiento actual (5 CRUD por defecto)
+# ──────────────────────────────────────────────────────────────────────────
+
+endpoints:
+  basePath: /orders
+  versions:
+    - version: v1
+      operations:
+        - method: GET
+          path: /{id}
+          description: "Obtener detalle de un pedido"
+          useCase: FindOrderById        # completo: FindOrderByIdQuery + Handler
+
+        - method: GET
+          path: /
+          description: "Listar pedidos con paginación"
+          useCase: FindAllOrders        # completo: FindAllOrdersQuery + Handler
+
+        - method: POST
+          path: /
+          description: "Crear nuevo pedido"
+          useCase: CreateOrder          # completo: CreateOrderCommand + Handler
+
+        - method: PUT
+          path: /{id}/confirm
+          description: "Confirmar pedido pendiente — PENDING → CONFIRMED"
+          useCase: ConfirmOrder         # scaffold: TODO → order.confirm(); repo.save(order)
+
+        - method: PUT
+          path: /{id}/cancel
+          description: "Cancelar pedido — [PENDING, CONFIRMED] → CANCELLED"
+          useCase: CancelOrder          # scaffold: TODO → order.cancel(); repo.save(order)
+
+        - method: DELETE
+          path: /{id}
+          description: "Eliminar pedido"
+          useCase: DeleteOrder          # completo: DeleteOrderCommand + Handler
+
+# Archivos generados con esta configuración:
+#
+# infrastructure/rest/controllers/order/v1/
+#   └── OrderV1Controller.java          ← 6 métodos exactos
+#
+# application/commands/
+#   ├── CreateOrderCommand.java
+#   ├── ConfirmOrderCommand.java
+#   ├── CancelOrderCommand.java
+#   └── DeleteOrderCommand.java
+#
+# application/queries/
+#   ├── FindOrderByIdQuery.java
+#   └── FindAllOrdersQuery.java
+#
+# application/usecases/
+#   ├── CreateOrderCommandHandler.java      ← implementación completa
+#   ├── ConfirmOrderCommandHandler.java     ← scaffold + TODO
+#   ├── CancelOrderCommandHandler.java      ← scaffold + TODO
+#   ├── DeleteOrderCommandHandler.java      ← implementación completa
+#   ├── FindOrderByIdQueryHandler.java      ← implementación completa
+#   └── FindAllOrdersQueryHandler.java      ← implementación completa

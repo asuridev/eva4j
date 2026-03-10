@@ -1,0 +1,40 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.queries.<%= useCaseName %>Query;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.interfaces.QueryHandler;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * <%= useCaseName %>QueryHandler
+ * TODO: Implement the query logic for "<%= useCaseName %>".
+ *
+ * Suggested steps:
+ *   1. Read parameters from the query record
+ *   2. Retrieve data from the repository
+ *   3. Map the result to a DTO and return it
+ */
+@Slf4j
+@ApplicationComponent
+public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseName %>Query, Object> {
+
+    private final <%= aggregateName %>Repository repository;
+
+    public <%= useCaseName %>QueryHandler(<%= aggregateName %>Repository repository) {
+        this.repository = repository;
+    }
+
+    @Override
+    public Object handle(<%= useCaseName %>Query query) {
+        log.info("Handling <%= useCaseName %>Query: {}", query);
+
+        // TODO: Implement query logic
+        // Example:
+        // return repository.findById(query.id())
+        //         .map(mapper::toDto)
+        //         .orElseThrow(() -> new EntityNotFoundException("<%= aggregateName %> not found"));
+
+        throw new UnsupportedOperationException("<%= useCaseName %> not yet implemented");
+    }
+}

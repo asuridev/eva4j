@@ -117,30 +117,38 @@ system:
   springBootVersion: 3.4.1
   database: postgresql
 
+messaging:
+  enabled: true
+  broker: kafka                  # kafka | rabbitmq | sns-sqs (solo kafka soportado actualmente)
+  kafka:
+    bootstrapServers: localhost:9092
+    defaultGroupId: ecommerce-platform
+    topicPrefix: ecommerce       # opcional — prefixa todos los topics: ecommerce.ORDER_PLACED
+
 modules:
   - name: orders
     description: "Gestión del ciclo de vida de pedidos"
     exposes:
-      - GET    /orders/{id}
-      - GET    /orders
-      - POST   /orders
-      - PUT    /orders/{id}/confirm
-      - PUT    /orders/{id}/cancel
+      - GET  /orders/{id}          # Obtener detalle de un pedido
+      - GET  /orders               # Listar pedidos con filtros y paginación
+      - POST /orders               # Crear nuevo pedido
+      - PUT  /orders/{id}/confirm  # Confirmar pedido pendiente
+      - PUT  /orders/{id}/cancel   # Cancelar pedido (PENDING o CONFIRMED)
 
   - name: customers
     description: "Registro y gestión de clientes"
     exposes:
-      - GET  /customers/{id}
-      - GET  /customers
-      - POST /customers
-      - PUT  /customers/{id}
+      - GET  /customers/{id}       # Obtener cliente por ID
+      - GET  /customers            # Listar clientes con filtros
+      - POST /customers            # Registrar nuevo cliente
+      - PUT  /customers/{id}       # Actualizar datos del cliente
 
   - name: payments
     description: "Procesamiento de pagos"
     exposes:
-      - POST /payments
-      - GET  /payments/{id}
-      - POST /payments/{id}/refund
+      - POST /payments             # Iniciar procesamiento de pago
+      - GET  /payments/{id}        # Consultar estado de un pago
+      - POST /payments/{id}/refund # Solicitar reembolso
 
   - name: notifications
     description: "Envío de notificaciones"
@@ -188,6 +196,128 @@ integrations:
 - Los endpoints en `exposes:` son referencias documentales y sirven para validar los `calls.using:`
 - Los módulos en `consumers:` deben existir en `modules:`
 - Los eventos en `consumers:` deben tener exactamente un `producer:`
+
+### Sección `messaging`
+
+| Campo | Obligatorio | Descripción |
+|---|---|---|
+| `enabled` | sí | `true` para activar soporte de mensajería asíncrona |
+| `broker` | sí | Tipo de broker: `kafka` \| `rabbitmq` \| `sns-sqs` |
+| `kafka.bootstrapServers` | cuando `broker: kafka` | Host(s) del broker Kafka |
+| `kafka.defaultGroupId` | no | Consumer group ID base; cada módulo añade su sufijo |
+| `kafka.topicPrefix` | no | Prefijo global para todos los topics del sistema |
+| `rabbitmq.host` | cuando `broker: rabbitmq` | Host del broker RabbitMQ |
+| `rabbitmq.port` | no | Puerto (default `5672`) |
+| `rabbitmq.virtualHost` | no | VirtualHost (default `/`) |
+| `rabbitmq.exchangeType` | no | Tipo de exchange: `topic` \| `direct` \| `fanout` (default `topic`) |
+| `sns-sqs.region` | cuando `broker: sns-sqs` | Región AWS |
+| `sns-sqs.accountId` | cuando `broker: sns-sqs` | AWS Account ID (para construir ARNs) |
+| `sns-sqs.endpointOverride` | no | URL local para desarrollo (ej. LocalStack) |
+
+> **Nota:** solo `kafka` está soportado actualmente. Los valores `rabbitmq` y `sns-sqs` están reservados para versiones futuras y generan un warning al ejecutar `eva system validate`.
+
+#### Ejemplo con RabbitMQ
+
+En brokers basados en colas, el modelo de comunicación cambia: en lugar de **topics** (Kafka) se usan **exchanges + queues** (RabbitMQ) o **topics SNS + colas SQS** (AWS). La integración sigue siendo declarativa — la diferencia está en los campos de configuración y en cómo se nombran los canales en `integrations.async`.
+
+```yaml
+# system.yaml — broker RabbitMQ
+
+system:
+  name: ecommerce-platform
+  groupId: com.acme
+  javaVersion: 21
+  springBootVersion: 3.4.1
+  database: postgresql
+
+messaging:
+  enabled: true
+  broker: rabbitmq
+  rabbitmq:
+    host: localhost
+    port: 5672
+    virtualHost: /ecommerce
+    exchangeType: topic            # un exchange por evento (topic exchange)
+
+modules:
+  - name: orders
+    description: "Gestión del ciclo de vida de pedidos"
+    exposes:
+      - POST /orders               # Crear nuevo pedido
+      - PUT  /orders/{id}/confirm  # Confirmar pedido pendiente
+      - PUT  /orders/{id}/cancel   # Cancelar pedido
+
+  - name: payments
+    description: "Procesamiento de pagos"
+    exposes:
+      - POST /payments             # Iniciar procesamiento de pago
+
+  - name: notifications
+    description: "Envío de notificaciones"
+    # Sin endpoints REST — solo consume eventos
+
+integrations:
+  async:
+    - event: OrderPlacedEvent
+      producer: orders
+      exchange: orders.events          # exchange RabbitMQ
+      routingKey: order.placed         # routing key del mensaje
+      consumers:
+        - module: payments
+          queue: payments.order.placed  # cola dedicada por consumidor
+        - module: notifications
+          queue: notifications.order.placed
+
+    - event: PaymentProcessedEvent
+      producer: payments
+      exchange: payments.events
+      routingKey: payment.processed
+      consumers:
+        - module: orders
+          queue: orders.payment.processed
+
+  sync:
+    - caller: orders
+      calls: customers
+      port: CustomerService
+      using:
+        - GET /customers/{id}
+```
+
+**Diferencias clave respecto a Kafka:**
+
+| Concepto | Kafka | RabbitMQ |
+|---|---|---|
+| Canal de publicación | `topic` | `exchange` + `routingKey` |
+| Canal de consumo | `topic` (compartido) | `queue` (exclusiva por consumidor) |
+| Retención de mensajes | Log persistente (configurable) | Hasta que el consumidor los acepta |
+| Fan-out | Un topic, múltiples consumer groups | Un exchange, múltiples queues binding |
+| Replay | Sí (offset reset) | No (requiere DLQ + republicación) |
+
+#### Ejemplo con SNS/SQS
+
+```yaml
+# system.yaml — broker SNS/SQS (AWS)
+
+messaging:
+  enabled: true
+  broker: sns-sqs
+  sns-sqs:
+    region: us-east-1
+    accountId: "123456789012"
+    endpointOverride: http://localhost:4566   # LocalStack para desarrollo local
+
+integrations:
+  async:
+    - event: OrderPlacedEvent
+      producer: orders
+      topic: arn:aws:sns:us-east-1:123456789012:OrderPlaced   # ARN del topic SNS
+      consumers:
+        - module: payments
+          queue: arn:aws:sqs:us-east-1:123456789012:payments-order-placed
+        - module: notifications
+          queue: arn:aws:sqs:us-east-1:123456789012:notifications-order-placed
+```
 
 ---
 

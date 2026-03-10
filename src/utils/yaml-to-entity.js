@@ -26,7 +26,8 @@ async function parseDomainYaml(yamlPath, packageName = '', moduleName = '') {
   
   return {
     aggregates,
-    allEnums: extractAllEnums(domainData.aggregates)
+    allEnums: extractAllEnums(domainData.aggregates),
+    endpoints: parseEndpoints(domainData)
   };
 }
 
@@ -959,6 +960,33 @@ function extractAllEnums(aggregates) {
   });
   
   return Array.from(enumsMap.values());
+}
+
+/**
+ * Parse the optional endpoints section from domain.yaml.
+ * When present, controls which use cases and versioned controllers are generated.
+ * @param {Object} domainData - Raw parsed YAML data
+ * @returns {Object|null} Parsed endpoints structure or null if not declared
+ */
+function parseEndpoints(domainData) {
+  if (!domainData.endpoints) return null;
+  const { basePath = '/', versions = [] } = domainData.endpoints;
+  return {
+    basePath,
+    versions: versions.map(v => ({
+      version: v.version,
+      operations: (v.operations || []).map(op => {
+        const method = (op.method || 'GET').toUpperCase();
+        return {
+          method,
+          path: op.path || '/',
+          description: op.description || '',
+          useCase: toPascalCase(op.useCase),
+          type: method === 'GET' ? 'query' : 'command'
+        };
+      })
+    }))
+  };
 }
 
 module.exports = {

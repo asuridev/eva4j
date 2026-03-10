@@ -173,7 +173,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
   try {
     // Parse domain.yaml
-    const { aggregates, allEnums } = await parseDomainYaml(domainYamlPath, packageName, moduleName);
+    const { aggregates, allEnums, endpoints } = await parseDomainYaml(domainYamlPath, packageName, moduleName);
     
     spinner.succeed(chalk.green(`Found ${aggregates.length} aggregate(s) and ${allEnums.length} enum(s)`));
     
@@ -541,15 +541,60 @@ async function generateEntitiesCommand(moduleName, options = {}) {
     // Persist checksums to disk before asking about CRUD
     await checksumManager.save();
 
-    // Ask user if they want to generate CRUD resources
-    const { generateCrud } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'generateCrud',
-        message: 'Do you want to generate CRUD resources for aggregate roots?',
-        default: true
+    if (endpoints) {
+      // ── endpoints: section declared → skip CRUD prompt, auto-generate ──
+      spinner.start('Generating endpoint-driven resources...');
+
+      for (const aggregate of aggregates) {
+        await generateEndpointsResources(
+          aggregate,
+          endpoints,
+          moduleName,
+          moduleBasePath,
+          packageName,
+          generatedFiles,
+          writeOptions
+        );
       }
-    ]);
+
+      spinner.succeed(chalk.green('Endpoint-driven resources generated! ✨'));
+
+      const epFiles = generatedFiles.filter(f =>
+        f.type.includes('Command') || f.type.includes('Query') ||
+        f.type.includes('Handler') || f.type.includes('DTO') ||
+        f.type.includes('Controller') || f.type.includes('Mapper')
+      );
+      console.log(chalk.blue('\n📄 Generated endpoint files:'));
+      const groupedEp = epFiles.reduce((acc, file) => {
+        if (!acc[file.type]) acc[file.type] = [];
+        acc[file.type].push(file);
+        return acc;
+      }, {});
+      Object.keys(groupedEp).forEach(type => {
+        console.log(chalk.gray(`\n  ${type}:`));
+        groupedEp[type].forEach(file => {
+          console.log(chalk.gray(`    ├── ${file.name}`));
+        });
+      });
+
+      // Collect versions for summary
+      const versionList = endpoints.versions.map(v => v.version).join(', ');
+      const totalOps = endpoints.versions.reduce((sum, v) => sum + v.operations.length, 0);
+      console.log(chalk.blue(`\n✅ Generated ${totalOps} endpoint(s) across version(s): ${versionList}`));
+
+      await checksumManager.save();
+
+    } else {
+      // ── No endpoints section → original interactive CRUD flow ────────
+      // Ask user if they want to generate CRUD resources
+      const { generateCrud } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'generateCrud',
+          message: 'Do you want to generate CRUD resources for aggregate roots?',
+          default: true
+        }
+      ]);
 
     if (generateCrud) {
       // Ask for API version
@@ -641,6 +686,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       await checksumManager.save();
     }
 
+    } // end else (no endpoints section)
+
     console.log();
 
   } catch (error) {
@@ -684,6 +731,362 @@ function transformRelsForApp(rels, validatedVoNames) {
       fields: transformFieldsForApp(otoRel.fields || [], validatedVoNames)
     }))
   }));
+}
+
+/**
+ * Enrich a single endpoint operation with derived properties for template rendering.
+ */
+function enrichEndpointOperation(op, aggregateName, idType) {
+  const httpAnnotationMap = {
+    GET: 'GetMapping', POST: 'PostMapping',
+    PUT: 'PutMapping', PATCH: 'PatchMapping', DELETE: 'DeleteMapping'
+  };
+  const hasPathVar = Boolean(op.path && op.path.includes('{'));
+  const pathVarMatch = hasPathVar ? op.path.match(/\{([^}]+)\}/) : null;
+  const pathVarName = pathVarMatch ? pathVarMatch[1] : 'id';
+
+  const standardUseCasesMap = {
+    [`Create${aggregateName}`]: 'create',
+    [`Update${aggregateName}`]: 'update',
+    [`Delete${aggregateName}`]: 'delete',
+    [`Get${aggregateName}`]: 'getById',
+    [`FindAll${aggregateName}s`]: 'findAll'
+  };
+  const standardType = standardUseCasesMap[op.useCase] || null;
+  const isStandard = standardType !== null;
+
+  let returnType = 'void';
+  if (standardType === 'getById') returnType = `${aggregateName}ResponseDto`;
+  else if (standardType === 'findAll') returnType = `PagedResponse<${aggregateName}ResponseDto>`;
+  else if (op.type === 'query') returnType = 'Object';
+
+  let httpStatus = 'HttpStatus.OK';
+  if (standardType === 'create') httpStatus = 'HttpStatus.CREATED';
+  else if (standardType === 'update') httpStatus = 'HttpStatus.NO_CONTENT';
+
+  return {
+    ...op,
+    httpAnnotation: httpAnnotationMap[op.method] || 'PostMapping',
+    methodName: toCamelCase(op.useCase),
+    hasPathVar,
+    pathVarName,
+    isStandard,
+    standardType,
+    returnType,
+    httpStatus,
+    idType
+  };
+}
+
+/**
+ * Generate endpoint-driven resources (use cases + versioned controllers)
+ * for an aggregate when domain.yaml declares an `endpoints:` section.
+ */
+async function generateEndpointsResources(aggregate, endpoints, moduleName, moduleBasePath, packageName, generatedFiles, writeOptions = {}) {
+  const { name: aggregateName, rootEntity, secondaryEntities, valueObjects = [] } = aggregate;
+  const templatesDir = path.join(__dirname, '..', '..', 'templates', 'crud');
+
+  const idField = rootEntity.fields[0];
+  const idType = idField.javaType;
+
+  const commandFields = rootEntity.fields.filter(f =>
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' &&
+    f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
+  );
+
+  const validatedVos = valueObjects.filter(vo =>
+    vo.fields.some(f => f.validationAnnotations && f.validationAnnotations.length > 0)
+  );
+  const validatedVoNames = new Set(validatedVos.map(vo => vo.name));
+
+  const oneToManyRelationships = enrichRelationshipsRecursively(rootEntity, secondaryEntities, 0, new Set());
+  const oneToOneRels = rootEntity.relationships?.filter(r => r.type === 'OneToOne' && !r.isInverse) || [];
+  const oneToOneRelationships = oneToOneRels.map(rel => {
+    const targetEntity = secondaryEntities.find(e => e.name === rel.target);
+    if (!targetEntity) return { targetEntityName: rel.target, fieldName: rel.fieldName, type: rel.type, fields: [] };
+    const targetFields = targetEntity.fields.filter(f =>
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' &&
+      f.name !== 'createdBy' && f.name !== 'updatedBy'
+    );
+    return { targetEntityName: rel.target, fieldName: rel.fieldName, type: rel.type, fields: targetFields, entity: targetEntity };
+  });
+
+  const hasValueObjects = rootEntity.fields.some(f => f.isValueObject);
+  const hasEnums = rootEntity.enums && rootEntity.enums.length > 0;
+  const resourceNameCamel = toCamelCase(aggregateName);
+  const resourceNameKebab = toKebabCase(aggregateName);
+
+  const responseFields = rootEntity.fields.filter(f =>
+    f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden
+  );
+  const responseSecondaryEntities = secondaryEntities.map(entity => ({
+    ...entity,
+    responseFields: entity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden),
+    nestedRelationships: enrichRelationshipsRecursively(entity, secondaryEntities, 0, new Set()),
+    forwardOneToOneRels: (entity.relationships || [])
+      .filter(r => r.type === 'OneToOne' && !r.isInverse)
+      .map(r => ({ targetEntityName: r.target, fieldName: r.fieldName }))
+  }));
+
+  const commandFieldsApp = transformFieldsForApp(commandFields, validatedVoNames);
+  const oneToOneRelationshipsApp = oneToOneRelationships.map(rel => ({
+    ...rel,
+    fields: transformFieldsForApp(rel.fields || [], validatedVoNames)
+  }));
+  const oneToManyRelationshipsApp = transformRelsForApp(oneToManyRelationships, validatedVoNames);
+
+  const baseContext = {
+    packageName, moduleName, aggregateName, rootEntity, secondaryEntities,
+    responseFields, responseSecondaryEntities, idType,
+    commandFields: commandFieldsApp, oneToManyRelationships, oneToOneRelationships,
+    hasValueObjects, hasEnums, imports: rootEntity.imports,
+    resourceNameCamel, resourceNameKebab
+  };
+
+  // ── Step 1: Validated VO Dtos ────────────────────────────────────────
+  for (const vo of validatedVos) {
+    const voDtoContext = {
+      packageName, moduleName, voName: vo.name, fields: vo.fields,
+      hasEnums: (vo.imports || []).some(i => i.includes('.enums.')),
+      imports: [...(vo.imports || []), ...generateValidationImports(vo.fields)]
+    };
+    await renderAndWrite(
+      path.join(templatesDir, 'CreateValueObjectDto.java.ejs'),
+      path.join(moduleBasePath, 'application', 'dtos', `Create${vo.name}Dto.java`),
+      voDtoContext, writeOptions
+    );
+    generatedFiles.push({ type: 'DTO', name: `Create${vo.name}Dto`, path: `${moduleName}/application/dtos/Create${vo.name}Dto.java` });
+  }
+
+  // ── Step 2: ApplicationMapper ────────────────────────────────────────
+  await renderAndWrite(
+    path.join(templatesDir, 'ApplicationMapper.java.ejs'),
+    path.join(moduleBasePath, 'application', 'mappers', `${aggregateName}ApplicationMapper.java`),
+    { ...baseContext, commandFields: commandFieldsApp, oneToOneRelationships: oneToOneRelationshipsApp, oneToManyRelationships: oneToManyRelationshipsApp, validatedVos },
+    writeOptions
+  );
+  generatedFiles.push({ type: 'Application Mapper', name: `${aggregateName}ApplicationMapper`, path: `${moduleName}/application/mappers/${aggregateName}ApplicationMapper.java` });
+
+  // ── Step 3: ResponseDto ──────────────────────────────────────────────
+  const responseDtoContext = {
+    ...baseContext,
+    allFields: rootEntity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden),
+    relationships: rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse)
+  };
+  await renderAndWrite(
+    path.join(templatesDir, 'ResponseDto.java.ejs'),
+    path.join(moduleBasePath, 'application', 'dtos', `${aggregateName}ResponseDto.java`),
+    responseDtoContext, writeOptions
+  );
+  generatedFiles.push({ type: 'DTO', name: `${aggregateName}ResponseDto`, path: `${moduleName}/application/dtos/${aggregateName}ResponseDto.java` });
+
+  // ── Step 4: Secondary entity DTOs ───────────────────────────────────
+  for (const entity of secondaryEntities) {
+    const nestedRelationships = enrichRelationshipsRecursively(entity, secondaryEntities, 0, new Set());
+    const forwardOoO = (entity.relationships || []).filter(r => r.type === 'OneToOne' && !r.isInverse)
+      .map(r => ({ targetEntityName: r.target, fieldName: r.fieldName }));
+
+    await renderAndWrite(
+      path.join(templatesDir, 'SecondaryEntityDto.java.ejs'),
+      path.join(moduleBasePath, 'application', 'dtos', `${entity.name}Dto.java`),
+      { packageName, moduleName, entityName: entity.name,
+        fields: entity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden),
+        nestedRelationships, hasNestedRelationships: nestedRelationships.length > 0,
+        forwardOneToOneRels: forwardOoO,
+        hasValueObjects: entity.fields.some(f => f.isValueObject),
+        hasEnums: entity.enums && entity.enums.length > 0, imports: entity.imports },
+      writeOptions
+    );
+    generatedFiles.push({ type: 'DTO', name: `${entity.name}Dto`, path: `${moduleName}/application/dtos/${entity.name}Dto.java` });
+
+    const createFields = entity.fields.filter(f =>
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' &&
+      f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
+    );
+    const entityNestedRels = enrichRelationshipsRecursively(entity, secondaryEntities, 0, new Set());
+    const createFieldsApp = transformFieldsForApp(createFields, validatedVoNames);
+    const dtoVoDtoImports = validatedVos.filter(vo => createFieldsApp.some(f => f.originalVoType === vo.name))
+      .map(vo => `import ${packageName}.${moduleName}.application.dtos.Create${vo.name}Dto;`);
+    const createDtoImports = [...new Set([
+      ...(entity.imports || []), ...generateValidationImports(createFieldsApp), ...dtoVoDtoImports,
+      ...(createFieldsApp.some(f => f.originalVoType) ? ['import jakarta.validation.Valid;'] : [])
+    ])];
+    const fwdOoO = (entity.relationships || []).filter(r => r.type === 'OneToOne' && !r.isInverse)
+      .map(r => ({ targetEntityName: r.target, fieldName: r.fieldName }));
+
+    await renderAndWrite(
+      path.join(templatesDir, 'CreateItemDto.java.ejs'),
+      path.join(moduleBasePath, 'application', 'dtos', `Create${entity.name}Dto.java`),
+      { packageName, moduleName, entityName: entity.name, fields: createFieldsApp,
+        nestedRelationships: entityNestedRels, hasNestedRelationships: entityNestedRels.length > 0,
+        forwardOneToOneRels: fwdOoO,
+        hasValueObjects: entity.fields.some(f => f.isValueObject),
+        hasEnums: entity.enums && entity.enums.length > 0, imports: createDtoImports },
+      writeOptions
+    );
+    generatedFiles.push({ type: 'DTO', name: `Create${entity.name}Dto`, path: `${moduleName}/application/dtos/Create${entity.name}Dto.java` });
+  }
+
+  // ── Step 5: Generate declared use cases (anti-duplicate across versions) ─
+  const commandVoDtoImports = validatedVos
+    .filter(vo => commandFieldsApp.some(f => f.originalVoType === vo.name))
+    .map(vo => `import ${packageName}.${moduleName}.application.dtos.Create${vo.name}Dto;`);
+  const commandAppImports = [...new Set([
+    ...(rootEntity.imports || []), ...generateValidationImports(commandFieldsApp), ...commandVoDtoImports,
+    ...(commandFieldsApp.some(f => f.originalVoType) ? ['import jakarta.validation.Valid;'] : [])
+  ])];
+
+  const standardUseCaseNames = new Set([
+    `Create${aggregateName}`, `Update${aggregateName}`, `Delete${aggregateName}`,
+    `Get${aggregateName}`, `FindAll${aggregateName}s`
+  ]);
+
+  const generatedUseCases = new Set();
+
+  for (const version of endpoints.versions) {
+    for (const op of version.operations) {
+      if (generatedUseCases.has(op.useCase)) continue; // anti-duplicate
+      generatedUseCases.add(op.useCase);
+
+      const isStandard = standardUseCaseNames.has(op.useCase);
+
+      if (isStandard) {
+        if (op.useCase.startsWith('Create')) {
+          await renderAndWrite(
+            path.join(templatesDir, 'CreateCommand.java.ejs'),
+            path.join(moduleBasePath, 'application', 'commands', `Create${aggregateName}Command.java`),
+            { ...baseContext, imports: commandAppImports }, writeOptions
+          );
+          generatedFiles.push({ type: 'Command', name: `Create${aggregateName}Command`, path: `${moduleName}/application/commands/Create${aggregateName}Command.java` });
+
+          await renderAndWrite(
+            path.join(templatesDir, 'CreateCommandHandler.java.ejs'),
+            path.join(moduleBasePath, 'application', 'usecases', `Create${aggregateName}CommandHandler.java`),
+            { ...baseContext, commandFields: commandFieldsApp, oneToOneRelationships: oneToOneRelationshipsApp, oneToManyRelationships: oneToManyRelationshipsApp, validatedVos }, writeOptions
+          );
+          generatedFiles.push({ type: 'Handler', name: `Create${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Create${aggregateName}CommandHandler.java` });
+
+        } else if (op.useCase.startsWith('Update')) {
+          await renderAndWrite(
+            path.join(templatesDir, 'UpdateCommand.java.ejs'),
+            path.join(moduleBasePath, 'application', 'commands', `Update${aggregateName}Command.java`),
+            { ...baseContext, imports: commandAppImports }, writeOptions
+          );
+          generatedFiles.push({ type: 'Command', name: `Update${aggregateName}Command`, path: `${moduleName}/application/commands/Update${aggregateName}Command.java` });
+
+          await renderAndWrite(
+            path.join(templatesDir, 'UpdateCommandHandler.java.ejs'),
+            path.join(moduleBasePath, 'application', 'usecases', `Update${aggregateName}CommandHandler.java`),
+            baseContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Handler', name: `Update${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Update${aggregateName}CommandHandler.java` });
+
+        } else if (op.useCase.startsWith('Delete')) {
+          await renderAndWrite(
+            path.join(templatesDir, 'DeleteCommand.java.ejs'),
+            path.join(moduleBasePath, 'application', 'commands', `Delete${aggregateName}Command.java`),
+            baseContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Command', name: `Delete${aggregateName}Command`, path: `${moduleName}/application/commands/Delete${aggregateName}Command.java` });
+
+          await renderAndWrite(
+            path.join(templatesDir, 'DeleteCommandHandler.java.ejs'),
+            path.join(moduleBasePath, 'application', 'usecases', `Delete${aggregateName}CommandHandler.java`),
+            baseContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Handler', name: `Delete${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Delete${aggregateName}CommandHandler.java` });
+
+        } else if (op.useCase.startsWith('Get')) {
+          await renderAndWrite(
+            path.join(templatesDir, 'GetQuery.java.ejs'),
+            path.join(moduleBasePath, 'application', 'queries', `Get${aggregateName}Query.java`),
+            baseContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Query', name: `Get${aggregateName}Query`, path: `${moduleName}/application/queries/Get${aggregateName}Query.java` });
+
+          await renderAndWrite(
+            path.join(templatesDir, 'GetQueryHandler.java.ejs'),
+            path.join(moduleBasePath, 'application', 'usecases', `Get${aggregateName}QueryHandler.java`),
+            baseContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Handler', name: `Get${aggregateName}QueryHandler`, path: `${moduleName}/application/usecases/Get${aggregateName}QueryHandler.java` });
+
+        } else if (op.useCase.startsWith('FindAll')) {
+          await renderAndWrite(
+            path.join(templatesDir, 'ListQuery.java.ejs'),
+            path.join(moduleBasePath, 'application', 'queries', `FindAll${aggregateName}sQuery.java`),
+            baseContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Query', name: `FindAll${aggregateName}sQuery`, path: `${moduleName}/application/queries/FindAll${aggregateName}sQuery.java` });
+
+          await renderAndWrite(
+            path.join(templatesDir, 'ListQueryHandler.java.ejs'),
+            path.join(moduleBasePath, 'application', 'usecases', `FindAll${aggregateName}sQueryHandler.java`),
+            baseContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Handler', name: `FindAll${aggregateName}sQueryHandler`, path: `${moduleName}/application/usecases/FindAll${aggregateName}sQueryHandler.java` });
+        }
+
+      } else {
+        // Non-standard use case → scaffold with TODO
+        const scaffoldContext = { packageName, moduleName, aggregateName, useCaseName: op.useCase };
+        if (op.type === 'command') {
+          await renderAndWrite(
+            path.join(templatesDir, 'ScaffoldCommand.java.ejs'),
+            path.join(moduleBasePath, 'application', 'commands', `${op.useCase}Command.java`),
+            scaffoldContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Command', name: `${op.useCase}Command`, path: `${moduleName}/application/commands/${op.useCase}Command.java` });
+
+          await renderAndWrite(
+            path.join(templatesDir, 'ScaffoldCommandHandler.java.ejs'),
+            path.join(moduleBasePath, 'application', 'usecases', `${op.useCase}CommandHandler.java`),
+            scaffoldContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Handler', name: `${op.useCase}CommandHandler`, path: `${moduleName}/application/usecases/${op.useCase}CommandHandler.java` });
+        } else {
+          await renderAndWrite(
+            path.join(templatesDir, 'ScaffoldQuery.java.ejs'),
+            path.join(moduleBasePath, 'application', 'queries', `${op.useCase}Query.java`),
+            scaffoldContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Query', name: `${op.useCase}Query`, path: `${moduleName}/application/queries/${op.useCase}Query.java` });
+
+          await renderAndWrite(
+            path.join(templatesDir, 'ScaffoldQueryHandler.java.ejs'),
+            path.join(moduleBasePath, 'application', 'usecases', `${op.useCase}QueryHandler.java`),
+            scaffoldContext, writeOptions
+          );
+          generatedFiles.push({ type: 'Handler', name: `${op.useCase}QueryHandler`, path: `${moduleName}/application/usecases/${op.useCase}QueryHandler.java` });
+        }
+      }
+    }
+  }
+
+  // ── Step 6: Versioned controllers ────────────────────────────────────
+  for (const version of endpoints.versions) {
+    const versionCap = version.version.charAt(0).toUpperCase() + version.version.slice(1);
+    const controllerName = `${aggregateName}${versionCap}Controller`;
+    const enrichedOps = version.operations.map(op => enrichEndpointOperation(op, aggregateName, idType));
+
+    const controllerContext = {
+      ...baseContext,
+      apiVersion: version.version,
+      controllerName,
+      operations: enrichedOps,
+      basePath: endpoints.basePath,
+      commandFields: commandFieldsApp,
+      oneToManyRelationships,
+      oneToOneRelationships
+    };
+
+    await renderAndWrite(
+      path.join(templatesDir, 'EndpointsController.java.ejs'),
+      path.join(moduleBasePath, 'infrastructure', 'rest', 'controllers', resourceNameCamel, version.version, `${controllerName}.java`),
+      controllerContext, writeOptions
+    );
+    generatedFiles.push({ type: 'Controller', name: controllerName, path: `${moduleName}/infrastructure/rest/controllers/${resourceNameCamel}/${version.version}/${controllerName}.java` });
+  }
 }
 
 /**
