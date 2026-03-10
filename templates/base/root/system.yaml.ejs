@@ -1,0 +1,97 @@
+# system.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Archivo de arquitectura del sistema — System-First Development con eva4j
+#
+# Describe qué módulos existen, qué exponen y cómo se comunican entre sí.
+# Los campos de dominio (aggregates, events, ports) se declaran en domain.yaml.
+#
+# Comandos disponibles:
+#   eva system validate  →  valida coherencia del grafo (referencias, ciclos)
+#   eva generate system  →  genera módulos + domain.yaml con endpoints: pre-generado
+#   eva system diagram   →  genera diagrama Mermaid del sistema
+# ─────────────────────────────────────────────────────────────────────────────
+
+system:
+  name: <%= projectName %>
+  groupId: <%= groupId %>
+  javaVersion: <%= javaVersion %>
+  springBootVersion: <%= springBootVersion %>
+  database: <%= databaseType %>
+
+# messaging:                           # Descomentar si el sistema usa mensajería asíncrona
+#   enabled: true
+#   broker: kafka                      # kafka | rabbitmq | sns-sqs
+#   kafka:
+#     bootstrapServers: localhost:9092
+#     defaultGroupId: <%= projectName %>
+#     topicPrefix: <%= projectName %>  # prefija todos los topics: <%= projectName %>.ORDER_PLACED
+
+modules:
+  # Declara cada módulo del sistema (nombre en plural, kebab-case).
+  # eva generate system genera por cada módulo: carpeta + domain.yaml con endpoints: pre-generado.
+  #
+  # - name: orders
+  #   description: "Gestión del ciclo de vida de pedidos"
+  #   exposes:
+  #     - method: GET
+  #       path: /orders/{id}
+  #       useCase: GetOrder            # PascalCase — alimenta endpoints: en domain.yaml
+  #       description: "Obtener pedido por ID"
+  #     - method: GET
+  #       path: /orders
+  #       useCase: FindAllOrders
+  #       description: "Listar pedidos con filtros y paginación"
+  #     - method: POST
+  #       path: /orders
+  #       useCase: CreateOrder
+  #       description: "Crear nuevo pedido"
+  #     - method: PUT
+  #       path: /orders/{id}/confirm
+  #       useCase: ConfirmOrder
+  #       description: "Confirmar pedido pendiente"
+  #     - method: PUT
+  #       path: /orders/{id}/cancel
+  #       useCase: CancelOrder
+  #       description: "Cancelar pedido (PENDING o CONFIRMED)"
+  #
+  # - name: customers
+  #   description: "Registro y gestión de clientes"
+  #   exposes:
+  #     - method: GET
+  #       path: /customers/{id}
+  #       useCase: GetCustomer
+  #       description: "Obtener cliente por ID"
+  #     - method: POST
+  #       path: /customers
+  #       useCase: CreateCustomer
+  #       description: "Registrar nuevo cliente"
+  #
+  # - name: notifications
+  #   description: "Envío de notificaciones"
+  #   # Sin endpoints REST — solo consume eventos
+
+# integrations:
+#   async:
+#     # Eventos asíncronos entre módulos.
+#     # Los campos del evento se declaran en domain.yaml → events[].fields del productor.
+#     - event: OrderPlacedEvent
+#       producer: orders
+#       topic: ORDER_PLACED
+#       consumers:
+#         - module: payments
+#         - module: notifications
+#
+#     - event: PaymentProcessedEvent
+#       producer: payments
+#       topic: PAYMENT_PROCESSED
+#       consumers:
+#         - module: orders
+#
+#   sync:
+#     # Llamadas HTTP síncronas entre módulos.
+#     # El shape del DTO de respuesta se declara en domain.yaml → ports[] del caller.
+#     - caller: orders
+#       calls: customers
+#       port: CustomerService
+#       using:
+#         - GET /customers/{id}

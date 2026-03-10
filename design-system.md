@@ -228,7 +228,7 @@ integrations:
 
 - Solo describe **qué existe** y **qué fluye** — no sabe nada de entidades, campos ni lógica de negocio
 - Los endpoints en `exposes:` usan sintaxis objeto: `method`, `path`, `useCase` (obligatorio) y `description`
-- El campo `useCase` permite a `eva system init` pre-generar la sección `endpoints:` completa en `domain.yaml`
+- El campo `useCase` permite a `eva generate system` pre-generar la sección `endpoints:` completa en `domain.yaml`
 - Los endpoints en `exposes:` sirven también para validar los `calls.using:`
 - Los módulos en `consumers:` deben existir en `modules:`
 - Los eventos en `consumers:` deben tener exactamente un `producer:`
@@ -456,11 +456,13 @@ domain.yaml (events[] + ports[])
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  2. BOOTSTRAP                                                            │
 │                                                                          │
-│     eva system init                                                      │
+│     eva generate system                                                      │
 │       → proyecto base (build.gradle, Application.java, shared/)         │
-│       → módulo vacío por cada entrada en modules:                       │
-│       → domain.yaml esqueleto con endpoints: pre-generado (del system.yaml) │
-│       → integration.yaml pre-llenado (consumes + calls del system.yaml)     │
+│       → módulo vacío por cada entrada en modules: (si no existe)        │
+│       → domain.yaml siempre sobreescrito con el esqueleto del system.yaml │
+│                                                                          │
+│     (re-ejecutable) agrega módulos nuevos y regenera todos los          │
+│     domain.yaml — comportamiento idempotente para el módulo              │
 └──────────────────────────────────────┬──────────────────────────────────┘
                                        │
                                        ▼
@@ -491,7 +493,7 @@ domain.yaml (events[] + ports[])
 | Comando | Descripción |
 |---|---|
 | `eva system validate` | Valida coherencia del `system.yaml` (referencias rotas, ciclos, eventos sin consumidor, `ports[].target` inexistentes) |
-| `eva system init` | Bootstrap completo: proyecto + módulos + `domain.yaml` esqueleto con `endpoints:` pre-generado |
+| `eva generate system` | Bootstrap completo: proyecto + módulos + `domain.yaml` esqueleto con `endpoints:` pre-generado |
 | `eva system diagram` | Genera diagrama Mermaid del grafo de módulos y comunicaciones |
 
 ### Relación con comandos existentes
@@ -524,7 +526,7 @@ El equipo puede definir y discutir la arquitectura del sistema completo en un so
 Toda la topología del sistema — qué módulos existen, qué publican, qué consumen, a quién llaman — vive en un único lugar. Elimina la necesidad de diagramas de arquitectura que quedan desactualizados.
 
 ### 3. Eliminación de prompts interactivos
-Los comandos actuales (`eva g kafka-event`, `eva g kafka-listener`, `eva g http-exchange`) requieren responder preguntas cada vez que se ejecutan. Con `integration.yaml`, `eva g integration <module>` genera todo de una vez, sin interacción, reproducible y apto para CI/CD.
+Los comandos actuales (`eva g kafka-event`, `eva g kafka-listener`, `eva g http-exchange`) requieren responder preguntas cada vez que se ejecutan. Con `domain.yaml → events[]` y `ports:`, `eva g entities <module>` genera todo (kafka producers, listeners, feign clients) de una vez, sin interacción, reproducible y apto para CI/CD.
 
 ### 4. Contratos explícitos entre módulos
 Los `events[]` en `domain.yaml` del productor definen el contrato completo del evento. Los `ports:` en `domain.yaml` del consumidor declaran explícitamente qué campos del servicio remoto necesita. Esto hace visibles las dependencias de datos entre módulos y reduce el acoplamiento implícito.
@@ -542,8 +544,8 @@ Cada archivo tiene una responsabilidad única y bien definida:
 
 Un cambio de dominio no toca `system.yaml`. Un cambio de arquitectura no toca `domain.yaml`. Las responsabilidades no se mezclan.
 
-### 8. Autonomía de módulos preservada
-A pesar de comenzar con una visión global, cada módulo sigue siendo autónomo: su `domain.yaml` y su `integration.yaml` evolucionan de forma independiente. El `system.yaml` es el punto de partida, no una restricción permanente.
+### 8. Diseño iterativo del sistema
+El `system.yaml` no es solo un artefacto de arranque — **evoluciona con el proyecto**. Es normal que durante el desarrollo emerjan nuevos módulos, endpoints o integraciones que no se vieron inicialmente. Cada iteración sobre `system.yaml` sigue el mismo ciclo ligero: editar → `eva system validate` → actualizar `domain.yaml` afectado → `eva g entities`. El costo de cambiar la arquitectura permanece bajo porque la revisión ocurre en YAML, no en código.
 
 ### 9. Diagrama siempre actualizado
 `eva system diagram` genera un diagrama Mermaid directamente desde `system.yaml`, garantizando que la documentación visual del sistema nunca queda desactualizada respecto al código.
@@ -596,7 +598,13 @@ El modelo YAML como fuente de verdad hace que cada cambio sea mínimo y rastreab
 ```
 Cambio de negocio:      editar domain.yaml   →  eva g entities orders
 Nuevo evento:           editar system.yaml   →  eva system validate
-                        editar domain.yaml   →  eva g entities orders
+                        editar domain.yaml   →  eva g entities orders payments
+Nuevo módulo:           editar system.yaml   →  eva system validate
+                        eva generate system  →  agrega el módulo nuevo
+                                               +  regenera todos los domain.yaml
+                        eva g entities <nuevo-modulo>
+Nuevo endpoint:         editar system.yaml (exposes:)   →  eva system validate
+                        editar domain.yaml (endpoints:) →  eva g entities orders
 Nueva feature completa: agente recibe domain.yaml actual + descripción del cambio
                         propone domain.yaml actualizado (diff mínimo)
                         humano aprueba  →  eva g entities
@@ -728,7 +736,7 @@ Genera el system.yaml completo respetando:
                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  6. BOOTSTRAP                                                     │
-│     eva system init  →  proyecto + módulos + domain.yaml          │
+│     eva generate system  →  proyecto + módulos + domain.yaml          │
 │                          (con endpoints: pre-generados)           │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -767,9 +775,9 @@ Sin una referencia técnica precisa, el agente puede generar YAML semánticament
 
 ## Preguntas Abiertas
 
-1. **¿`system.yaml` como fuente de verdad permanente o solo bootstrap inicial?**  
-   ¿Los `domain.yaml` son siempre derivados del `system.yaml` (un cambio en uno requiere actualizar el otro), o el `system.yaml` solo se usa para el arranque inicial y después cada módulo evoluciona libremente?  
-   *Recomendación actual: bootstrap inicial. Los módulos evolucionan de forma autónoma.*
+1. ~~**¿`system.yaml` como fuente de verdad permanente o solo bootstrap inicial?**~~  
+   ~~¿Los `domain.yaml` son siempre derivados del `system.yaml` (un cambio en uno requiere actualizar el otro), o el `system.yaml` solo se usa para el arranque inicial y después cada módulo evoluciona libremente?~~  
+   **Resuelto:** el `system.yaml` es un artefacto **iterativo** que evoluciona con el proyecto. Es normal que emerjan nuevos módulos, endpoints o integraciones no previstos inicialmente. Cada cambio sigue el mismo ciclo: editar → `eva system validate` → actualizar `domain.yaml` afectado → `eva g entities`. `eva generate system` es re-ejecutable: agrega módulos nuevos que aún no existen y **siempre sobreescribe el `domain.yaml`** de todos los módulos con el esqueleto actualizado desde `system.yaml` (los módulos ya existentes no se recrean, solo se regenera su `domain.yaml`).
 
 2. ~~**¿Cómo manejar eventos cuyos campos no están definidos en `system.yaml`?**~~  
    ~~El `system.yaml` no conoce los campos de los eventos (ese es territorio del dominio). ¿El `integration.yaml → consumes[].fields` es suficiente como contrato, o hace falta un schema compartido?~~  
@@ -783,7 +791,7 @@ Sin una referencia técnica precisa, el agente puede generar YAML semánticament
 
 5. ~~**Granularidad de `exposes:`**~~  
    ~~¿Los endpoints en `exposes:` solo son documentales, o en el futuro podrían incluir request/response bodies para generar también los DTOs del controller?~~  
-   **Resuelto:** sintaxis objeto obligatoria con `method`, `path`, `useCase` y `description`. El campo `useCase` permite a `eva system init` pre-generar la sección `endpoints:` completa en `domain.yaml`; el desarrollador solo rellena `aggregates:`.
+   **Resuelto:** sintaxis objeto obligatoria con `method`, `path`, `useCase` y `description`. El campo `useCase` permite a `eva generate system` pre-generar la sección `endpoints:` completa en `domain.yaml`; el desarrollador solo rellena `aggregates:`.
 
 ---
 
