@@ -8,7 +8,7 @@ class BaseGenerator {
   constructor(context) {
     this.context = context;
     this.templatesDir = path.join(__dirname, '../../templates/base');
-    this.projectDir = path.join(process.cwd(), context.artifactId);
+    this.projectDir = path.join(process.cwd(), context.projectName);
   }
 
   async generate() {

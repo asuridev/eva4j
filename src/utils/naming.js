@@ -84,12 +84,13 @@ function getBaseEntity(hasSoftDelete, hasAudit) {
 /**
  * Convert artifact ID to valid Java package name
  * @param {string} artifactId - Artifact ID (e.g., my-project)
- * @returns {string} Valid package name (e.g., myproject)
+ * @returns {string} Valid package name (e.g., my_project)
  */
 function artifactIdToPackageName(artifactId) {
   return artifactId
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+    .replace(/-/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
 }
 
 /**

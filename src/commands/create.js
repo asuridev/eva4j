@@ -55,7 +55,10 @@ async function createCommand(projectName, options) {
   
   // Set all required dependencies
   answers.dependencies = ['web', 'data-jpa', 'security', 'validation', 'actuator'];
-  
+
+  // Preserve CLI name as project directory name (independent of artifactId)
+  answers.projectName = projectName || answers.artifactId;
+
   // Build context
   const context = buildBaseContext(answers);
   
@@ -69,7 +72,7 @@ async function createCommand(projectName, options) {
     spinner.succeed(chalk.green('Project created successfully! ✨'));
     
     console.log(chalk.blue('\n📦 Project structure:'));
-    console.log(chalk.gray(`  ${context.artifactId}/`));
+    console.log(chalk.gray(`  ${context.projectName}/`));
     console.log(chalk.gray(`    ├── src/main/java/${context.packagePath.replace(/\//g, '.')}`));
     console.log(chalk.gray(`    │   ├── ${context.applicationClassName}.java`));
     console.log(chalk.gray(`    │   └── common/`));
@@ -77,7 +80,7 @@ async function createCommand(projectName, options) {
     console.log(chalk.gray(`    └── README.md`));
     
     console.log(chalk.blue('\n🚀 Next steps:'));
-    console.log(chalk.white(`  cd ${context.artifactId}`));
+    console.log(chalk.white(`  cd ${context.projectName}`));
     console.log(chalk.white(`  eva4j add module user    # Add your first module`));
     console.log(chalk.white(`  ./gradlew bootRun        # Run the application`));
     console.log();
