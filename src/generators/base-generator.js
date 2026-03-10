@@ -132,6 +132,10 @@ class BaseGenerator {
       path.join(this.projectDir, 'AGENTS.md'));
     await this.generateFile('root/system.yaml.ejs', 
       path.join(this.projectDir, 'system.yaml'));
+    await this.generateFile('root/agent-build-system-yaml.ejs', 
+      path.join(this.projectDir, '.github', 'agents', 'build-system-yaml.agent.md'));
+    await this.generateFile('root/agent-build-domain-yaml.ejs', 
+      path.join(this.projectDir, '.github', 'agents', 'build-domain-yaml.agent.md'));
     
     if (this.context.features.includeDocker) {
       await this.generateFile('docker/docker-compose.yaml.ejs', 
