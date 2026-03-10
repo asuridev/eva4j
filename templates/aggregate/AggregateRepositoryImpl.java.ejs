@@ -58,4 +58,13 @@ public class <%= rootEntity.name %>RepositoryImpl implements <%= rootEntity.name
     public boolean existsById(<%= rootEntity.fields[0].javaType %> id) {
         return jpaRepository.existsById(id);
     }
+<% if (findByOps && findByOps.length > 0) { %>
+<% findByOps.forEach(function(op) { %>
+    @Override
+    public Page<<%= rootEntity.name %>> <%= op.jpaMethodName %>(<%= op.fieldJavaType %> <%= op.fieldName %>, Pageable pageable) {
+        return jpaRepository.<%= op.jpaMethodName %>(<%= op.fieldName %>, pageable)
+                .map(mapper::toDomain);
+    }
+<% }); %>
+<% } %>
 }

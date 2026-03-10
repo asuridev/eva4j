@@ -4,14 +4,22 @@ const uniqueOpsMap = new Map();
 operations.forEach(op => { if (!uniqueOpsMap.has(op.useCase)) uniqueOpsMap.set(op.useCase, op); });
 const uniqueOps = Array.from(uniqueOpsMap.values());
 
-const hasCreate  = uniqueOps.some(op => op.isStandard && op.standardType === 'create');
-const hasUpdate  = uniqueOps.some(op => op.isStandard && op.standardType === 'update');
-const hasDelete  = uniqueOps.some(op => op.isStandard && op.standardType === 'delete');
-const hasGetById = uniqueOps.some(op => op.isStandard && op.standardType === 'getById');
-const hasFindAll = uniqueOps.some(op => op.isStandard && op.standardType === 'findAll');
+const hasCreate      = uniqueOps.some(op => op.isStandard && op.standardType === 'create');
+const hasUpdate      = uniqueOps.some(op => op.isStandard && op.standardType === 'update');
+const hasDelete      = uniqueOps.some(op => op.isStandard && op.standardType === 'delete');
+const hasGetById     = uniqueOps.some(op => op.isStandard && op.standardType === 'getById');
+const hasFindAll     = uniqueOps.some(op => op.isStandard && op.standardType === 'findAll');
+const hasTransition  = uniqueOps.some(op => op.classifiedType === 'transition');
+const hasSubAdd      = uniqueOps.some(op => op.classifiedType === 'subEntityAdd');
+const hasSubRemove   = uniqueOps.some(op => op.classifiedType === 'subEntityRemove');
+const hasFindBy      = uniqueOps.some(op => op.classifiedType === 'findBy');
 
-const customCmdUCs   = uniqueOps.filter(op => !op.isStandard && op.type === 'command');
-const customQueryUCs = uniqueOps.filter(op => !op.isStandard && op.type === 'query');
+const transitionOps  = uniqueOps.filter(op => op.classifiedType === 'transition');
+const subAddOps      = uniqueOps.filter(op => op.classifiedType === 'subEntityAdd');
+const subRemoveOps   = uniqueOps.filter(op => op.classifiedType === 'subEntityRemove');
+const findByOps      = uniqueOps.filter(op => op.classifiedType === 'findBy');
+const customCmdUCs   = uniqueOps.filter(op => op.classifiedType === 'scaffold' && op.type !== 'query');
+const customQueryUCs = uniqueOps.filter(op => op.classifiedType === 'scaffold' && op.type === 'query');
 -%>
 package <%= packageName %>.<%= moduleName %>.infrastructure.rest.controllers.<%= resourceNameCamel %>.<%= apiVersion %>;
 
@@ -36,10 +44,22 @@ import <%= packageName %>.<%= moduleName %>.application.commands.<%= op.useCase 
 <% customQueryUCs.forEach(function(op) { -%>
 import <%= packageName %>.<%= moduleName %>.application.queries.<%= op.useCase %>Query;
 <% }); -%>
-<% if (hasGetById || hasFindAll) { -%>
+<% transitionOps.forEach(function(op) { -%>
+import <%= packageName %>.<%= moduleName %>.application.commands.<%= op.useCase %>Command;
+<% }); -%>
+<% subAddOps.forEach(function(op) { -%>
+import <%= packageName %>.<%= moduleName %>.application.commands.<%= op.useCase %>Command;
+<% }); -%>
+<% subRemoveOps.forEach(function(op) { -%>
+import <%= packageName %>.<%= moduleName %>.application.commands.<%= op.useCase %>Command;
+<% }); -%>
+<% findByOps.forEach(function(op) { -%>
+import <%= packageName %>.<%= moduleName %>.application.queries.<%= op.useCase %>Query;
+<% }); -%>
+<% if (hasGetById || hasFindAll || hasFindBy) { -%>
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
 <% } -%>
-<% if (hasFindAll) { -%>
+<% if (hasFindAll || hasFindBy) { -%>
 import <%= packageName %>.shared.application.dtos.PagedResponse;
 <% } -%>
 import <%= packageName %>.shared.infrastructure.configurations.useCaseConfig.UseCaseMediator;
@@ -115,6 +135,31 @@ public class <%= controllerName %> {
 <% }); %>
 <% } %>
         ));
+    }
+<%  } else if (op.classifiedType === 'transition') { %>
+    public void <%= op.methodName %>(@PathVariable <%- op.idType %> id) {
+        log.info("Handling <%= op.useCase %> for <%= aggregateName %> id: {}", id);
+        useCaseMediator.dispatch(new <%= op.useCase %>Command(id));
+    }
+<%  } else if (op.classifiedType === 'subEntityAdd') { %>
+    public void <%= op.methodName %>(@PathVariable <%- op.idType %> id, @Valid @RequestBody <%= op.useCase %>Command command) {
+        log.info("Handling <%= op.useCase %> for <%= aggregateName %> id: {}", id);
+        useCaseMediator.dispatch(new <%= op.useCase %>Command(id<% if (op.classification && op.classification.entityFields && op.classification.entityFields.length > 0) { %>, <% op.classification.entityFields.forEach(function(f, idx) { %>command.<%= f.name %>()<% if (idx < op.classification.entityFields.length - 1) { %>, <% } %><% }); %><% } %>));
+    }
+<%  } else if (op.classifiedType === 'subEntityRemove') { %>
+    public void <%= op.methodName %>(@PathVariable <%- op.idType %> id, @PathVariable String itemId) {
+        log.info("Handling <%= op.useCase %> for <%= aggregateName %> id: {}, itemId: {}", id, itemId);
+        useCaseMediator.dispatch(new <%= op.useCase %>Command(id, itemId));
+    }
+<%  } else if (op.classifiedType === 'findBy') { %>
+    public PagedResponse<<%= aggregateName %>ResponseDto> <%= op.methodName %>(
+            @RequestParam <%- op.classification.fieldJavaType %> <%= op.classification.fieldName %>,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "id") String sortBy,
+            @RequestParam(defaultValue = "ASC") String sortDirection) {
+        log.info("Handling <%= op.useCase %> — <%= op.classification.fieldName %>={}, page={}, size={}", <%= op.classification.fieldName %>, page, size);
+        return useCaseMediator.dispatch(new <%= op.useCase %>Query(<%= op.classification.fieldName %>, page, size, sortBy, sortDirection));
     }
 <%  } else if (op.type === 'command') { %>
     // TODO: Review the fields declared in <%= op.useCase %>Command and adapt the method signature if needed

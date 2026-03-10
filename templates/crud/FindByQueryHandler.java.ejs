@@ -1,0 +1,57 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.queries.<%= useCaseName %>Query;
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.shared.application.dtos.PagedResponse;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.interfaces.QueryHandler;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
+/**
+ * <%= useCaseName %>QueryHandler
+ * Returns paginated <%= aggregateName %>s filtered by <%= fieldName %>.
+ * Calls repository.<%= jpaMethodName %>(<%= fieldName %>, pageable).
+ */
+@Slf4j
+@ApplicationComponent
+public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseName %>Query, PagedResponse<<%= aggregateName %>ResponseDto>> {
+
+    private final <%= aggregateName %>Repository repository;
+    private final <%= aggregateName %>ApplicationMapper mapper;
+
+    public <%= useCaseName %>QueryHandler(<%= aggregateName %>Repository repository,
+                                           <%= aggregateName %>ApplicationMapper mapper) {
+        this.repository = repository;
+        this.mapper = mapper;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<<%= aggregateName %>ResponseDto> handle(<%= useCaseName %>Query query) {
+        log.info("Handling <%= useCaseName %>Query — <%= fieldName %>={}, page={}, size={}",
+                query.<%= fieldName %>(), query.page(), query.size());
+
+        Sort sort = Sort.by(Sort.Direction.fromString(query.sortDirection()), query.sortBy());
+        Pageable pageable = PageRequest.of(query.page(), query.size(), sort);
+
+        Page<<%= aggregateName %>> page = repository.<%= jpaMethodName %>(query.<%= fieldName %>(), pageable);
+        List<<%= aggregateName %>ResponseDto> content = page.getContent().stream()
+                .map(mapper::toDto)
+                .toList();
+
+        log.info("<%= useCaseName %> retrieved — page={}/{}, totalElements={}",
+                page.getNumber() + 1, page.getTotalPages(), page.getTotalElements());
+
+        return PagedResponse.of(content, page.getNumber(), page.getSize(), page.getTotalElements());
+    }
+}

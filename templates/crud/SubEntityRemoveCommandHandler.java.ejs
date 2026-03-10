@@ -1,0 +1,42 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.commands.<%= useCaseName %>Command;
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
+import <%= packageName %>.shared.domain.interfaces.CommandHandler;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * <%= useCaseName %>CommandHandler
+ * Loads the <%= aggregateName %> aggregate and removes the <%= entityName %> by itemId.
+ *
+ * The aggregate root must expose: <%= removeMethodName %>(String itemId)
+ */
+@Slf4j
+@ApplicationComponent
+public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useCaseName %>Command> {
+
+    private final <%= aggregateName %>Repository repository;
+
+    public <%= useCaseName %>CommandHandler(<%= aggregateName %>Repository repository) {
+        this.repository = repository;
+    }
+
+    @Override
+    @Transactional
+    public void handle(<%= useCaseName %>Command command) {
+        log.info("Handling <%= useCaseName %>Command for <%= aggregateName %> id: {}, itemId: {}",
+                command.id(), command.itemId());
+
+        <%= aggregateName %> entity = repository.findById(command.id())
+                .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
+
+        entity.<%= removeMethodName %>(command.itemId());
+        repository.save(entity);
+
+        log.info("<%= entityName %> id: {} removed from <%= aggregateName %> id: {}", command.itemId(), command.id());
+    }
+}

@@ -1,0 +1,17 @@
+package <%= packageName %>.<%= moduleName %>.application.commands;
+
+<% (imports || []).forEach(imp => { %>
+<%- imp %>
+<% }); %>
+import <%= packageName %>.shared.domain.interfaces.Command;
+
+/**
+ * <%= useCaseName %>Command
+ * Adds a new <%= entityName %> to the <%= aggregateName %> aggregate.
+ */
+public record <%= useCaseName %>Command(
+        <%- idType %> id<% if (entityFields && entityFields.length > 0) { %>,<% } %>
+<% (entityFields || []).forEach(function(field, idx) { %>
+        <%- field.javaType %> <%= field.name %><% if (idx < entityFields.length - 1) { %>,<% } %>
+<% }); %>
+) implements Command {}

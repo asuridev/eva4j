@@ -1,0 +1,353 @@
+# EJEMPLO: ENDPOINTS + RELACIONES
+#
+# Muestra cómo funciona la sección endpoints: cuando el agregado tiene
+#   - Entidad raíz   : Order
+#   - OneToMany       : OrderItem
+#   - OneToOne        : ShippingAddress
+#
+# REGLA CLAVE:
+#   La sección `endpoints:` controla CUÁLES use cases se generan.
+#   La sección `aggregates:` controla LA ESTRUCTURA de cada use case
+#   (campos, listas anidadas, DTOs de relaciones).
+#
+#   Ambas secciones son INDEPENDIENTES entre sí. El generador combina
+#   la información de ambas para producir el código correcto.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# QUÉ SE GENERA
+# ─────────────────────────────────────────────────────────────────────────
+#
+# CreateOrder → implementación COMPLETA
+#   Porque su nombre coincide con el patrón estándar Create{Aggregate}.
+#   El Command incluirá automáticamente:
+#     - Los campos simples de Order (orderNumber, customerId)
+#     - List<CreateOrderItemDto> items   ← por la relación OneToMany
+#     - CreateShippingAddressDto shipping ← por la relación OneToOne
+#
+# GetOrder / FindAllOrders → implementación COMPLETA
+#   El ResponseDto incluirá:
+#     - Campos de Order
+#     - List<OrderItemDto> items          ← OneToMany en respuesta
+#     - ShippingAddressDto shippingAddress ← OneToOne en respuesta
+#
+# ConfirmOrder / CancelOrder / ShipOrder → Cat. 1 TRANSITION
+#   Porque su nombre es PascalCase(method) + Aggregate para una transición
+#   declarada en enums[].transitions. Handler completo generado automáticamente.
+#
+# AddOrderItem / RemoveOrderItem → Cat. 2 SUB-ENTITY ADD/REMOVE
+#   Porque su nombre es Add{Target} / Remove{Target} para una relación OneToMany.
+#   Handler completo generado automáticamente.
+#
+# FindAllOrdersByCustomerId → Cat. 3 FIND-BY
+#   Porque su nombre sigue FindAll{Aggregate}sBy{FieldPascal} para un campo de la raíz.
+#   Query + handler + método en el repositorio generados automáticamente.
+#
+# ProcessOrderPayment → SCAFFOLD (nombre libre)
+#   No coincide con ningún patrón → genera stubs con TODO.
+#   El desarrollador añade los campos al Command e implementa el Handler.
+
+aggregates:
+  - name: Order
+    entities:
+
+      # ── Raíz del agregado ──────────────────────────────────────────────
+      - name: Order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+            validations:
+              - type: NotBlank
+                message: "El número de pedido es obligatorio"
+          - name: customerId
+            type: String
+            reference:
+              aggregate: Customer
+              module: customers
+          - name: status
+            type: OrderStatus
+            readOnly: true     # Manejado por transitions — no va en CreateCommand
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true     # Calculado — no va en CreateCommand
+            defaultValue: "0.00"
+          - name: notes
+            type: String
+        relationships:
+          # El generador crea automáticamente la relación inversa (ManyToOne) en OrderItem
+          # No es necesario declarar la relación inversa en OrderItem
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order          # → OrderItem tendrá un campo 'order' (FK: order_id)
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+          # El generador crea automáticamente la relación inversa (OneToOne) en ShippingAddress
+          # No es necesario declarar la relación inversa en ShippingAddress
+          - type: OneToOne
+            target: ShippingAddress
+            mappedBy: order          # → ShippingAddress tendrá un campo 'order' (FK: order_id)
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+
+      # ── OneToMany: líneas del pedido ───────────────────────────────────
+      - name: OrderItem
+        tableName: order_items
+        fields:
+          - name: id
+            type: String
+          - name: productId
+            type: String
+            reference:
+              aggregate: Product
+              module: catalog
+          - name: productName
+            type: String
+          - name: quantity
+            type: Integer
+            validations:
+              - type: Min
+                value: 1
+                message: "La cantidad mínima es 1"
+          - name: unitPrice
+            type: BigDecimal
+          - name: subtotal
+            type: BigDecimal
+            readOnly: true     # Calculado por el método de negocio addOrderItem()
+            defaultValue: "0.00"
+        # ❌ No declarar aquí la relación inversa (ManyToOne hacia Order):
+        #    el generador la infiere automáticamente desde la definición de Order
+
+      # ── OneToOne: dirección de envío ───────────────────────────────────
+      - name: ShippingAddress
+        tableName: order_shipping_addresses
+        fields:
+          - name: id
+            type: String
+          - name: street
+            type: String
+            validations:
+              - type: NotBlank
+          - name: city
+            type: String
+            validations:
+              - type: NotBlank
+          - name: postalCode
+            type: String
+          - name: country
+            type: String
+        # ❌ No declarar aquí la relación inversa (OneToOne hacia Order):
+        #    el generador la infiere automáticamente desde la definición de Order
+
+    enums:
+      - name: OrderStatus
+        initialValue: PENDING
+        transitions:
+          - from: PENDING
+            to: CONFIRMED
+            method: confirm
+          - from: [PENDING, CONFIRMED]
+            to: CANCELLED
+            method: cancel
+          - from: CONFIRMED
+            to: SHIPPED
+            method: ship
+        values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+
+    events:
+      - name: OrderConfirmedEvent
+        fields:
+          - name: orderId
+            type: String
+          - name: customerId
+            type: String
+        
+
+# ─────────────────────────────────────────────────────────────────────────
+# ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Solo controla CUÁLES use cases existen y bajo qué URLs viven.
+# La estructura (campos anidados, listas) la define aggregates: arriba.
+
+endpoints:
+  basePath: /orders
+  versions:
+    - version: v1
+      operations:
+
+        # ── CRUD estándar ─────────────────────────────────────────────────
+
+        - method: POST
+          path: /
+          description: "Crear pedido con sus líneas y dirección de envío"
+          useCase: CreateOrder
+          # El Command generado incluirá automáticamente:
+          #   String orderNumber
+          #   String customerId
+          #   String notes
+          #   List<CreateOrderItemDto> items        ← OneToMany
+          #   CreateShippingAddressDto shippingAddress ← OneToOne
+
+        - method: GET
+          path: /{id}
+          description: "Obtener pedido completo con líneas y dirección"
+          useCase: GetOrder
+          # El ResponseDto tendrá:
+          #   campos de Order + List<OrderItemDto> + ShippingAddressDto
+
+        - method: GET
+          path: /
+          description: "Listar pedidos con paginación"
+          useCase: FindAllOrders
+
+        - method: DELETE
+          path: /{id}
+          description: "Cancelar y eliminar un pedido"
+          useCase: DeleteOrder
+
+        # ── Operaciones de negocio (scaffold) ────────────────────────────
+
+        - method: PUT
+          path: /{id}/confirm
+          description: "Confirmar un pedido pendiente"
+          useCase: ConfirmOrder
+          # Cat. 1 TRANSITION — nombre coincide con PascalCase(confirm) + Order
+          # Genera ConfirmOrderCommand(String id) + handler completo:
+          #   repository.findById(id) → entity.confirm() → repository.save(entity)
+          # type inferido: PUT → command
+
+        - method: PUT
+          path: /{id}/cancel
+          description: "Cancelar un pedido"
+          useCase: CancelOrder
+          # Cat. 1 TRANSITION — cancel + Order
+
+        - method: PUT
+          path: /{id}/ship
+          description: "Marcar pedido como enviado"
+          useCase: ShipOrder
+          # Cat. 1 TRANSITION — ship + Order
+
+        # ── Operaciones sobre sub-entidades (scaffold) ───────────────────
+
+        - method: POST
+          path: /{id}/items
+          description: "Agregar línea a un pedido existente"
+          useCase: AddOrderItem
+          # Cat. 2a SUB-ENTITY ADD — patrón: Add{target} donde target=OrderItem (OneToMany)
+          # Patrón de nombre: Add + rel.target → AddOrderItem
+          # Genera AddOrderItemCommand(String id, String productId, String productName, Integer quantity, BigDecimal unitPrice)
+          # Handler: findById → entity.addOrderItem(productId, productName, quantity, unitPrice) → save
+          # Nota: el campo generado en Order se llama 'orderItems' (auto-pluralizado de OrderItem)
+
+        - method: DELETE
+          path: /{id}/items/{itemId}
+          description: "Eliminar una línea del pedido"
+          useCase: RemoveOrderItem
+          # Cat. 2b SUB-ENTITY REMOVE — patrón: Remove{target} donde target=OrderItem
+          # Patrón de nombre: Remove + rel.target → RemoveOrderItem
+          # Genera RemoveOrderItemCommand(String id, String itemId)
+          # Handler: findById → entity.removeOrderItemById(itemId) → save
+
+        - method: GET
+          path: /customer/{customerId}
+          description: "Buscar pedidos por cliente"
+          useCase: FindAllOrdersByCustomerId
+          # Cat. 3 FIND-BY — patrón FindAll{Aggregate}sBy{FieldPascal}
+          # Genera FindAllOrdersByCustomerIdQuery(customerId, page, size, sortBy, sortDirection)
+          # Handler: repository.findByCustomerId(customerId, pageable)
+          # Además actualiza OrderRepository + OrderJpaRepository + OrderRepositoryImpl
+          # type inferido: GET → query
+
+        # ── SCAFFOLD (nombre libre — ningún patrón lo reconoce) ──────────
+
+        - method: POST
+          path: /{id}/payment
+          description: "Procesar el pago de un pedido"
+          useCase: ProcessOrderPayment
+          # ⚠️ SCAFFOLD — el nombre no coincide con ningún patrón:
+          #   ✗ No es Create/Get/FindAll/Update/Delete{Aggregate}  (estándar)
+          #   ✗ No es {MethodPascal}{Aggregate} de ninguna transition (Cat. 1)
+          #   ✗ No es Add{Target} / Remove{Target} de un OneToMany  (Cat. 2)
+          #   ✗ No es FindAll{Aggregate}sBy{Field}                  (Cat. 3)
+          #
+          # Por eso genera stubs con TODO y UnsupportedOperationException:
+          #
+          #   ProcessOrderPaymentCommand.java  ← record con /* TODO: add fields */
+          #   ProcessOrderPaymentCommandHandler.java ← lanza UnsupportedOperationException
+          #
+          # El desarrollador debe:
+          #   1. Añadir los campos al Command (paymentMethod, amount, etc.)
+          #   2. Implementar la lógica en el Handler
+          #
+          # type inferido: POST → command  (o declarar explícitamente si es GET)
+
+# ─────────────────────────────────────────────────────────────────────────
+# RESUMEN DE ARCHIVOS GENERADOS
+# ─────────────────────────────────────────────────────────────────────────
+#
+# domain/models/entities/
+#   ├── Order.java              (raíz — con métodos confirm/cancel/ship/addOrderItem/removeOrderItemById)
+#   ├── OrderItem.java
+#   └── ShippingAddress.java
+#
+# domain/models/enums/
+#   └── OrderStatus.java
+#
+# domain/models/events/
+#   └── OrderConfirmedEvent.java
+#
+# domain/repositories/
+#   └── OrderRepository.java   ← actualizado con findByCustomerId (Cat.3)
+#
+# infrastructure/database/repositories/
+#   ├── OrderJpaRepository.java       ← actualizado con findByCustomerId
+#   └── OrderRepositoryImpl.java      ← actualizado con findByCustomerId
+#
+# application/commands/
+#   ├── CreateOrderCommand.java                ← ESTÁNDAR — incluye items[] y shippingAddress
+#   ├── DeleteOrderCommand.java                ← ESTÁNDAR
+#   ├── ConfirmOrderCommand.java               ← TRANSITION Cat.1 — record(String id)
+#   ├── CancelOrderCommand.java                ← TRANSITION Cat.1
+#   ├── ShipOrderCommand.java                  ← TRANSITION Cat.1
+#   ├── AddOrderItemCommand.java               ← SUB-ENTITY ADD Cat.2 — incluye campos de OrderItem
+#   ├── RemoveOrderItemCommand.java            ← SUB-ENTITY REMOVE Cat.2 — record(id, itemId)
+#   └── ProcessOrderPaymentCommand.java        ← SCAFFOLD — record con /* TODO: add fields */
+#
+# application/queries/
+#   ├── GetOrderQuery.java                     ← ESTÁNDAR
+#   ├── FindAllOrdersQuery.java                ← ESTÁNDAR (FindAll + Order + s)
+#   └── FindAllOrdersByCustomerIdQuery.java    ← FIND-BY Cat.3 — filtra por customerId
+#
+# application/usecases/
+#   ├── CreateOrderCommandHandler.java         ← ESTÁNDAR — completo
+#   ├── DeleteOrderCommandHandler.java         ← ESTÁNDAR — completo
+#   ├── GetOrderQueryHandler.java              ← ESTÁNDAR — completo
+#   ├── FindAllOrdersQueryHandler.java         ← ESTÁNDAR — paginado completo
+#   ├── ConfirmOrderCommandHandler.java        ← TRANSITION — findById → entity.confirm() → save
+#   ├── CancelOrderCommandHandler.java         ← TRANSITION — findById → entity.cancel() → save
+#   ├── ShipOrderCommandHandler.java           ← TRANSITION — findById → entity.ship() → save
+#   ├── AddOrderItemCommandHandler.java        ← SUB-ENTITY ADD — findById → entity.addOrderItem(new OrderItem(...)) → save
+#   ├── RemoveOrderItemCommandHandler.java     ← SUB-ENTITY REMOVE — findById → entity.removeOrderItemById(itemId) → save
+#   ├── FindAllOrdersByCustomerIdQueryHandler.java ← FIND-BY — repository.findByCustomerId(customerId, pageable)
+#   └── ProcessOrderPaymentCommandHandler.java ← SCAFFOLD — UnsupportedOperationException (TODO)
+#
+# application/dtos/
+#   ├── OrderResponseDto.java
+#   ├── OrderItemDto.java
+#   ├── ShippingAddressDto.java
+#   ├── CreateOrderItemDto.java          ← para el comando de creación
+#   └── CreateShippingAddressDto.java    ← para el comando de creación
+#
+# application/mappers/
+#   └── OrderApplicationMapper.java
+#
+# infrastructure/rest/controllers/order/
+#   └── v1/
+#       └── OrderV1Controller.java       ← 10 endpoints declarados

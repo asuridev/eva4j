@@ -8,4 +8,9 @@ import <%= packageName %>.<%= moduleName %>.infrastructure.database.entities.<%=
  * Spring Data JPA repository
  */
 public interface <%= rootEntity.name %>JpaRepository extends JpaRepository<<%= rootEntity.name %>Jpa, <%= rootEntity.fields[0].javaType %>> {
+<% if (findByOps && findByOps.length > 0) { %>
+<% findByOps.forEach(function(op) { %>
+    org.springframework.data.domain.Page<<%= rootEntity.name %>Jpa> <%= op.jpaMethodName %>(<%= op.fieldJavaType %> <%= op.fieldName %>, org.springframework.data.domain.Pageable pageable);
+<% }); %>
+<% } %>
 }

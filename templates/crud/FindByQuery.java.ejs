@@ -1,0 +1,17 @@
+package <%= packageName %>.<%= moduleName %>.application.queries;
+
+import <%= packageName %>.shared.domain.interfaces.Query;
+import <%= packageName %>.shared.application.dtos.PagedResponse;
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
+
+/**
+ * <%= useCaseName %>Query
+ * Returns a paginated list of <%= aggregateName %>s filtered by <%= fieldName %>.
+ */
+public record <%= useCaseName %>Query(
+        <%- fieldJavaType %> <%= fieldName %>,
+        int page,
+        int size,
+        String sortBy,
+        String sortDirection
+) implements Query<PagedResponse<<%= aggregateName %>ResponseDto>> {}

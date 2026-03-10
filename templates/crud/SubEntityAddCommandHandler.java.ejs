@@ -1,0 +1,43 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.commands.<%= useCaseName %>Command;
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= entityName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
+import <%= packageName %>.shared.domain.interfaces.CommandHandler;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * <%= useCaseName %>CommandHandler
+ * Loads the <%= aggregateName %> aggregate and adds a new <%= entityName %> to it.
+ *
+ * The aggregate root must expose: <%= addMethodName %>(<%= entityName %> item)
+ */
+@Slf4j
+@ApplicationComponent
+public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useCaseName %>Command> {
+
+    private final <%= aggregateName %>Repository repository;
+
+    public <%= useCaseName %>CommandHandler(<%= aggregateName %>Repository repository) {
+        this.repository = repository;
+    }
+
+    @Override
+    @Transactional
+    public void handle(<%= useCaseName %>Command command) {
+        log.info("Handling <%= useCaseName %>Command for <%= aggregateName %> id: {}", command.id());
+
+        <%= aggregateName %> entity = repository.findById(command.id())
+                .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
+
+        <%= entityName %> item = new <%= entityName %>(<% (entityFields || []).forEach(function(field, idx) { %>command.<%= field.name %>()<% if (idx < entityFields.length - 1) { %>, <% } %><% }); %>);
+        entity.<%= addMethodName %>(item);
+        repository.save(entity);
+
+        log.info("<%= entityName %> added to <%= aggregateName %> id: {}", command.id());
+    }
+}

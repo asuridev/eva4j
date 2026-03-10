@@ -5,7 +5,7 @@ const fs = require('fs-extra');
 const inquirer = require('inquirer');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toPackagePath, toCamelCase, toKebabCase, getApplicationClassName } = require('../utils/naming');
+const { toPackagePath, toCamelCase, toKebabCase, toPascalCase, getApplicationClassName } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
 const SharedGenerator = require('../generators/shared-generator');
@@ -439,7 +439,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       const repoContext = {
         packageName,
         moduleName,
-        rootEntity
+        rootEntity,
+        findByOps: []
       };
 
       await renderAndWrite(
@@ -465,7 +466,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         moduleName,
         aggregateName,
         rootEntity,
-        hasDomainEvents: (aggregate.domainEvents || []).length > 0
+        hasDomainEvents: (aggregate.domainEvents || []).length > 0,
+        findByOps: []
       };
 
       await renderAndWrite(
@@ -734,7 +736,98 @@ function transformRelsForApp(rels, validatedVoNames) {
 }
 
 /**
+ * Classify an endpoint operation into a semantic category.
+ * Returns { category, ...metadata } where category is one of:
+ *   'standard'        → matches the 5 CRUD patterns exactly
+ *   'transition'      → matches {MethodPascal}{Aggregate} for an enum transition
+ *   'subEntityAdd'    → matches Add{EntityName} for a OneToMany secondary entity
+ *   'subEntityRemove' → matches Remove{EntityName} for a OneToMany secondary entity
+ *   'findBy'          → matches FindAll{Aggregate}sBy{FieldPascal} for a root field
+ *   'scaffold'        → no semantic pattern matched
+ */
+function classifyUseCase(op, aggregateName, aggregate) {
+  // 1. Standard CRUD
+  const standardMap = {
+    [`Create${aggregateName}`]: 'create',
+    [`Update${aggregateName}`]: 'update',
+    [`Delete${aggregateName}`]: 'delete',
+    [`Get${aggregateName}`]: 'getById',
+    [`FindAll${aggregateName}s`]: 'findAll'
+  };
+  if (standardMap[op.useCase]) {
+    return { category: 'standard', variant: standardMap[op.useCase] };
+  }
+
+  const rootEntity = aggregate.rootEntity;
+  const enums = aggregate.enums || [];
+
+  // 2. Enum transitions — pattern: {MethodPascal}{Aggregate}
+  for (const enumDef of enums) {
+    for (const transition of (enumDef.transitions || [])) {
+      const methodPascal = toPascalCase(transition.method);
+      if (op.useCase === `${methodPascal}${aggregateName}`) {
+        return {
+          category: 'transition',
+          domainMethod: transition.method,
+          enumName: enumDef.name,
+          targetStatus: Array.isArray(transition.to) ? transition.to[0] : transition.to
+        };
+      }
+    }
+  }
+
+  // 3. Sub-entity operations — pattern: Add{Entity} / Remove{Entity} (OneToMany only)
+  const oneToManyRels = (rootEntity.relationships || []).filter(r =>
+    r.type === 'OneToMany' && !r.isInverse
+  );
+  for (const rel of oneToManyRels) {
+    if (op.useCase === `Add${rel.target}`) {
+      const targetEntity = (aggregate.secondaryEntities || []).find(e => e.name === rel.target);
+      const entityFields = targetEntity
+        ? targetEntity.fields.filter(f =>
+            f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' &&
+            f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
+          )
+        : [];
+      return {
+        category: 'subEntityAdd',
+        entityName: rel.target,
+        fieldName: rel.fieldName,
+        addMethodName: `add${rel.target}`,
+        entityFields,
+        entityImports: targetEntity ? (targetEntity.imports || []) : []
+      };
+    }
+    if (op.useCase === `Remove${rel.target}`) {
+      return {
+        category: 'subEntityRemove',
+        entityName: rel.target,
+        fieldName: rel.fieldName,
+        removeMethodName: `remove${rel.target}ById`
+      };
+    }
+  }
+
+  // 4. FindBy field — pattern: FindAll{Aggregate}sBy{FieldPascal}
+  for (const field of (rootEntity.fields || [])) {
+    const fieldPascal = toPascalCase(field.name);
+    if (op.useCase === `FindAll${aggregateName}sBy${fieldPascal}`) {
+      return {
+        category: 'findBy',
+        fieldName: field.name,
+        fieldPascal,
+        fieldJavaType: field.javaType,
+        jpaMethodName: `findBy${fieldPascal}`
+      };
+    }
+  }
+
+  return { category: 'scaffold' };
+}
+
+/**
  * Enrich a single endpoint operation with derived properties for template rendering.
+ * Expects op._classification to be set by classifyUseCase() before this call.
  */
 function enrichEndpointOperation(op, aggregateName, idType) {
   const httpAnnotationMap = {
@@ -745,33 +838,37 @@ function enrichEndpointOperation(op, aggregateName, idType) {
   const pathVarMatch = hasPathVar ? op.path.match(/\{([^}]+)\}/) : null;
   const pathVarName = pathVarMatch ? pathVarMatch[1] : 'id';
 
-  const standardUseCasesMap = {
-    [`Create${aggregateName}`]: 'create',
-    [`Update${aggregateName}`]: 'update',
-    [`Delete${aggregateName}`]: 'delete',
-    [`Get${aggregateName}`]: 'getById',
-    [`FindAll${aggregateName}s`]: 'findAll'
-  };
-  const standardType = standardUseCasesMap[op.useCase] || null;
-  const isStandard = standardType !== null;
+  const cl = op._classification || { category: 'scaffold' };
+  const isStandard = cl.category === 'standard';
+  const standardType = isStandard ? cl.variant : null;
+
+  // Infer type from HTTP method when not explicitly declared: GET → query, everything else → command
+  const resolvedType = op.type || (op.method === 'GET' ? 'query' : 'command');
 
   let returnType = 'void';
   if (standardType === 'getById') returnType = `${aggregateName}ResponseDto`;
   else if (standardType === 'findAll') returnType = `PagedResponse<${aggregateName}ResponseDto>`;
-  else if (op.type === 'query') returnType = 'Object';
+  else if (cl.category === 'findBy') returnType = `PagedResponse<${aggregateName}ResponseDto>`;
+  else if (cl.category === 'scaffold' && resolvedType === 'query') returnType = 'Object';
 
   let httpStatus = 'HttpStatus.OK';
   if (standardType === 'create') httpStatus = 'HttpStatus.CREATED';
   else if (standardType === 'update') httpStatus = 'HttpStatus.NO_CONTENT';
+  else if (cl.category === 'transition') httpStatus = 'HttpStatus.NO_CONTENT';
+  else if (cl.category === 'subEntityAdd') httpStatus = 'HttpStatus.CREATED';
+  else if (cl.category === 'subEntityRemove') httpStatus = 'HttpStatus.NO_CONTENT';
 
   return {
     ...op,
+    type: resolvedType,
     httpAnnotation: httpAnnotationMap[op.method] || 'PostMapping',
     methodName: toCamelCase(op.useCase),
     hasPathVar,
     pathVarName,
     isStandard,
     standardType,
+    classifiedType: cl.category,
+    classification: cl,
     returnType,
     httpStatus,
     idType
@@ -936,22 +1033,27 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
     ...(commandFieldsApp.some(f => f.originalVoType) ? ['import jakarta.validation.Valid;'] : [])
   ])];
 
-  const standardUseCaseNames = new Set([
-    `Create${aggregateName}`, `Update${aggregateName}`, `Delete${aggregateName}`,
-    `Get${aggregateName}`, `FindAll${aggregateName}s`
-  ]);
+  // Pre-classify ALL operations (including cross-version duplicates) so that
+  // enrichEndpointOperation() can read op._classification in step 6.
+  for (const version of endpoints.versions) {
+    for (const op of version.operations) {
+      op._classification = classifyUseCase(op, aggregateName, aggregate);
+    }
+  }
 
   const generatedUseCases = new Set();
+  const findByOps = []; // collect FindBy ops for repository re-generation
 
   for (const version of endpoints.versions) {
     for (const op of version.operations) {
       if (generatedUseCases.has(op.useCase)) continue; // anti-duplicate
       generatedUseCases.add(op.useCase);
 
-      const isStandard = standardUseCaseNames.has(op.useCase);
+      const cl = op._classification;
 
-      if (isStandard) {
-        if (op.useCase.startsWith('Create')) {
+      if (cl.category === 'standard') {
+        const isStandard = true;
+        if (cl.variant === 'create') {
           await renderAndWrite(
             path.join(templatesDir, 'CreateCommand.java.ejs'),
             path.join(moduleBasePath, 'application', 'commands', `Create${aggregateName}Command.java`),
@@ -966,7 +1068,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
           );
           generatedFiles.push({ type: 'Handler', name: `Create${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Create${aggregateName}CommandHandler.java` });
 
-        } else if (op.useCase.startsWith('Update')) {
+        } else if (cl.variant === 'update') {
           await renderAndWrite(
             path.join(templatesDir, 'UpdateCommand.java.ejs'),
             path.join(moduleBasePath, 'application', 'commands', `Update${aggregateName}Command.java`),
@@ -981,7 +1083,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
           );
           generatedFiles.push({ type: 'Handler', name: `Update${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Update${aggregateName}CommandHandler.java` });
 
-        } else if (op.useCase.startsWith('Delete')) {
+        } else if (cl.variant === 'delete') {
           await renderAndWrite(
             path.join(templatesDir, 'DeleteCommand.java.ejs'),
             path.join(moduleBasePath, 'application', 'commands', `Delete${aggregateName}Command.java`),
@@ -996,7 +1098,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
           );
           generatedFiles.push({ type: 'Handler', name: `Delete${aggregateName}CommandHandler`, path: `${moduleName}/application/usecases/Delete${aggregateName}CommandHandler.java` });
 
-        } else if (op.useCase.startsWith('Get')) {
+        } else if (cl.variant === 'getById') {
           await renderAndWrite(
             path.join(templatesDir, 'GetQuery.java.ejs'),
             path.join(moduleBasePath, 'application', 'queries', `Get${aggregateName}Query.java`),
@@ -1011,7 +1113,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
           );
           generatedFiles.push({ type: 'Handler', name: `Get${aggregateName}QueryHandler`, path: `${moduleName}/application/usecases/Get${aggregateName}QueryHandler.java` });
 
-        } else if (op.useCase.startsWith('FindAll')) {
+        } else if (cl.variant === 'findAll') {
           await renderAndWrite(
             path.join(templatesDir, 'ListQuery.java.ejs'),
             path.join(moduleBasePath, 'application', 'queries', `FindAll${aggregateName}sQuery.java`),
@@ -1027,10 +1129,107 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
           generatedFiles.push({ type: 'Handler', name: `FindAll${aggregateName}sQueryHandler`, path: `${moduleName}/application/usecases/FindAll${aggregateName}sQueryHandler.java` });
         }
 
+      } else if (cl.category === 'transition') {
+        // Transition: {MethodPascal}{Aggregate} → findById → entity.{method}() → save
+        const transitionContext = {
+          packageName, moduleName, aggregateName,
+          useCaseName: op.useCase,
+          idType,
+          domainMethod: cl.domainMethod
+        };
+        await renderAndWrite(
+          path.join(templatesDir, 'TransitionCommand.java.ejs'),
+          path.join(moduleBasePath, 'application', 'commands', `${op.useCase}Command.java`),
+          transitionContext, writeOptions
+        );
+        generatedFiles.push({ type: 'Command', name: `${op.useCase}Command`, path: `${moduleName}/application/commands/${op.useCase}Command.java` });
+
+        await renderAndWrite(
+          path.join(templatesDir, 'TransitionCommandHandler.java.ejs'),
+          path.join(moduleBasePath, 'application', 'usecases', `${op.useCase}CommandHandler.java`),
+          transitionContext, writeOptions
+        );
+        generatedFiles.push({ type: 'Handler', name: `${op.useCase}CommandHandler`, path: `${moduleName}/application/usecases/${op.useCase}CommandHandler.java` });
+
+      } else if (cl.category === 'subEntityAdd') {
+        // SubEntityAdd: Add{EntityName} → findById → entity.add{Entity}(...) → save
+        const addContext = {
+          packageName, moduleName, aggregateName,
+          useCaseName: op.useCase,
+          idType,
+          entityName: cl.entityName,
+          entityFields: cl.entityFields,
+          addMethodName: cl.addMethodName,
+          imports: cl.entityImports
+        };
+        await renderAndWrite(
+          path.join(templatesDir, 'SubEntityAddCommand.java.ejs'),
+          path.join(moduleBasePath, 'application', 'commands', `${op.useCase}Command.java`),
+          addContext, writeOptions
+        );
+        generatedFiles.push({ type: 'Command', name: `${op.useCase}Command`, path: `${moduleName}/application/commands/${op.useCase}Command.java` });
+
+        await renderAndWrite(
+          path.join(templatesDir, 'SubEntityAddCommandHandler.java.ejs'),
+          path.join(moduleBasePath, 'application', 'usecases', `${op.useCase}CommandHandler.java`),
+          addContext, writeOptions
+        );
+        generatedFiles.push({ type: 'Handler', name: `${op.useCase}CommandHandler`, path: `${moduleName}/application/usecases/${op.useCase}CommandHandler.java` });
+
+      } else if (cl.category === 'subEntityRemove') {
+        // SubEntityRemove: Remove{EntityName} → findById → entity.remove{Entity}ById(itemId) → save
+        const removeContext = {
+          packageName, moduleName, aggregateName,
+          useCaseName: op.useCase,
+          idType,
+          entityName: cl.entityName,
+          removeMethodName: cl.removeMethodName
+        };
+        await renderAndWrite(
+          path.join(templatesDir, 'SubEntityRemoveCommand.java.ejs'),
+          path.join(moduleBasePath, 'application', 'commands', `${op.useCase}Command.java`),
+          removeContext, writeOptions
+        );
+        generatedFiles.push({ type: 'Command', name: `${op.useCase}Command`, path: `${moduleName}/application/commands/${op.useCase}Command.java` });
+
+        await renderAndWrite(
+          path.join(templatesDir, 'SubEntityRemoveCommandHandler.java.ejs'),
+          path.join(moduleBasePath, 'application', 'usecases', `${op.useCase}CommandHandler.java`),
+          removeContext, writeOptions
+        );
+        generatedFiles.push({ type: 'Handler', name: `${op.useCase}CommandHandler`, path: `${moduleName}/application/usecases/${op.useCase}CommandHandler.java` });
+
+      } else if (cl.category === 'findBy') {
+        // FindBy: FindAll{Aggregate}sBy{Field} → paginated query on a root field
+        findByOps.push(cl); // collected for repository re-generation after the loop
+        const findByContext = {
+          packageName, moduleName, aggregateName,
+          useCaseName: op.useCase,
+          idType,
+          fieldName: cl.fieldName,
+          fieldPascal: cl.fieldPascal,
+          fieldJavaType: cl.fieldJavaType,
+          jpaMethodName: cl.jpaMethodName
+        };
+        await renderAndWrite(
+          path.join(templatesDir, 'FindByQuery.java.ejs'),
+          path.join(moduleBasePath, 'application', 'queries', `${op.useCase}Query.java`),
+          findByContext, writeOptions
+        );
+        generatedFiles.push({ type: 'Query', name: `${op.useCase}Query`, path: `${moduleName}/application/queries/${op.useCase}Query.java` });
+
+        await renderAndWrite(
+          path.join(templatesDir, 'FindByQueryHandler.java.ejs'),
+          path.join(moduleBasePath, 'application', 'usecases', `${op.useCase}QueryHandler.java`),
+          findByContext, writeOptions
+        );
+        generatedFiles.push({ type: 'Handler', name: `${op.useCase}QueryHandler`, path: `${moduleName}/application/usecases/${op.useCase}QueryHandler.java` });
+
       } else {
-        // Non-standard use case → scaffold with TODO
+        // Scaffold: no semantic pattern matched → generate stub with TODO
         const scaffoldContext = { packageName, moduleName, aggregateName, useCaseName: op.useCase };
-        if (op.type === 'command') {
+        const scaffoldType = op.type || (op.method === 'GET' ? 'query' : 'command');
+        if (scaffoldType === 'command') {
           await renderAndWrite(
             path.join(templatesDir, 'ScaffoldCommand.java.ejs'),
             path.join(moduleBasePath, 'application', 'commands', `${op.useCase}Command.java`),
@@ -1061,6 +1260,33 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
         }
       }
     }
+  }
+
+  // ── Step 5b: Re-generate repository files when FindBy ops are present ────
+  // Checksum protection still applies: manually modified files are skipped.
+  if (findByOps.length > 0) {
+    const aggregateTemplatesDir = path.join(__dirname, '..', '..', 'templates', 'aggregate');
+    const repoContext = { packageName, moduleName, rootEntity, findByOps };
+    const repoImplContext = {
+      packageName, moduleName, aggregateName, rootEntity,
+      hasDomainEvents: (aggregate.domainEvents || []).length > 0,
+      findByOps
+    };
+    await renderAndWrite(
+      path.join(aggregateTemplatesDir, 'AggregateRepository.java.ejs'),
+      path.join(moduleBasePath, 'domain', 'repositories', `${rootEntity.name}Repository.java`),
+      repoContext, writeOptions
+    );
+    await renderAndWrite(
+      path.join(aggregateTemplatesDir, 'JpaRepository.java.ejs'),
+      path.join(moduleBasePath, 'infrastructure', 'database', 'repositories', `${rootEntity.name}JpaRepository.java`),
+      repoContext, writeOptions
+    );
+    await renderAndWrite(
+      path.join(aggregateTemplatesDir, 'AggregateRepositoryImpl.java.ejs'),
+      path.join(moduleBasePath, 'infrastructure', 'database', 'repositories', `${rootEntity.name}RepositoryImpl.java`),
+      repoImplContext, writeOptions
+    );
   }
 
   // ── Step 6: Versioned controllers ────────────────────────────────────

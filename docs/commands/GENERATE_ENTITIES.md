@@ -907,3 +907,198 @@ aggregates:
 | `Column 'x_id' is duplicated` | ManyToOne defined manually + auto-generated | Remove the manual ManyToOne; let eva4j generate it |
 | File not regenerated | File was manually modified (checksum) | Use `--force` to overwrite |
 | Import errors | Field `type` doesn't match name in `enums:` or `valueObjects:` | Verify names match exactly |
+
+---
+
+## 16. Declarative endpoints (`endpoints:`) — Use case patterns
+
+When `domain.yaml` includes an `endpoints:` section, the generator examines each `useCase` name and classifies it semantically before generating code. This determines whether a full, working implementation or a scaffold stub is produced.
+
+### 16.1 Pattern table
+
+| Pattern | Category | Recognition condition | What is generated |
+|---------|----------|----------------------|-------------------|
+| `Create{Aggregate}` | **standard** | Exact string match | Full `CreateCommand` + `CreateCommandHandler` (`ApplicationMapper.fromCommand → save`) |
+| `Update{Aggregate}` | **standard** | Exact string match | Full `UpdateCommand` + `UpdateCommandHandler` |
+| `Delete{Aggregate}` | **standard** | Exact string match | Full `DeleteCommand` + `DeleteCommandHandler` |
+| `Get{Aggregate}` | **standard** | Exact string match | Full `GetQuery` + `GetQueryHandler` (find + `mapper.toDto`) |
+| `FindAll{Aggregate}s` | **standard** | Exact string match (trailing literal `s`) | Full `ListQuery` + `ListQueryHandler` (paginated) |
+| `{MethodPascal}{Aggregate}` | **transition** | `MethodPascal` is `toPascalCase(transitions[n].method)` for any enum in the aggregate | Full `TransitionCommand(id)` + handler that calls `entity.{method}() → save()` |
+| `Add{EntityName}` | **subEntityAdd** | `EntityName` is the `target` of a `OneToMany` relationship on the root | Full `AddCommand(id, entityFields…)` + handler that calls `entity.add{Entity}(new {Entity}(…)) → save()` |
+| `Remove{EntityName}` | **subEntityRemove** | Same `target` from a `OneToMany` relationship | Full `RemoveCommand(id, itemId)` + handler that calls `entity.remove{Entity}ById(itemId) → save()` |
+| `FindAll{Aggregate}sBy{FieldPascal}` | **findBy** | `FieldPascal` is `toPascalCase(fieldName)` for any field in the root entity | Full `FindByQuery` + `FindByQueryHandler` + `findBy{FieldPascal}` added to `{Aggregate}Repository`, `{Aggregate}RepositoryImpl`, and `{Aggregate}JpaRepository` |
+| _anything else_ | **scaffold** | No pattern matched | `*Command(id)` or `*Query(id)` + handler that throws `UnsupportedOperationException` with a TODO comment |
+
+> **Note on `FindAll{Aggregate}s`:** The trailing `s` is a literal character. For `Aggregate = Order` the standard name is `FindAllOrders` (not `FindAllOrder`). Irregular plurals are not supported — use the exact pattern or it will be classified as scaffold.
+
+### 16.2 Transition pattern in detail
+
+Enumerate state transitions in the `enums:` block using `transitions`:
+
+```yaml
+enums:
+  - name: OrderStatus
+    transitions:
+      - from: PENDING
+        to: CONFIRMED
+        method: confirm        # → recognized as ConfirmOrder (PascalCase(confirm) + Order)
+      - from: [PENDING, CONFIRMED]
+        to: CANCELLED
+        method: cancel         # → CancelOrder
+      - from: CONFIRMED
+        to: SHIPPED
+        method: ship           # → ShipOrder
+    values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+```
+
+Declare the corresponding use cases in `endpoints:`:
+
+```yaml
+endpoints:
+  basePath: /orders
+  versions:
+    - version: v1
+      operations:
+        - method: PUT
+          path: /{id}/confirm
+          useCase: ConfirmOrder    # ← transition pattern: confirm + Order
+          type: command
+        - method: PUT
+          path: /{id}/cancel
+          useCase: CancelOrder
+          type: command
+```
+
+**Generated output:**
+
+```java
+// ConfirmOrderCommand.java
+public record ConfirmOrderCommand(String id) implements Command {}
+
+// ConfirmOrderCommandHandler.java
+@Transactional
+public void handle(ConfirmOrderCommand command) {
+    Order entity = repository.findById(command.id())
+            .orElseThrow(() -> new NotFoundException("Order not found with id: " + command.id()));
+    entity.confirm();   // ← the domain method from transitions[].method
+    repository.save(entity);
+}
+```
+
+### 16.3 Sub-entity add/remove pattern in detail
+
+Requirements:
+- A `OneToMany` relationship must be declared on the root entity pointing to the target entity.
+- The aggregate root must expose `add{EntityName}({EntityName} item)` and `remove{EntityName}ById(String id)` domain methods (generated automatically by `eva g entities`).
+
+```yaml
+# aggregates: section
+relationships:
+  - type: OneToMany
+    target: OrderItem          # ← entityName used to match Add/Remove pattern
+    fieldName: items
+    ...
+
+# endpoints: section
+operations:
+  - method: POST
+    path: /{id}/items
+    useCase: AddOrderItem      # ← Add + OrderItem (target name)
+    type: command
+  - method: DELETE
+    path: /{id}/items/{itemId}
+    useCase: RemoveOrderItem   # ← Remove + OrderItem
+    type: command
+```
+
+**Generated output:**
+
+```java
+// AddOrderItemCommand.java — fields taken from OrderItem (non-id, non-audit, non-readOnly)
+public record AddOrderItemCommand(
+    String id,
+    String productId,
+    String productName,
+    Integer quantity,
+    BigDecimal unitPrice
+) implements Command {}
+
+// AddOrderItemCommandHandler.java
+@Transactional
+public void handle(AddOrderItemCommand command) {
+    Order entity = repository.findById(command.id()) ...;
+    OrderItem item = new OrderItem(command.productId(), command.productName(),
+                                   command.quantity(), command.unitPrice());
+    entity.addOrderItem(item);
+    repository.save(entity);
+}
+
+// RemoveOrderItemCommand.java
+public record RemoveOrderItemCommand(String id, String itemId) implements Command {}
+
+// RemoveOrderItemCommandHandler.java
+@Transactional
+public void handle(RemoveOrderItemCommand command) {
+    Order entity = repository.findById(command.id()) ...;
+    entity.removeOrderItemById(command.itemId());
+    repository.save(entity);
+}
+```
+
+### 16.4 FindBy pattern in detail
+
+Strict pattern: `FindAll{Aggregate}sBy{FieldPascal}` — both parts are required.
+
+When detected, the generator:
+1. Creates a paginated `FindBy{Field}Query` + `FindBy{Field}QueryHandler`.
+2. Re-generates `{Aggregate}Repository.java` (domain interface), `{Aggregate}JpaRepository.java`, and `{Aggregate}RepositoryImpl.java` with the `findBy{FieldPascal}(FieldType value, Pageable pageable)` method added. Checksum protection still applies — manually modified files are skipped unless `--force` is used.
+
+```yaml
+# Root entity field
+fields:
+  - name: customerId
+    type: String
+
+# Endpoint
+operations:
+  - method: GET
+    path: /customer/{customerId}
+    useCase: FindAllOrdersByCustomerId   # ← FindAll + Order + s + By + CustomerId
+    type: query
+```
+
+**Generated output:**
+
+```java
+// FindAllOrdersByCustomerIdQuery.java
+public record FindAllOrdersByCustomerIdQuery(
+    String customerId, int page, int size, String sortBy, String sortDirection
+) implements Query<PagedResponse<OrderResponseDto>> {}
+
+// OrderRepository.java (domain interface — method appended)
+Page<Order> findByCustomerId(String customerId, Pageable pageable);
+
+// OrderJpaRepository.java (Spring Data JPA — method auto-implemented)
+Page<OrderJpa> findByCustomerId(String customerId, Pageable pageable);
+```
+
+### 16.5 Scaffold (fallback)
+
+Any `useCase` name that does not match any pattern above becomes a scaffold. A scaffold generates:
+
+- A minimal `{UseCase}Command(String id)` or `{UseCase}Query(String id)` record.
+- A handler that throws `UnsupportedOperationException` and includes a step-by-step TODO comment.
+
+This is intentional: the developer fills in the custom business logic while the wiring (registration, mediator dispatch, controller method) is already in place.
+
+### 16.6 Naming rules
+
+| What | Convention | Example |
+|------|-----------|---------|
+| Aggregate name | PascalCase | `Order` |
+| Use case name in YAML | PascalCase | `ConfirmOrder`, `FindAllOrdersByCustomerId` |
+| Transition method in YAML | camelCase | `confirm`, `cancelOrder` |
+| Pattern `{MethodPascal}` | `toPascalCase(method)` | `confirm` → `Confirm` |
+| Pattern `{FieldPascal}` | `toPascalCase(fieldName)` | `customerId` → `CustomerId` |
+| Sub-entity target | PascalCase (must match entity `name:`) | `OrderItem` |
+

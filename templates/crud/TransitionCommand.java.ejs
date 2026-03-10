@@ -1,0 +1,9 @@
+package <%= packageName %>.<%= moduleName %>.application.commands;
+
+import <%= packageName %>.shared.domain.interfaces.Command;
+
+/**
+ * <%= useCaseName %>Command
+ * Triggers the '<%= domainMethod %>' state transition on the <%= aggregateName %> aggregate.
+ */
+public record <%= useCaseName %>Command(<%- idType %> id) implements Command {}

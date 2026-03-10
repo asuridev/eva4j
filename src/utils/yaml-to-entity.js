@@ -92,7 +92,8 @@ function parseAggregate(aggregateData) {
     valueObjects: parsedValueObjects,
     aggregateMethods,
     allEntities: parsedEntities,
-    domainEvents
+    domainEvents,
+    enums: aggregateEnums
   };
 }
 
