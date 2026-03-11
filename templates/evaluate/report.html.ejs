@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= data.systemName %> — eva4j Architecture Validator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; color: #e8e8f0; font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0a0a0f; }
+    ::-webkit-scrollbar-thumb { background: #2e2e50; border-radius: 3px; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes shimmer { 0% { box-shadow: 0 0 0 0 rgba(230,57,80,0.4); } 70% { box-shadow: 0 0 0 8px rgba(230,57,80,0); } 100% { box-shadow: 0 0 0 0 rgba(230,57,80,0); } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    (function () {
+      var _d = '<%- Buffer.from(JSON.stringify(data)).toString("base64") %>';
+      var bytes = Uint8Array.from(atob(_d), function(c) { return c.charCodeAt(0); });
+      window.__EVA_DATA__ = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+    })();
+  </script>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    // ─── Injected data ──────────────────────────────────────────────────────
+    const {
+      systemName,
+      modules: MODULES_LIST,
+      events: EVENTS,
+      syncIntegrations: SYNC_INTEGRATIONS,
+      endpoints: ENDPOINTS,
+      flows: FLOWS_LIST,
+      validation: VALIDATION,
+      generatedAt,
+    } = window.__EVA_DATA__;
+
+    // Convert arrays to maps for fast lookup
+    const MODULES = Object.fromEntries(MODULES_LIST.map(m => [m.id, m]));
+    const FLOWS = Object.fromEntries(FLOWS_LIST.map(f => [f.id, f]));
+
+    // ─── Design system ──────────────────────────────────────────────────────
+    const C = {
+      bg: "#0a0a0f",
+      surface: "#12121a",
+      surfaceHover: "#1a1a28",
+      border: "#1e1e30",
+      borderBright: "#2e2e50",
+      accent: "#e63950",
+      gold: "#f5c842",
+      green: "#2dcc8f",
+      blue: "#4a9eff",
+      purple: "#9b6dff",
+      orange: "#ff8c42",
+      text: "#e8e8f0",
+      textMuted: "#8c8caa",
+      textDim: "#b4b4cc",
+    };
+
+    // ─── Primitive components ───────────────────────────────────────────────
+    const Tag = ({ color, children }) => (
+      <span style={{
+        background: color + "22", color, border: `1px solid ${color}44`,
+        borderRadius: 4, padding: "1px 8px", fontSize: 11, fontWeight: 600,
+        fontFamily: "'JetBrains Mono', 'Courier New', monospace", letterSpacing: 0.3, display: "inline-block",
+      }}>
+        {children}
+      </span>
+    );
+
+    const Badge = ({ color, children }) => (
+      <span style={{
+        background: color + "33", color, borderRadius: 20,
+        padding: "2px 10px", fontSize: 11, fontWeight: 700,
+      }}>
+        {children}
+      </span>
+    );
+
+    // ─── ModuleCard ─────────────────────────────────────────────────────────
+    function ModuleCard({ id, selected, onClick }) {
+      const mod = MODULES[id];
+      if (!mod) return null;
+      return (
+        <div onClick={onClick} style={{
+          background: selected ? mod.color + "22" : C.surface,
+          border: `1px solid ${selected ? mod.color : C.border}`,
+          borderRadius: 10, padding: "10px 14px", cursor: "pointer",
+          transition: "all 0.18s", display: "flex", alignItems: "center", gap: 10,
+          boxShadow: selected ? `0 0 14px ${mod.color}33` : "none",
+        }}>
+          <span style={{ fontSize: 20 }}>{mod.icon}</span>
+          <div>
+            <div style={{ fontWeight: 700, color: selected ? mod.color : C.text, fontSize: 13 }}>{mod.label}</div>
+            <div style={{ color: C.textMuted, fontSize: 10, marginTop: 1 }}>{mod.desc}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── ValidationTab ──────────────────────────────────────────────────────
+    function ValidationTab() {
+      const [expanded, setExpanded] = useState({ errors: true, warnings: true, ok: false });
+
+      const score = VALIDATION.score;
+      const scoreColor = score > 80 ? C.green : score > 60 ? C.gold : C.accent;
+
+      function Section({ title, items, color, icon, sectionKey }) {
+        const isOpen = expanded[sectionKey];
+        return (
+          <div style={{ marginBottom: 16 }}>
+            <div
+              onClick={() => setExpanded(e => ({ ...e, [sectionKey]: !e[sectionKey] }))}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+                padding: "10px 16px", background: C.surface, border: `1px solid ${C.border}`,
+                borderRadius: isOpen ? "8px 8px 0 0" : 8, userSelect: "none",
+              }}
+            >
+              <span style={{ fontSize: 18 }}>{icon}</span>
+              <span style={{ fontWeight: 700, color, flex: 1 }}>{title}</span>
+              <Badge color={color}>{items.length}</Badge>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>{isOpen ? "▲" : "▼"}</span>
+            </div>
+            {isOpen && items.length > 0 && (
+              <div style={{ border: `1px solid ${C.border}`, borderTop: "none", borderRadius: "0 0 8px 8px", overflow: "hidden" }}>
+                {items.map((item, i) => (
+                  <div key={i} style={{
+                    padding: "10px 16px",
+                    borderBottom: i < items.length - 1 ? `1px solid ${C.border}` : "none",
+                    display: "flex", alignItems: "flex-start", gap: 10,
+                    background: i % 2 === 0 ? C.bg : C.surface,
+                  }}>
+                    <span style={{ color, marginTop: 1, flexShrink: 0 }}>•</span>
+                    <span style={{ color: C.textDim, fontSize: 13, lineHeight: 1.6 }}>
+                      {typeof item === "string" ? item : item.msg}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {isOpen && items.length === 0 && (
+              <div style={{ border: `1px solid ${C.border}`, borderTop: "none", borderRadius: "0 0 8px 8px", padding: "12px 16px", background: C.bg }}>
+                <span style={{ color: C.textMuted, fontSize: 12 }}>— ninguno —</span>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      return (
+        <div>
+          {/* Score cards */}
+          <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
+            <div style={{
+              flex: 1, minWidth: 160, background: C.surface, border: `1px solid ${scoreColor}44`,
+              borderRadius: 12, padding: 20, textAlign: "center",
+              boxShadow: `0 0 24px ${scoreColor}22`,
+            }}>
+              <div style={{ fontSize: 52, fontWeight: 900, color: scoreColor, fontFamily: "monospace", lineHeight: 1 }}>
+                {score}%
+              </div>
+              <div style={{ color: C.textMuted, fontSize: 11, marginTop: 6, letterSpacing: 1 }}>SCORE DE CALIDAD</div>
+            </div>
+            {[
+              { label: "Errores", count: VALIDATION.errors.length, color: C.accent, icon: "🔴" },
+              { label: "Advertencias", count: VALIDATION.warnings.length, color: C.gold, icon: "🟡" },
+              { label: "Validados", count: VALIDATION.ok.length, color: C.green, icon: "🟢" },
+            ].map(s => (
+              <div key={s.label} style={{
+                flex: 1, minWidth: 130, background: C.surface, border: `1px solid ${C.border}`,
+                borderRadius: 12, padding: 20, textAlign: "center",
+              }}>
+                <div style={{ fontSize: 38, fontWeight: 900, color: s.color, fontFamily: "monospace" }}>{s.count}</div>
+                <div style={{ color: C.textMuted, fontSize: 11, marginTop: 6, letterSpacing: 0.5 }}>
+                  {s.icon} {s.label.toUpperCase()}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <Section title="Errores críticos" items={VALIDATION.errors} color={C.accent} icon="🔴" sectionKey="errors" />
+          <Section title="Advertencias" items={VALIDATION.warnings} color={C.gold} icon="🟡" sectionKey="warnings" />
+          <Section title="Validaciones pasadas" items={VALIDATION.ok} color={C.green} icon="🟢" sectionKey="ok" />
+        </div>
+      );
+    }
+
+    // ─── FlowSimulator ──────────────────────────────────────────────────────
+    function FlowSimulator() {
+      const defaultFlow = FLOWS_LIST[0]?.id || null;
+      const [selectedFlowId, setSelectedFlowId] = useState(defaultFlow);
+      const [currentStep, setCurrentStep] = useState(-1);
+      const [running, setRunning] = useState(false);
+      const [completed, setCompleted] = useState(false);
+      const intervalRef = useRef(null);
+
+      const flow = FLOWS[selectedFlowId] || FLOWS_LIST[0];
+
+      if (!flow) {
+        return (
+          <div style={{ color: C.textMuted, padding: 40, textAlign: "center" }}>
+            No hay flujos de eventos declarados en integrations.async
+          </div>
+        );
+      }
+
+      const reset = () => {
+        clearInterval(intervalRef.current);
+        setCurrentStep(-1);
+        setRunning(false);
+        setCompleted(false);
+      };
+
+      const selectFlow = (id) => {
+        reset();
+        setSelectedFlowId(id);
+      };
+
+      const run = () => {
+        if (running) return;
+        reset();
+        setRunning(true);
+        let step = 0;
+        setCurrentStep(0);
+        intervalRef.current = setInterval(() => {
+          step++;
+          if (step >= flow.steps.length) {
+            clearInterval(intervalRef.current);
+            setRunning(false);
+            setCompleted(true);
+            setCurrentStep(flow.steps.length);
+          } else {
+            setCurrentStep(step);
+          }
+        }, 1100);
+      };
+
+      useEffect(() => () => clearInterval(intervalRef.current), []);
+
+      const getStepIcon = (step) => {
+        if (step.type === "event") return "⚡";
+        if (step.type === "external") return "🌐";
+        if (step.type === "action") return "📤";
+        return "→";
+      };
+
+      const getStepColor = (step) => {
+        if (step.type === "event") return C.gold;
+        if (step.type === "external") return C.purple;
+        if (step.type === "action") return C.green;
+        return C.blue;
+      };
+
+      const getActorColor = (actor) => {
+        if (MODULES[actor]) return MODULES[actor].color;
+        if (actor === "client" || actor === "organizer") return C.green;
+        if (actor === "admin") return C.purple;
+        if (actor === "gateway") return C.textDim;
+        return C.textMuted;
+      };
+
+      return (
+        <div>
+          {/* Flow selector tabs */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+            {FLOWS_LIST.map(f => (
+              <button key={f.id} onClick={() => selectFlow(f.id)} style={{
+                background: selectedFlowId === f.id ? f.color + "22" : C.surface,
+                border: `1px solid ${selectedFlowId === f.id ? f.color : C.border}`,
+                color: selectedFlowId === f.id ? f.color : C.textMuted,
+                borderRadius: 8, padding: "7px 12px", cursor: "pointer",
+                fontWeight: selectedFlowId === f.id ? 700 : 400, fontSize: 12,
+                transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6,
+                boxShadow: selectedFlowId === f.id ? `0 0 12px ${f.color}33` : "none",
+                fontFamily: "inherit",
+              }}>
+                <span>{f.icon}</span>{f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Flow header */}
+          <div style={{
+            background: C.surface, border: `1px solid ${flow.color}44`, borderRadius: 10,
+            padding: 16, marginBottom: 20, display: "flex", alignItems: "center", gap: 16,
+          }}>
+            <span style={{ fontSize: 32 }}>{flow.icon}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, color: flow.color, fontSize: 16 }}>{flow.label}</div>
+              <div style={{ color: C.textDim, fontSize: 12, marginTop: 3 }}>{flow.description}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={run} disabled={running} style={{
+                background: running ? C.border : flow.color, color: "#fff",
+                border: "none", borderRadius: 8, padding: "10px 20px",
+                cursor: running ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 14,
+                transition: "all 0.15s", opacity: running ? 0.6 : 1, fontFamily: "inherit",
+              }}>
+                {running ? "⏳ Ejecutando..." : completed ? "▶ Re-ejecutar" : "▶ Simular"}
+              </button>
+              <button onClick={reset} style={{
+                background: "transparent", color: C.textMuted,
+                border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: "10px 14px", cursor: "pointer", fontFamily: "inherit",
+              }}>⟳</button>
+            </div>
+          </div>
+
+          {/* Steps timeline */}
+          <div style={{ position: "relative" }}>
+            {flow.steps.map((step, i) => {
+              const isActive = currentStep === i;
+              const isDone = currentStep > i;
+              const stepColor = getStepColor(step);
+
+              return (
+                <div key={step.id} style={{ display: "flex", gap: 16, marginBottom: 8, alignItems: "flex-start" }}>
+                  {/* Timeline dot */}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 36, flexShrink: 0 }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: "50%",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: isDone ? C.green + "22" : isActive ? stepColor + "33" : C.surface,
+                      border: `2px solid ${isDone ? C.green : isActive ? stepColor : C.border}`,
+                      color: isDone ? C.green : isActive ? stepColor : C.textMuted,
+                      fontWeight: 700, fontSize: 13, transition: "all 0.3s",
+                      boxShadow: isActive ? `0 0 16px ${stepColor}44` : "none",
+                    }}>
+                      {isDone ? "✓" : step.id}
+                    </div>
+                    {i < flow.steps.length - 1 && (
+                      <div style={{
+                        width: 2, flex: 1, minHeight: 24,
+                        background: isDone ? C.green + "44" : C.border,
+                        marginTop: 4,
+                      }} />
+                    )}
+                  </div>
+
+                  {/* Step card */}
+                  <div style={{
+                    flex: 1,
+                    background: isActive ? stepColor + "11" : isDone ? C.green + "08" : C.surface,
+                    border: `1px solid ${isActive ? stepColor + "66" : isDone ? C.green + "33" : C.border}`,
+                    borderRadius: 10, padding: "12px 16px", marginBottom: 4,
+                    transition: "all 0.3s",
+                    opacity: currentStep === -1 ? 0.55 : isDone || isActive ? 1 : 0.4,
+                  }}>
+                    {/* Step header */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 16 }}>{getStepIcon(step)}</span>
+                      {step.from && (
+                        <>
+                          <Tag color={getActorColor(step.from)}>{step.from}</Tag>
+                          <span style={{ color: C.textMuted, fontSize: 12 }}>→</span>
+                        </>
+                      )}
+                      {step.to && !Array.isArray(step.to) && (
+                        <Tag color={getActorColor(step.to)}>{step.to}</Tag>
+                      )}
+                      {Array.isArray(step.to) && step.to.map(t => (
+                        <Tag key={t} color={getActorColor(t)}>{t}</Tag>
+                      ))}
+                      {step.label && (
+                        <code style={{
+                          background: C.bg, color: stepColor,
+                          padding: "2px 8px", borderRadius: 4, fontSize: 12,
+                          border: `1px solid ${C.border}`,
+                        }}>
+                          {step.label}
+                        </code>
+                      )}
+                      {step.event && <Tag color={C.gold}>⚡ {step.event}</Tag>}
+                      {step.topic && <Tag color={C.purple}>kafka:{step.topic}</Tag>}
+                    </div>
+
+                    <div style={{ color: C.textDim, fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
+                      {step.desc}
+                    </div>
+
+                    {/* Sync sub-calls (shown when step is active) */}
+                    {step.syncCalls && step.syncCalls.length > 0 && isActive && (
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${C.border}` }}>
+                        <div style={{ color: C.textMuted, fontSize: 10, marginBottom: 6, fontWeight: 700, letterSpacing: 1 }}>
+                          LLAMADAS SÍNCRONAS:
+                        </div>
+                        {step.syncCalls.map((sc, j) => (
+                          <div key={j} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <span style={{ color: C.blue, fontSize: 11 }}>⟶</span>
+                            <Tag color={getActorColor(sc.to)}>{sc.to}</Tag>
+                            <code style={{
+                              background: C.bg, color: C.blue,
+                              padding: "1px 6px", borderRadius: 3, fontSize: 11,
+                            }}>{sc.label}</code>
+                            <span style={{ color: C.textMuted, fontSize: 10 }}>via {sc.port}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {completed && (
+            <div style={{
+              background: C.green + "15", border: `1px solid ${C.green}44`,
+              borderRadius: 10, padding: 16, textAlign: "center", marginTop: 8,
+              animation: "fadeIn 0.3s",
+            }}>
+              <span style={{ fontSize: 24 }}>✅</span>
+              <div style={{ color: C.green, fontWeight: 700, marginTop: 4 }}>Flujo completado exitosamente</div>
+              <div style={{ color: C.textMuted, fontSize: 12, marginTop: 2 }}>
+                {flow.steps.length} pasos · {flow.label}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── ArchitectureTab ────────────────────────────────────────────────────
+    function ArchitectureTab() {
+      const [selected, setSelected] = useState(null);
+
+      const moduleInfo = (id) => ({
+        produces: EVENTS.filter(e => e.producer === id),
+        consumes: EVENTS.filter(e => (e.consumers || []).includes(id)),
+        callsSync: SYNC_INTEGRATIONS.filter(s => s.caller === id),
+        calledBy: SYNC_INTEGRATIONS.filter(s => s.calls === id),
+        endpoints: ENDPOINTS[id] || [],
+      });
+
+      return (
+        <div>
+          {/* Module grid */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 10, fontWeight: 700, letterSpacing: 1 }}>
+              MÓDULOS — clic para explorar dependencias
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+              {MODULES_LIST.map(m => (
+                <ModuleCard
+                  key={m.id}
+                  id={m.id}
+                  selected={selected === m.id}
+                  onClick={() => setSelected(selected === m.id ? null : m.id)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Selected module detail */}
+          {selected && (() => {
+            const mod = MODULES[selected];
+            const info = moduleInfo(selected);
+            if (!mod) return null;
+            return (
+              <div style={{
+                background: C.surface, border: `1px solid ${mod.color}44`,
+                borderRadius: 12, padding: 20, marginBottom: 20,
+                animation: "fadeIn 0.2s",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                  <span style={{ fontSize: 28 }}>{mod.icon}</span>
+                  <div>
+                    <div style={{ fontWeight: 800, color: mod.color, fontSize: 18 }}>{mod.label}</div>
+                    <div style={{ color: C.textMuted, fontSize: 12 }}>{mod.desc}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
+                  {[
+                    { title: "Produce eventos",       items: info.produces,  color: C.gold,   icon: "📤", render: e => e.event },
+                    { title: "Consume eventos",        items: info.consumes,  color: C.blue,   icon: "📥", render: e => e.event },
+                    { title: "Llama síncronamente",   items: info.callsSync, color: C.purple, icon: "⟶", render: s => `→ ${s.calls}  (${s.port})` },
+                    { title: "Es llamado por",         items: info.calledBy,  color: C.green,  icon: "⟵", render: s => `← ${s.caller}  (${s.port})` },
+                    { title: "Endpoints expuestos",    items: info.endpoints, color: mod.color, icon: "🔌", render: e => e },
+                  ].filter(sec => sec.items.length > 0).map(section => (
+                    <div key={section.title}>
+                      <div style={{ color: section.color, fontSize: 10, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }}>
+                        {section.icon} {section.title.toUpperCase()}
+                      </div>
+                      {section.items.map((item, i) => (
+                        <div key={i} style={{
+                          color: C.textDim, fontSize: 12, padding: "5px 0",
+                          borderBottom: `1px solid ${C.border}`, fontFamily: "monospace",
+                        }}>
+                          {section.render(item)}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Sync integrations graph */}
+          {SYNC_INTEGRATIONS.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 10, fontWeight: 700, letterSpacing: 1 }}>
+                DEPENDENCIAS SÍNCRONAS ({SYNC_INTEGRATIONS.length} puertos)
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 10 }}>
+                {SYNC_INTEGRATIONS.map((s, i) => {
+                  const callerMod = MODULES[s.caller];
+                  const calleeMod = MODULES[s.calls];
+                  return (
+                    <div key={i} style={{
+                      background: C.surface, border: `1px solid ${C.border}`,
+                      borderRadius: 10, padding: "12px 16px",
+                    }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                        <Tag color={callerMod?.color || C.textMuted}>{s.caller}</Tag>
+                        <span style={{ color: C.textMuted, fontSize: 14, fontWeight: 700 }}>→</span>
+                        <Tag color={calleeMod?.color || C.textMuted}>{s.calls}</Tag>
+                        <Tag color={C.purple}>{s.port}</Tag>
+                      </div>
+                      <div style={{ marginLeft: 4 }}>
+                        {(s.endpoints || []).map((ep, j) => (
+                          <div key={j} style={{ color: C.textDim, fontSize: 11, fontFamily: "monospace", padding: "2px 0" }}>
+                            · {ep}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Kafka topics */}
+          <div>
+            <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 10, fontWeight: 700, letterSpacing: 1 }}>
+              KAFKA TOPICS ({EVENTS.length} eventos)
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 8 }}>
+              {EVENTS.map(e => (
+                <div key={e.event} style={{
+                  background: C.surface, border: `1px solid ${C.border}`,
+                  borderRadius: 8, padding: "10px 14px",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                    <Tag color={C.gold}>{e.topic}</Tag>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <Tag color={MODULES[e.producer]?.color || C.textMuted}>{e.producer}</Tag>
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>→</span>
+                    {(e.consumers || []).map(c => (
+                      <Tag key={c} color={MODULES[c]?.color || C.textMuted}>{c}</Tag>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── DiagramTab ──────────────────────────────────────────────────────────
+    function DiagramTab() {
+      const containerRef     = useRef(null);
+      const networkRef      = useRef(null);
+      const edgesDataRef    = useRef(null);
+      const edgeGroupMapRef  = useRef({});
+      const eventEdgesMapRef = useRef({});
+      const edgeLabelMapRef  = useRef({});
+      const [physicsOn, setPhysicsOn] = useState(true);
+      const [hoveredNode,  setHoveredNode]  = useState(null);
+      const [hoveredEvent, setHoveredEvent] = useState(null);  // { name, producer, consumers[] }
+
+      // Build vis datasets from injected data
+      function buildDatasets() {
+        const visNodes = MODULES_LIST.map(mod => ({
+          id:    mod.id,
+          label: mod.icon + "\n" + mod.label,
+          title: mod.desc,
+          color: {
+            background: mod.color + "22",
+            border:     mod.color,
+            highlight:  { background: mod.color + "44", border: mod.color },
+            hover:      { background: mod.color + "33", border: mod.color },
+          },
+          font:  { color: C.text, size: 13, face: "'Plus Jakarta Sans', sans-serif", multi: false },
+          shape: "box",
+          borderWidth: 2,
+          borderWidthSelected: 3,
+          margin: 10,
+        }));
+
+        const visEdges = [];
+
+        // Sync edges — solid blue
+        SYNC_INTEGRATIONS.forEach((s, i) => {
+          visEdges.push({
+            id:     "sync-" + i,
+            from:   s.caller,
+            to:     s.calls,
+            label:  s.port,
+            dashes: false,
+            color:  { color: C.blue, highlight: C.blue, hover: C.blue },
+            font:   { color: C.blue, size: 10, face: "'JetBrains Mono', monospace",
+                      background: C.bg, strokeWidth: 0, align: "middle" },
+            arrows: { to: { enabled: true, scaleFactor: 0.7 } },
+            width:  2,
+            smooth: { enabled: true, type: "curvedCW", roundness: 0.15 },
+          });
+        });
+
+        // Broker node — shown only if there are async events
+        if (EVENTS.length > 0) {
+          const brokerLabel = ((window.__EVA_DATA__.brokerName || "Kafka") + "\nBroker");
+          visNodes.push({
+            id:    "__broker__",
+            label: "⚡ " + brokerLabel,
+            title: "Message broker — retransmite eventos asíncronos entre módulos",
+            color: {
+              background: C.gold, border: "#c49a00",
+              highlight: { background: "#ffd84d", border: "#c49a00" },
+              hover:     { background: "#ffd84d", border: "#c49a00" },
+            },
+            font:  { color: "#0d1f3c", size: 13, face: "'Plus Jakarta Sans', sans-serif", bold: true },
+            shape: "box", borderWidth: 2, borderWidthSelected: 3, margin: 12,
+          });
+        }
+
+        // Async edges — routed through broker + group maps for hover highlighting
+        const edgeGroupMap  = {};   // edgeId → eventIndex
+        const eventEdgesMap = {};   // eventIndex → [edgeIds]
+        const edgeLabelMap  = {};   // edgeId → original label
+        EVENTS.forEach((ev, i) => {
+          const shortLabel = ev.event.replace(/Event$/, "");
+          eventEdgesMap[i] = [];
+          // producer → broker
+          const pubId = "async-pub-" + i;
+          edgeGroupMap[pubId] = i;
+          eventEdgesMap[i].push(pubId);
+          edgeLabelMap[pubId] = shortLabel;
+          visEdges.push({
+            id:     pubId,
+            from:   ev.producer,
+            to:     "__broker__",
+            label:  shortLabel,
+            dashes: [6, 4],
+            color:  { color: C.gold + "cc", highlight: C.gold, hover: C.gold },
+            font:   { color: C.gold, size: 10, face: "'JetBrains Mono', monospace",
+                      background: C.bg, strokeWidth: 0, align: "middle" },
+            arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+            width:  1.5,
+            smooth: { enabled: true, type: "dynamic" },
+          });
+          // broker → each consumer
+          (ev.consumers || []).forEach((consumer, j) => {
+            const subId = "async-sub-" + i + "-" + j;
+            edgeGroupMap[subId] = i;
+            eventEdgesMap[i].push(subId);
+            edgeLabelMap[subId] = "";
+            visEdges.push({
+              id:     subId,
+              from:   "__broker__",
+              to:     consumer,
+              label:  "",
+              dashes: [4, 4],
+              color:  { color: C.gold + "77", highlight: C.gold, hover: C.gold },
+              font:   { color: "rgba(0,0,0,0)", strokeWidth: 0 },
+              arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+              width:  1.5,
+              smooth: { enabled: true, type: "dynamic" },
+            });
+          });
+        });
+
+        return { visNodes, visEdges, edgeGroupMap, eventEdgesMap, edgeLabelMap };
+      }
+
+      function initNetwork(phys) {
+        if (!containerRef.current) return;
+        if (networkRef.current) { networkRef.current.destroy(); }
+
+        const { visNodes, visEdges, edgeGroupMap, eventEdgesMap, edgeLabelMap } = buildDatasets();
+        edgeGroupMapRef.current  = edgeGroupMap;
+        eventEdgesMapRef.current = eventEdgesMap;
+        edgeLabelMapRef.current  = edgeLabelMap;
+        const edgesDS = new vis.DataSet(visEdges);
+        edgesDataRef.current = edgesDS;
+        const data = {
+          nodes: new vis.DataSet(visNodes),
+          edges: edgesDS,
+        };
+        const options = {
+          physics: {
+            enabled: phys,
+            solver: "forceAtlas2Based",
+            forceAtlas2Based: { gravitationalConstant: -60, springLength: 160, springConstant: 0.05, damping: 0.5 },
+            stabilization: { iterations: 400, updateInterval: 25 },
+          },
+          interaction: { dragNodes: true, zoomView: true, hover: true, tooltipDelay: 150 },
+          edges: { selectionWidth: 2 },
+          nodes: { chosen: true },
+          layout: { randomSeed: 42 },
+        };
+
+        const net = new vis.Network(containerRef.current, data, options);
+        net.once("stabilizationIterationsDone", () => {
+          net.setOptions({ physics: { enabled: false } });
+          setPhysicsOn(false);
+        });
+        net.on("hoverNode", (p) => setHoveredNode(p.node));
+        net.on("blurNode",  ()  => setHoveredNode(null));
+        net.on("hoverEdge", (p) => {
+          const groupIdx = edgeGroupMapRef.current[p.edge];
+          if (groupIdx === undefined || !edgesDataRef.current) return;
+          const groupIds = eventEdgesMapRef.current[groupIdx] || [];
+          const allIds   = Object.keys(edgeGroupMapRef.current);
+          const RED      = "#ff6b6b";
+          const GREEN    = "#4ade80";
+          const FONT_PUB = { color: C.gold, size: 10, face: "'JetBrains Mono', monospace", background: C.bg, strokeWidth: 0, align: "middle" };
+          const FONT_HID = { color: "rgba(0,0,0,0)", background: "rgba(0,0,0,0)", strokeWidth: 0 };
+          edgesDataRef.current.update(allIds.map(id => {
+            const inGroup = groupIds.includes(id);
+            const isPub   = id.startsWith("async-pub-");
+            return inGroup
+              ? { id,
+                  color: { color: RED, highlight: RED, hover: RED },
+                  font:  isPub ? { ...FONT_PUB, color: GREEN, background: "rgba(0,0,0,0)", vadjust: -14 } : FONT_HID,
+                  label: edgeLabelMapRef.current[id],
+                  width: 1.5 }
+              : { id,
+                  color: { color: C.gold + "18", highlight: C.gold + "22", hover: C.gold + "22" },
+                  font:  FONT_HID,
+                  label: "",
+                  width: 1.5 };
+          }));
+          // update event tooltip
+          const ev = EVENTS[groupIdx];
+          if (ev) setHoveredEvent({ name: ev.event, producer: ev.producer, consumers: ev.consumers || [] });
+        });
+        net.on("blurEdge", () => {
+          setHoveredEvent(null);
+          if (!edgesDataRef.current) return;
+          const allIds   = Object.keys(edgeGroupMapRef.current);
+          const FONT_PUB = { color: C.gold, size: 10, face: "'JetBrains Mono', monospace", background: C.bg, strokeWidth: 0, align: "middle" };
+          const FONT_SUB = { color: "rgba(0,0,0,0)", strokeWidth: 0 };
+          edgesDataRef.current.update(allIds.map(id => {
+            const isPub = id.startsWith("async-pub-");
+            return {
+              id,
+              color: isPub
+                ? { color: C.gold + "cc", highlight: C.gold, hover: C.gold }
+                : { color: C.gold + "77", highlight: C.gold, hover: C.gold },
+              font:  isPub ? FONT_PUB : FONT_SUB,
+              label: edgeLabelMapRef.current[id],
+              width: 1.5,
+            };
+          }));
+        });
+        networkRef.current = net;
+      }
+
+      useEffect(() => {
+        initNetwork(true);
+        return () => { if (networkRef.current) networkRef.current.destroy(); };
+      }, []);
+
+      const togglePhysics = () => {
+        const next = !physicsOn;
+        setPhysicsOn(next);
+        if (networkRef.current) networkRef.current.setOptions({ physics: { enabled: next } });
+      };
+
+      const fitView  = () => networkRef.current && networkRef.current.fit({ animation: { duration: 400, easingFunction: "easeInOutQuad" } });
+      const resetNet = () => initNetwork(true);
+
+      const hoveredMod    = (hoveredNode && hoveredNode !== "__broker__") ? MODULES[hoveredNode] : null;
+      const hoveredBroker = hoveredNode === "__broker__";
+      // overlay priority: hoveredEvent > node tooltips
+      const showOverlay   = hoveredEvent || hoveredMod || hoveredBroker;
+
+      return (
+        <div>
+          {/* Toolbar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+            <button onClick={togglePhysics} style={{
+              background: physicsOn ? C.blue + "22" : C.surface,
+              border: `1px solid ${physicsOn ? C.blue : C.border}`,
+              color: physicsOn ? C.blue : C.textMuted,
+              borderRadius: 8, padding: "7px 14px", cursor: "pointer",
+              fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+              transition: "all 0.15s",
+            }}>
+              {physicsOn ? "⏸ Detener física" : "▶ Activar física"}
+            </button>
+            <button onClick={fitView} style={{
+              background: C.surface, border: `1px solid ${C.border}`,
+              color: C.textMuted, borderRadius: 8, padding: "7px 14px",
+              cursor: "pointer", fontFamily: "inherit", fontSize: 12,
+            }}>⊞ Ajustar vista</button>
+            <button onClick={resetNet} style={{
+              background: C.surface, border: `1px solid ${C.border}`,
+              color: C.textMuted, borderRadius: 8, padding: "7px 14px",
+              cursor: "pointer", fontFamily: "inherit", fontSize: 12,
+            }}>⟳ Reiniciar</button>
+            <div style={{ flex: 1 }} />
+          </div>
+
+          {/* Canvas */}
+          <div style={{
+            position: "relative",
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 12, overflow: "hidden",
+          }}>
+            <div ref={containerRef} style={{ width: "100%", height: 520 }} />
+            {showOverlay && (
+              <div style={{
+                position: "absolute", bottom: 12, left: 12,
+                background: C.bg + "ee",
+                border: `1px solid ${
+                  hoveredEvent ? "#4ade80"
+                  : hoveredBroker ? C.gold
+                  : hoveredMod.color}66`,
+                borderRadius: 8, padding: "6px 12px", backdropFilter: "blur(4px)",
+                fontSize: 12, fontWeight: 600,
+                animation: "fadeIn 0.15s", pointerEvents: "none",
+                maxWidth: "80%",
+              }}>
+                {hoveredEvent
+                  ? <span style={{ color: "#4ade80" }}>
+                      ⬡ {hoveredEvent.name}
+                      <span style={{ color: C.textMuted, fontWeight: 400 }}> — </span>
+                      <span style={{ color: C.textDim, fontWeight: 400 }}>
+                        {hoveredEvent.producer} → [{hoveredEvent.consumers.join(", ")}]
+                      </span>
+                    </span>
+                  : hoveredBroker
+                  ? <span style={{ color: C.gold }}>⚡ Kafka Broker — <span style={{ color: C.textDim, fontWeight: 400 }}>Retransmite eventos asíncronos entre módulos</span></span>
+                  : <span style={{ color: hoveredMod.color }}>{hoveredMod.icon} {hoveredMod.label} — <span style={{ color: C.textDim, fontWeight: 400 }}>{hoveredMod.desc}</span></span>
+                }
+              </div>
+            )}
+          </div>
+
+          {/* Legend */}
+          <div style={{
+            display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap",
+            alignItems: "center", paddingLeft: 4,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <svg width="36" height="12">
+                <line x1="0" y1="6" x2="36" y2="6"
+                  stroke={C.blue} strokeWidth="2" strokeLinecap="round" />
+                <polygon points="32,3 36,6 32,9" fill={C.blue} />
+              </svg>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>Síncrono (HTTP)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <svg width="36" height="12">
+                <line x1="0" y1="6" x2="36" y2="6"
+                  stroke={C.gold} strokeWidth="1.5" strokeDasharray="6 4" strokeLinecap="round" />
+                <polygon points="32,3 36,6 32,9" fill={C.gold} />
+              </svg>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>Asíncrono (Kafka)</span>
+            </div>
+            <div style={{ color: C.textMuted, fontSize: 11, marginLeft: "auto" }}>
+              {MODULES_LIST.length} módulos · {SYNC_INTEGRATIONS.length} puertos sync · {EVENTS.length} eventos
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── App root ───────────────────────────────────────────────────────────
+    function App() {
+      const [tab, setTab] = useState("validation");
+
+      const tabs = [
+        { id: "validation",   label: "Validación",           icon: "🔍" },
+        { id: "flows",        label: "Simulador de flujos",   icon: "▶" },
+        { id: "architecture", label: "Arquitectura",          icon: "🗺️" },
+        { id: "diagram",      label: "Diagrama",              icon: "◈" },
+      ];
+
+      const sys = window.__EVA_DATA__;
+      const tech = [];
+      // Detect tech from systemConfig embedded in data
+      if (sys.events && sys.events.length > 0) tech.push({ label: "Kafka", color: C.gold });
+
+      return (
+        <div style={{ background: C.bg, minHeight: "100vh", color: C.text, fontFamily: "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" }}>
+
+          {/* Header */}
+          <div style={{ borderBottom: `1px solid ${C.border}`, padding: "0 24px" }}>
+            <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", gap: 16, height: 64 }}>
+              <div>
+                <span style={{ fontWeight: 900, fontSize: 18, color: C.accent, letterSpacing: -0.5 }}>eva4j</span>
+                <span style={{ fontWeight: 400, fontSize: 14, color: C.textMuted, marginLeft: 8 }}>/ architecture validator</span>
+              </div>
+              <div style={{ height: 20, width: 1, background: C.border }} />
+              <div style={{ fontWeight: 700, fontSize: 16, color: C.text }}>{systemName}</div>
+              <div style={{ flex: 1 }} />
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {sys.events && sys.events.length > 0 && (
+                  <Tag color={C.gold}>Kafka · {sys.events.length} events</Tag>
+                )}
+                {sys.syncIntegrations && sys.syncIntegrations.length > 0 && (
+                  <Tag color={C.blue}>Sync · {sys.syncIntegrations.length} ports</Tag>
+                )}
+                <Tag color={C.purple}>{sys.modules.length} modules</Tag>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ borderBottom: `1px solid ${C.border}`, padding: "0 24px" }}>
+            <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", gap: 4 }}>
+              {tabs.map(t => (
+                <button key={t.id} onClick={() => setTab(t.id)} style={{
+                  background: "transparent", border: "none",
+                  color: tab === t.id ? C.text : C.textMuted,
+                  padding: "16px 20px", cursor: "pointer",
+                  fontWeight: tab === t.id ? 700 : 400,
+                  borderBottom: `2px solid ${tab === t.id ? C.accent : "transparent"}`,
+                  fontSize: 13, transition: "all 0.15s", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", gap: 8,
+                }}>
+                  <span>{t.icon}</span> {t.label}
+                </button>
+              ))}
+              <div style={{ flex: 1 }} />
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <span style={{ color: C.textMuted, fontSize: 10 }}>
+                  generated {new Date(generatedAt).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Tab content */}
+          <div style={{ maxWidth: 1100, margin: "0 auto", padding: "28px 24px" }}>
+            {tab === "validation"   && <ValidationTab />}
+            {tab === "flows"        && <FlowSimulator />}
+            {tab === "architecture" && <ArchitectureTab />}
+            {tab === "diagram"      && <DiagramTab />}
+          </div>
+        </div>
+      );
+    }
+
+    // Mount
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(React.createElement(App, null));
+  </script>
+</body>
+</html>

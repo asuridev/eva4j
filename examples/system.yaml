@@ -1,0 +1,289 @@
+system:
+  name: test-eva
+  groupId: com.example
+  javaVersion: 21
+  springBootVersion: 3.5.5
+  database: postgresql
+
+messaging:
+  enabled: true
+  broker: kafka
+  kafka:
+    bootstrapServers: localhost:9092
+    defaultGroupId: test-eva
+    topicPrefix: cinema
+
+modules:
+
+  # ─────────────────────────────────────────────
+  # CATÁLOGO
+  # ─────────────────────────────────────────────
+
+  - name: movies
+    description: "Catálogo de películas: títulos, géneros, clasificaciones, sinopsis y duración"
+    exposes:
+      - method: GET
+        path: /movies
+        useCase: FindAllMovies
+        description: "Listar películas con filtros por género, clasificación y estado de estreno"
+      - method: GET
+        path: /movies/{id}
+        useCase: GetMovie
+        description: "Obtener detalle completo de una película"
+      - method: POST
+        path: /movies
+        useCase: CreateMovie
+        description: "Registrar nueva película en el catálogo"
+      - method: PUT
+        path: /movies/{id}
+        useCase: UpdateMovie
+        description: "Actualizar información de una película"
+      - method: DELETE
+        path: /movies/{id}
+        useCase: DeleteMovie
+        description: "Retirar una película del catálogo"
+
+  - name: theaters
+    description: "Salas de cine: configuración de capacidad, tipo de sala (2D, 3D, IMAX) y mapa de asientos"
+    exposes:
+      - method: GET
+        path: /theaters
+        useCase: FindAllTheaters
+        description: "Listar todas las salas disponibles"
+      - method: GET
+        path: /theaters/{id}
+        useCase: GetTheater
+        description: "Obtener configuración y capacidad de una sala"
+      - method: POST
+        path: /theaters
+        useCase: CreateTheater
+        description: "Registrar nueva sala de cine"
+      - method: PUT
+        path: /theaters/{id}
+        useCase: UpdateTheater
+        description: "Actualizar configuración de una sala"
+
+  # ─────────────────────────────────────────────
+  # PROGRAMACIÓN
+  # ─────────────────────────────────────────────
+
+  - name: screenings
+    description: "Funciones programadas: asocia película + sala + horario, gestiona disponibilidad, precios y bloqueo exclusivo para eventos privados"
+    exposes:
+      - method: GET
+        path: /screenings
+        useCase: FindAllScreenings
+        description: "Listar funciones con filtros por película, sala y fecha"
+      - method: GET
+        path: /screenings/{id}
+        useCase: GetScreening
+        description: "Obtener detalle de una función (película, sala, horario, precio base)"
+      - method: GET
+        path: /screenings/{id}/seats
+        useCase: GetAvailableSeats
+        description: "Consultar mapa de asientos con disponibilidad en tiempo real"
+      - method: POST
+        path: /screenings
+        useCase: ScheduleScreening
+        description: "Programar una nueva función"
+      - method: PUT
+        path: /screenings/{id}/cancel
+        useCase: CancelScreening
+        description: "Cancelar una función programada y liberar todas las reservas"
+      - method: GET
+        path: /screenings/{id}/private-event-availability
+        useCase: CheckPrivateEventAvailability
+        description: "Verificar si la sala completa está libre de reservas individuales y puede ser bloqueada para un evento privado" # ★ NUEVO
+      - method: PUT
+        path: /screenings/{id}/lock
+        useCase: LockScreeningForPrivateEvent
+        description: "Bloquear toda la sala para un evento privado, impidiendo nuevas reservas individuales sobre esa función" # ★ NUEVO
+
+  # ─────────────────────────────────────────────
+  # CLIENTES
+  # ─────────────────────────────────────────────
+
+  - name: customers
+    description: "Registro y perfil de clientes: datos personales, historial de compras e historial de puntos"
+    exposes:
+      - method: POST
+        path: /customers
+        useCase: CreateCustomer
+        description: "Registrar nuevo cliente"
+      - method: GET
+        path: /customers/{id}
+        useCase: GetCustomer
+        description: "Obtener perfil del cliente"
+      - method: GET
+        path: /customers
+        useCase: FindAllCustomers
+        description: "Listar clientes con filtros"
+      - method: PUT
+        path: /customers/{id}
+        useCase: UpdateCustomer
+        description: "Actualizar datos personales del cliente"
+
+  # ─────────────────────────────────────────────
+  # RESERVAS
+  # ─────────────────────────────────────────────
+
+  - name: reservations
+    description: "Ciclo de vida de la reserva: selección y bloqueo de asientos, confirmación, cancelación y reserva exclusiva de sala completa para eventos privados"
+    exposes:
+      - method: POST
+        path: /reservations
+        useCase: CreateReservation
+        description: "Iniciar reserva: seleccionar función y asientos, bloqueo temporal (15 min)"
+      - method: GET
+        path: /reservations/{id}
+        useCase: GetReservation
+        description: "Consultar estado e información de una reserva"
+      - method: GET
+        path: /reservations
+        useCase: FindAllReservations
+        description: "Listar reservas con filtros por cliente, función y estado"
+      - method: PUT
+        path: /reservations/{id}/confirm
+        useCase: ConfirmReservation
+        description: "Confirmar la reserva después de recibir pago aprobado"
+      - method: PUT
+        path: /reservations/{id}/cancel
+        useCase: CancelReservation
+        description: "Cancelar la reserva y liberar los asientos seleccionados"
+      - method: PUT
+        path: /reservations/{id}/expire
+        useCase: ExpireReservation
+        description: "Expirar reserva no pagada dentro del tiempo límite de bloqueo"
+      - method: POST
+        path: /reservations/private-events
+        useCase: CreatePrivateEventReservation
+        description: "Reservar toda la sala para un evento privado: ocupa la capacidad total de la función de forma exclusiva" # ★ NUEVO
+
+  # ─────────────────────────────────────────────
+  # PAGOS
+  # ─────────────────────────────────────────────
+
+  - name: payments
+    description: "Procesamiento de pagos: integración con pasarela externa, aprobaciones y reembolsos"
+    exposes:
+      - method: POST
+        path: /payments
+        useCase: InitiatePayment
+        description: "Iniciar proceso de pago vinculado a una reserva"
+      - method: GET
+        path: /payments/{id}
+        useCase: GetPayment
+        description: "Consultar estado de un pago"
+      - method: GET
+        path: /payments
+        useCase: FindAllPayments
+        description: "Listar pagos con filtros por estado y fecha"
+      - method: PUT
+        path: /payments/{id}/approve
+        useCase: ApprovePayment
+        description: "Registrar aprobación de pago recibida desde la pasarela"
+      - method: PUT
+        path: /payments/{id}/reject
+        useCase: RejectPayment
+        description: "Registrar rechazo de pago recibido desde la pasarela"
+      - method: PUT
+        path: /payments/{id}/refund
+        useCase: ProcessRefund
+        description: "Procesar reembolso por cancelación de reserva o función"
+
+  # ─────────────────────────────────────────────
+  # NOTIFICACIONES
+  # ─────────────────────────────────────────────
+
+  - name: notifications
+    description: "Envío de notificaciones por email y SMS: confirmaciones, tickets QR, recordatorios y alertas de cancelación"
+
+integrations:
+  async:
+    # Reserva creada → pago espera cobro; notificación informa el bloqueo de asientos
+    - event: ReservationCreatedEvent
+      producer: reservations
+      topic: RESERVATION_CREATED
+      consumers:
+        - module: payments
+        - module: notifications
+
+    # Pago aprobado → reserva debe confirmarse; cliente recibe confirmación
+    - event: PaymentApprovedEvent
+      producer: payments
+      topic: PAYMENT_APPROVED
+      consumers:
+        - module: reservations
+        - module: notifications
+
+    # Pago rechazado → reserva debe expirar y liberar asientos; cliente recibe aviso
+    - event: PaymentRejectedEvent
+      producer: payments
+      topic: PAYMENT_REJECTED
+      consumers:
+        - module: reservations
+        - module: notifications
+
+    # Reserva confirmada → se emiten los tickets QR y se envían al cliente
+    - event: ReservationConfirmedEvent
+      producer: reservations
+      topic: RESERVATION_CONFIRMED
+      consumers:
+        - module: notifications
+
+    # Reserva cancelada → pagos evalúa reembolso; cliente recibe notificación
+    - event: ReservationCancelledEvent
+      producer: reservations
+      topic: RESERVATION_CANCELLED
+      consumers:
+        - module: payments
+        - module: notifications
+
+    # Función cancelada → reservas libera asientos y expira reservas activas; clientes notificados
+    - event: ScreeningCancelledEvent
+      producer: screenings
+      topic: SCREENING_CANCELLED
+      consumers:
+        - module: reservations
+        - module: notifications
+
+    # ★ NUEVO — Reserva de evento privado creada → screenings bloquea la sala; payments inicia cobro total; notifications avisa
+    - event: PrivateEventReservationCreatedEvent
+      producer: reservations
+      topic: PRIVATE_EVENT_RESERVATION_CREATED
+      consumers:
+        - module: screenings
+        - module: payments
+        - module: notifications
+
+    # ★ NUEVO — Sala bloqueada exitosamente → notifications confirma al organizador del evento
+    - event: TheaterLockedForPrivateEventEvent
+      producer: screenings
+      topic: THEATER_LOCKED_FOR_PRIVATE_EVENT
+      consumers:
+        - module: notifications
+
+  sync:
+    # Al crear una reserva se consulta la función para validar disponibilidad y precio
+    # ★ MODIFICADO — se agrega consulta de disponibilidad para evento privado
+    - caller: reservations
+      calls: screenings
+      port: ScreeningService
+      using:
+        - GET /screenings/{id}
+        - GET /screenings/{id}/seats
+        - GET /screenings/{id}/private-event-availability  # ★ NUEVO
+
+    # Al crear una reserva se verifica que el cliente exista y esté activo
+    - caller: reservations
+      calls: customers
+      port: CustomerService
+      using:
+        - GET /customers/{id}
+
+    # Al iniciar un pago se obtiene el detalle de la reserva para calcular el monto
+    - caller: payments
+      calls: reservations
+      port: ReservationService
+      using:
+        - GET /reservations/{id}

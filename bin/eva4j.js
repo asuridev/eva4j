@@ -17,6 +17,7 @@ const generateEntitiesCommand = require('../src/commands/generate-entities');
 const generateTemporalFlowCommand = require('../src/commands/generate-temporal-flow');
 const generateTemporalActivityCommand = require('../src/commands/generate-temporal-activity');
 const generateSystemCommand = require('../src/commands/generate-system');
+const evaluateSystemCommand = require('../src/commands/evaluate-system');
 const infoCommand = require('../src/commands/info');
 const detachCommand = require('../src/commands/detach');
 
@@ -291,6 +292,21 @@ program
     process.exit(1);
   });
 
+// Evaluate command
+program
+  .command('evaluate <type>')
+  .description('Validate and visualize project artifacts. type: system')
+  .option('--port <port>', 'Port for the web server (default: 3000)')
+  .option('--output <path>', 'Output path for the HTML report (default: ./system-report.html)')
+  .action(async (type, options) => {
+    try {
+      await evaluateSystemCommand(type, options);
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
 // Info command
 program
   .command('info')
@@ -335,6 +351,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j g record'));
   console.log(chalk.gray('  $ eva4j detach user'));
   console.log(chalk.gray('  $ eva4j info'));
+  console.log(chalk.gray('  $ eva4j evaluate system'));
   console.log('');
   console.log(chalk.blue('For more information, visit:'));
   console.log(chalk.gray('  https://github.com/your-repo/eva4j'));
