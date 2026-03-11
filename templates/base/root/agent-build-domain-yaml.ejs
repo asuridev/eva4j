@@ -12,8 +12,9 @@ Tu tarea es construir o actualizar el `domain.yaml` de un módulo específico.
 Documentos de referencia del proyecto:
 - [AGENTS.md](../../AGENTS.md) — patrones, convenciones y checklist de este proyecto eva4j
 - [system.yaml](../../system.yaml) — arquitectura del sistema (módulos, endpoints, eventos)
+- [docs/commands/GENERATE_ENTITIES.md](../../docs/commands/GENERATE_ENTITIES.md) — referencia técnica completa del generador: tipos soportados, propiedades de campo, relaciones, auditoría, validaciones, enums con transiciones, eventos de dominio y lista de archivos generados
 
-> **Lee siempre ambos archivos antes de proponer cualquier cambio.**
+> **Lee siempre los tres archivos antes de proponer cualquier cambio.**
 
 ---
 
@@ -53,6 +54,8 @@ Luego pregunta al usuario lo que no puedas inferir:
 10. **¿Necesita auditoría?** ¿Solo timestamps (`audit.enabled`) o también usuario (`audit.trackUser`)?
 
 > Si el `domain.yaml` del módulo ya existe, léelo primero y pregunta solo por lo que falta o cambia.
+
+> Consulta `docs/commands/GENERATE_ENTITIES.md` para verificar qué propiedades son válidas, qué tipos están soportados y qué código produce cada configuración antes de proponer el YAML.
 
 ---
 
@@ -99,8 +102,7 @@ aggregates:
             cascade: [PERSIST, MERGE, REMOVE]
             fetch: LAZY
 
-      - name: orderItem                 # entidad secundaria del mismo agregado
-        isRoot: false
+      - name: orderItem                 # entidad secundaria — isRoot omitido (false por defecto)
         tableName: order_items
         fields:
           - name: id
@@ -114,10 +116,8 @@ aggregates:
                 value: 1
           - name: unitPrice
             type: BigDecimal
-        relationships:
-          - type: ManyToOne
-            target: Order
-            fetch: LAZY
+        # No declarar ManyToOne hacia Order — el generador lo infiere automáticamente
+        # desde la relación OneToMany declarada en la entidad raíz
 
     valueObjects:
       - name: ShippingAddress           # PascalCase — inmutable, sin ID
@@ -157,23 +157,25 @@ aggregates:
             type: String
           - name: confirmedAt
             type: LocalDateTime
-        kafka: true                     # true → publica a MessageBroker tras commit
+        # kafka: true  ← agregar solo si el módulo usa mensajería (system.yaml → messaging.enabled)
 
 endpoints:                              # Opcional — solo si system.yaml ya declara exposes: para este módulo
-  - version: v1
-    operations:
-      - useCase: GetOrder               # debe coincidir con system.yaml → exposes[].useCase
-        method: GET
-        path: /orders/{id}
-      - useCase: FindAllOrders
-        method: GET
-        path: /orders
-      - useCase: CreateOrder
-        method: POST
-        path: /orders
-      - useCase: ConfirmOrder           # nombre de negocio → genera scaffold
-        method: PUT
-        path: /orders/{id}/confirm
+  basePath: /orders
+  versions:
+    - version: v1
+      operations:
+        - useCase: GetOrder             # debe coincidir con system.yaml → exposes[].useCase
+          method: GET
+          path: /orders/{id}
+        - useCase: FindAllOrders
+          method: GET
+          path: /orders
+        - useCase: CreateOrder
+          method: POST
+          path: /orders
+        - useCase: ConfirmOrder         # nombre de negocio → genera scaffold
+          method: PUT
+          path: /orders/{id}/confirm
 
 ports:                                  # Opcional — solo si el módulo consume servicios síncronos
   - name: CustomerService               # debe coincidir con system.yaml → integrations.sync[].port
@@ -226,11 +228,12 @@ ports:                                  # Opcional — solo si el módulo consum
 
 ## Paso 4 — Reglas de relaciones
 
-- ✅ `OneToMany` / `OneToOne` entre entidades del **mismo agregado** → usa `relationships:`
-- ✅ Referencia a entidad de **otro agregado** → usa `reference:` en el campo ID (tipo String/Long)
-- ❌ Nunca `@ManyToOne` apuntando a entidades de otro agregado
-- El `mappedBy` de OneToMany debe coincidir con el campo en la entidad secundaria
-- Las cascadas recomendadas: `[PERSIST, MERGE, REMOVE]` para composición, `[PERSIST, MERGE]` para asociación
+- ✅ `OneToMany` / `OneToOne` entre entidades del **mismo agregado** → declara la relación **solo en la entidad raíz**
+- ✅ El generador infiere automáticamente el lado inverso (`ManyToOne`) en la entidad secundaria — **no declararlo**
+- ✅ Referencia a entidad de **otro agregado** → usa `reference:` en el campo ID (tipo String/Long), nunca `relationships:`
+- ❌ No declarar `ManyToOne` en la entidad secundaria si ya existe `OneToMany` en la raíz con `mappedBy`
+- El `mappedBy` debe coincidir con el nombre del campo en la entidad secundaria que apunta de vuelta a la raíz
+- Cascadas recomendadas: `[PERSIST, MERGE, REMOVE]` para composición, `[PERSIST, MERGE]` para asociación
 
 ---
 
@@ -250,13 +253,14 @@ Verifica antes de entregar:
 Antes de proponer el `domain.yaml`, verifica:
 
 - [ ] Campo `id` presente en todas las entidades
-- [ ] Solo una entidad tiene `isRoot: true` por agregado
+- [ ] Solo una entidad tiene `isRoot: true` por agregado — las demás no necesitan declararlo
+- [ ] Relaciones intra-agregado declaradas solo en la entidad raíz; lado inverso NO declarado en la secundaria
 - [ ] Campos de auditoría NO en `fields:` (los genera el framework)
 - [ ] Campos `readOnly` con `defaultValue` si tienen valor inicial conocido
 - [ ] Enums con ciclo de vida tienen `initialValue` y `transitions`
 - [ ] `transitions.guard` apunta a condición que lanza excepción (no la condición feliz)
 - [ ] Value Objects sin campo `id`
-- [ ] Relaciones cross-aggregate usando `reference:`, no `relationships:`
+- [ ] Relaciones cross-aggregate usando `reference:` en el campo ID, no `relationships:`
 - [ ] `events[].name` consistente con `system.yaml`
 - [ ] `endpoints[].useCase` consistente con `system.yaml`
 - [ ] `ports[].name` consistente con `system.yaml`

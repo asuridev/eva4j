@@ -458,11 +458,11 @@ domain.yaml (events[] + ports[])
 │                                                                          │
 │     eva generate system                                                      │
 │       → proyecto base (build.gradle, Application.java, shared/)         │
-│       → módulo vacío por cada entrada en modules: (si no existe)        │
-│       → domain.yaml siempre sobreescrito con el esqueleto del system.yaml │
+│       → módulo vacío por cada entrada en modules:                       │
+│       → domain.yaml esqueleto con endpoints: pre-generado (del system.yaml) │
 │                                                                          │
-│     (re-ejecutable) agrega módulos nuevos y regenera todos los          │
-│     domain.yaml — comportamiento idempotente para el módulo              │
+│     (re-ejecutable) agrega módulos nuevos declarados en system.yaml     │
+│     que aún no existen en el proyecto                                    │
 └──────────────────────────────────────┬──────────────────────────────────┘
                                        │
                                        ▼
@@ -600,9 +600,8 @@ Cambio de negocio:      editar domain.yaml   →  eva g entities orders
 Nuevo evento:           editar system.yaml   →  eva system validate
                         editar domain.yaml   →  eva g entities orders payments
 Nuevo módulo:           editar system.yaml   →  eva system validate
-                        eva generate system  →  agrega el módulo nuevo
-                                               +  regenera todos los domain.yaml
-                        eva g entities <nuevo-modulo>
+                        eva generate system      →  genera el módulo nuevo
+                        diseñar domain.yaml  →  eva g entities <nuevo-modulo>
 Nuevo endpoint:         editar system.yaml (exposes:)   →  eva system validate
                         editar domain.yaml (endpoints:) →  eva g entities orders
 Nueva feature completa: agente recibe domain.yaml actual + descripción del cambio

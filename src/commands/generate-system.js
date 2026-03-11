@@ -151,7 +151,7 @@ function buildDomainYaml(mod, systemConfig) {
   lines.push(`#   - Add entity fields under aggregates[].entities[].fields`);
   if (producedEvents.length) lines.push(`#   - Add event fields under aggregates[].events[].fields`);
   if (outboundPorts.length)  lines.push(`#   - Add response shapes to ports[].methods[].response`);
-  if (exposes.length)        lines.push(`#   - Verify endpoints[].aggregate matches aggregates[].name`);
+  if (exposes.length)        lines.push(`#   - Verify endpoints[].operations match the use cases in aggregates[]`);
   lines.push(``);
 
   // ── aggregates ────────────────────────────────────────────────────────────
@@ -181,15 +181,18 @@ function buildDomainYaml(mod, systemConfig) {
 
   // ── endpoints ─────────────────────────────────────────────────────────────
   if (exposes.length) {
+    // Derive basePath from the first exposed endpoint (e.g. /orders/{id} → /orders)
+    const basePath = '/' + (exposes[0].path || '').replace(/^\//, '').split('/')[0];
     lines.push(`endpoints:`);
-    lines.push(`  - version: v1`);
-    lines.push(`    aggregate: ${aggregateName}  # must match aggregates[].name above`);
-    lines.push(`    operations:`);
+    lines.push(`  basePath: ${basePath}`);
+    lines.push(`  versions:`);
+    lines.push(`    - version: v1`);
+    lines.push(`      operations:`);
     for (const ep of exposes) {
-      lines.push(`      - useCase: ${ep.useCase}`);
-      lines.push(`        method: ${ep.method}`);
-      lines.push(`        path: ${ep.path}`);
-      if (ep.description) lines.push(`        description: "${ep.description}"`);
+      lines.push(`        - useCase: ${ep.useCase}`);
+      lines.push(`          method: ${ep.method}`);
+      lines.push(`          path: ${ep.path}`);
+      if (ep.description) lines.push(`          description: "${ep.description}"`);
     }
     lines.push(``);
   }
