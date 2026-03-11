@@ -112,7 +112,16 @@ Commands for transitioning from monolith to microservices.
   - Service independence
   - Zero code rewrite
 
-### 📊 Utility Commands
+### 📊 Analysis & Utility Commands
+
+- **[evaluate system](./EVALUATE_SYSTEM.md)** - Statically analyze a system.yaml for architectural problems
+  - Referential integrity (producers, consumers, sync endpoints)
+  - Synchronous cycle detection (DFS — deadlock prevention)
+  - Module role analysis (isolation, pure consumers, autonomous modules)
+  - Behavior gap detection (scheduler verbs with no trigger)
+  - Coupling pattern analysis (asymmetric sync↔async dependencies)
+  - Interactive HTML report with flow simulator + network diagram
+  - Domain-agnostic: works for any microservices design
 
 - **info** - Display project information
   - *Documentation coming soon*

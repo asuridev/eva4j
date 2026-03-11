@@ -19,6 +19,7 @@
 13. [Generated files](#13-generated-files)
 14. [Complete examples](#14-complete-examples)
 15. [Prerequisites and common errors](#15-prerequisites-and-common-errors)
+16. [Declarative endpoints — use case patterns](#16-declarative-endpoints-endpoints--use-case-patterns)
 
 ---
 
