@@ -10,6 +10,7 @@ const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
 const SharedGenerator = require('../generators/shared-generator');
 const ChecksumManager = require('../utils/checksum-manager');
+const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext } = require('./generate-kafka-event');
 
 // Maximum depth for recursive relationship traversal
 const MAX_DEPTH = 5;
@@ -200,6 +201,9 @@ async function generateEntitiesCommand(moduleName, options = {}) {
     if (hasDomainEventsInModule) {
       await sharedGenerator.generateDomainEvent(sharedBasePath);
     }
+
+    // Detect installed message broker for auto-wiring integration events
+    const broker = hasDomainEventsInModule ? await getInstalledBroker(configManager) : null;
 
     // Generate audit-related shared components if needed
     if (hasAuditableEntities || hasTrackUserEntities) {
@@ -505,8 +509,11 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           packageName,
           moduleName,
           aggregateName,
-          domainEvents: aggregateDomainEvents,
-          hasKafkaEvents: aggregateDomainEvents.some(e => e.kafka)
+          domainEvents: aggregateDomainEvents.map(e => ({
+            ...e,
+            integrationEventClassName: `${e.name}IntegrationEvent`
+          })),
+          broker
         };
         await renderAndWrite(
           path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainEventHandler.java.ejs'),
@@ -515,6 +522,33 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           writeOptions
         );
         generatedFiles.push({ type: 'Domain Event Handler', name: `${aggregateName}DomainEventHandler`, path: `${moduleName}/application/usecases/${aggregateName}DomainEventHandler.java` });
+
+        // ── Auto-wire broker integration events ────────────────────────────────
+        // When a message broker is installed, generate the complete integration
+        // event layer (XIntegrationEvent record, MessageBroker port method,
+        // KafkaMessageBroker impl method, topic config, KafkaConfig bean) for
+        // every domain event declared in this aggregate.
+        if (broker === 'kafka') {
+          for (const event of aggregateDomainEvents) {
+            const kafkaCtx = buildKafkaEventContext(packageName, moduleName, event);
+            await generateSingleKafkaEvent(projectDir, packagePath, kafkaCtx);
+            generatedFiles.push({
+              type: 'Integration Event',
+              name: kafkaCtx.eventClassName,
+              path: `${moduleName}/application/events/${kafkaCtx.eventClassName}.java`
+            });
+          }
+          generatedFiles.push({
+            type: 'Integration Event',
+            name: `${toPascalCase(moduleName)}KafkaMessageBroker (updated)`,
+            path: `${moduleName}/infrastructure/adapters/kafkaMessageBroker/${toPascalCase(moduleName)}KafkaMessageBroker.java`
+          });
+          generatedFiles.push({
+            type: 'Integration Event',
+            name: 'MessageBroker (updated)',
+            path: `${moduleName}/application/ports/MessageBroker.java`
+          });
+        }
       }
     }
 

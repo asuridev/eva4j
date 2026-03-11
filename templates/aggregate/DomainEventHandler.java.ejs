@@ -6,32 +6,37 @@ import org.springframework.transaction.event.TransactionalEventListener;
 <% domainEvents.forEach(event => { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.events.<%= event.name %>;
 <% }); %>
-<% if (hasKafkaEvents) { %>
-import <%= packageName %>.<%= moduleName %>.domain.repositories.MessageBroker;
+<% if (broker) { %>
+<% domainEvents.forEach(event => { %>
+import <%= packageName %>.<%= moduleName %>.application.events.<%= event.integrationEventClassName %>;
+<% }); %>
+import <%= packageName %>.<%= moduleName %>.application.ports.MessageBroker;
 <% } %>
 
 /**
  * <%= aggregateName %>DomainEventHandler — Domain Event Bridge
  *
- * This handler connects the internal Spring event bus (ApplicationEventPublisher)
- * with the external messaging port (MessageBroker).
+ * Connects the internal Spring event bus (ApplicationEventPublisher) with the
+ * external messaging port (MessageBroker).
  *
  * Architecture:
  *   AggregateRepositoryImpl.save()
- *     → eventPublisher.publishEvent(domainEvent)   [internal Spring bus]
- *       → @TransactionalEventListener(AFTER_COMMIT) [this class]
- *         → messageBroker.send*(event)             [port — broker-agnostic]
+ *     → eventPublisher.publishEvent(domainEvent)        [internal Spring bus]
+ *       → @TransactionalEventListener(AFTER_COMMIT)     [this class]
+ *         → messageBroker.publish*(integrationEvent)    [port — broker-agnostic]
  *
- * AFTER_COMMIT ensures the external event is only published if the
- * database transaction committed successfully, preventing ghost events
- * from rolled-back operations.
+ * AFTER_COMMIT guarantees that external events are published only when the
+ * database transaction committed successfully, preventing ghost events from
+ * rolled-back operations.
  *
- * To switch brokers (Kafka → RabbitMQ → SNS): change only the MessageBroker
- * adapter in infrastructure/. This class never needs modification.
+ * Domain Events  (domain/models/events/)  — internal signals scoped to this bounded context.
+ * Integration Events (application/events/) — broker-facing projections; changing broker
+ *   technology (Kafka → RabbitMQ → SNS) only requires changing the MessageBroker adapter.
+ *   Domain Events — and therefore this class — never need modification.
  */
 @ApplicationComponent
 public class <%= aggregateName %>DomainEventHandler {
-<% if (hasKafkaEvents) { %>
+<% if (broker) { %>
 
     private final MessageBroker messageBroker;
 
@@ -42,16 +47,15 @@ public class <%= aggregateName %>DomainEventHandler {
 <% domainEvents.forEach(event => { %>
 
     /**
-     * Handles {@link <%= event.name %>} after the wrapping transaction commits.
-     * <% if (!event.kafka) { %>
+     * Handles {@link <%= event.name %>} after the wrapping transaction commits.<% if (!broker) { %>
+     * <p>
      * TODO: Implement the side effect for this event (e.g., send notification,
-     *       update a read model, trigger a saga step, etc.).
-     * <% } %>
+     *       update a read model, trigger a saga step, etc.).<% } %>
      */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void on<%= event.name %>(<%=  event.name %> event) {
-    <% if (event.kafka) { %>
-        messageBroker.send<%= event.name %>(event);
+    public void on<%= event.name %>(<%= event.name %> event) {
+    <% if (broker) { %>
+        messageBroker.publish<%= event.integrationEventClassName %>(new <%= event.integrationEventClassName %>(<% if (event.fields && event.fields.length > 0) { event.fields.forEach(function(field, idx) { %>event.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<%= idx < event.fields.length - 1 ? ', ' : '' %><% }); } %>));
     <% } else { %>
         // TODO: handle <%= event.name %> — add your side-effect logic here
         //   e.g.:  notificationService.notify(event);

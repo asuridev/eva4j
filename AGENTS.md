@@ -457,7 +457,9 @@ aggregates:
         fields:
           - name: userId
             type: String
-        # kafka: true  # opcional — publica a Kafka tras commit
+        # Nota: el flag kafka: true ya no es necesario.
+        # Si el proyecto tiene un broker instalado (eva add kafka-client),
+        # eva g entities cablea automáticamente todos los eventos declarados.
 ```
 
 El `domain.yaml` también soporta una sección `endpoints:` opcional (sibling de `aggregates:`) para declarar los endpoints REST. Ver sección [⚡ Características Avanzadas](#-características-avanzadas-del-domainyaml) para detalles.
@@ -525,25 +527,50 @@ aggregates:
   - name: Order
     entities: [...]
     events:
-      - name: OrderConfirmedEvent
+      - name: OrderConfirmed
         fields:
           - name: orderId
             type: String
           - name: confirmedAt
             type: LocalDateTime
-        kafka: true              # opcional — genera publicación a MessageBroker
 ```
 
-Genera `OrderConfirmedEvent.java` (en `domain/models/events/`) que extiende `DomainEvent`, y `OrderDomainEventHandler.java` (en `application/usecases/`) con `@TransactionalEventListener(AFTER_COMMIT)`.
+Genera `OrderConfirmed.java` (en `domain/models/events/`) que extiende `DomainEvent`, y `OrderDomainEventHandler.java` (en `application/usecases/`) con `@TransactionalEventListener(AFTER_COMMIT)`.
+
+**Auto-wiring de broker:** Si el proyecto tiene un broker de mensajería instalado (`eva add kafka-client`), `eva g entities` genera automáticamente la capa de Integration Events para **todos** los eventos declarados — sin necesidad de ejecutar `eva g kafka-event` por separado:
+
+| Archivo generado | Descripción |
+|---|---|
+| `application/events/OrderConfirmedIntegrationEvent.java` | Record broker-facing (Integration Event) |
+| `application/ports/MessageBroker.java` | Puerto broker-agnóstico (creado/actualizado) |
+| `infrastructure/adapters/kafkaMessageBroker/…` | Adaptador Kafka (creado/actualizado) |
+| `shared/…/kafkaConfig/KafkaConfig.java` | Bean `NewTopic` (actualizado) |
+| `parameters/*/kafka.yaml` | Configuración de topic (actualizada) |
+
+**Domain Event vs Integration Event:**
+- **Domain Event** (`domain/models/events/OrderConfirmed.java`) — señal interna del bounded context. Nunca depende de infraestructura.
+- **Integration Event** (`application/events/OrderConfirmedIntegrationEvent.java`) — proyección para el broker. Cambiar de Kafka a RabbitMQ solo requiere cambiar el adaptador `MessageBroker`; los Domain Events no se modifican nunca.
+
+El `DomainEventHandler` mapea un Domain Event a un Integration Event:
+```java
+@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+public void onOrderConfirmed(OrderConfirmed event) {
+    messageBroker.publishOrderConfirmedIntegrationEvent(
+        new OrderConfirmedIntegrationEvent(event.getOrderId(), event.getConfirmedAt())
+    );
+}
+```
 
 Publicar desde la entidad raíz usando `raise()` heredado:
 
 ```java
 public void confirm() {
     this.status = this.status.transitionTo(OrderStatus.CONFIRMED);
-    raise(new OrderConfirmedEvent(this.id, this.id, LocalDateTime.now()));
+    raise(new OrderConfirmed(this.id, LocalDateTime.now()));
 }
 ```
+
+**Nota:** el flag `kafka: true` por evento ya no es necesario — todos los eventos se cablearán automáticamente cuando haya un broker instalado.
 
 ---
 
@@ -1201,11 +1228,12 @@ Al generar o modificar código, verificar:
 - [ ] Enum con ciclo de vida → usar `transitions` + `initialValue`, no setters manuales
 - [ ] Value Object con comportamiento → declarar `methods` en lugar de lógica en entidad
 - [ ] Evento de dominio → declarar en `events[]`, publicar con `raise()` en método de negocio
-- [ ] Evento con Kafka → agregar `kafka: true` al evento
+- [ ] Evento con broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
+- [ ] Distinguir entre Domain Event (`domain/models/events/X.java`) e Integration Event (`application/events/XIntegrationEvent.java`) — cambios de broker solo afectan al adaptador `MessageBroker`
 - [ ] Endpoints REST específicos → declarar `endpoints:` con versiones y operaciones; usar nombres estándar para implementación completa
 
 ---
 
-**Última actualización:** 2026-03-02  
-**Versión de eva4j:** 1.0.12  
+**Última actualización:** 2026-03-11  
+**Versión de eva4j:** 1.0.13  
 **Estado:** Documento de referencia para agentes IA

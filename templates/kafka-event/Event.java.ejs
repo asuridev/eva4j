@@ -17,6 +17,13 @@ import java.util.UUID;
 import java.util.List;
 <% } %>
 
+/**
+ * Integration Event — broker-side projection of the corresponding domain event.
+ * <p>
+ * This record is the data carrier published to the message broker. It is intentionally
+ * decoupled from the domain event so that changes in broker technology or serialization
+ * format never affect the domain model.
+ */
 public record <%= eventClassName %>(
 <% if (eventFields && eventFields.length > 0) { %>
 <% eventFields.forEach((field, idx) => { %>
