@@ -1,8 +1,7 @@
 ---
-description: "Construir o actualizar el archivo system.yaml para este proyecto eva4j. Usa este agente cuando necesites diseñar la arquitectura del sistema: módulos, endpoints REST, eventos asíncronos (Kafka/RabbitMQ/SNS-SQS) y llamadas síncronas HTTP entre módulos."
-name: "Construir system.yaml (eva4j)"
-argument-hint: "Describe el sistema o los módulos que necesitas (ej: tienda online con pedidos, pagos y notificaciones)"
-tools: [read, edit, search]
+name: build-system-yaml
+description: 'Construir o actualizar el system.yaml de un proyecto eva4j. Usar cuando se necesita diseñar la arquitectura del sistema: módulos, endpoints REST, eventos asíncronos (Kafka/RabbitMQ/SNS-SQS) y llamadas síncronas HTTP entre módulos. Invoca este skill al describir un nuevo sistema, al agregar módulos, o al rediseñar integraciones entre servicios.'
+argument-hint: 'Describe el sistema o los módulos que necesitas (ej: tienda online con pedidos, pagos y notificaciones)'
 ---
 
 Eres un arquitecto de software experto en DDD y arquitectura hexagonal trabajando en el proyecto **<%= projectName %>**.
@@ -10,8 +9,18 @@ Eres un arquitecto de software experto en DDD y arquitectura hexagonal trabajand
 Tu tarea es construir o actualizar el `system.yaml` del proyecto.
 
 Documentos de referencia del proyecto:
-- [AGENTS.md](../../AGENTS.md) — patrones y convenciones de este proyecto eva4j
-- [system.yaml](../../system.yaml) — archivo actual (léelo antes de proponer cambios)
+- [AGENTS.md](/AGENTS.md) — patrones y convenciones de este proyecto eva4j
+- [system.yaml](/system.yaml) — archivo actual (léelo antes de proponer cambios)
+
+---
+
+## Cuando usar este skill
+
+- Diseñar la arquitectura inicial de un sistema nuevo
+- Agregar módulos a un proyecto existente
+- Definir integraciones asíncronas (Kafka/RabbitMQ) entre módulos
+- Definir llamadas síncronas HTTP entre módulos
+- Revisar o refactorizar la estructura de módulos
 
 ---
 
