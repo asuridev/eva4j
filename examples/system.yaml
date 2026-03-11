@@ -224,20 +224,30 @@ integrations:
         - module: reservations
         - module: notifications
 
-    # Reserva confirmada → se emiten los tickets QR y se envían al cliente
+    # Reserva confirmada → se emiten los tickets QR y se envían al cliente; cliente acumula puntos de fidelidad
     - event: ReservationConfirmedEvent
       producer: reservations
       topic: RESERVATION_CONFIRMED
       consumers:
         - module: notifications
+        - module: customers     # acumula loyalty points al confirmar reserva
 
-    # Reserva cancelada → pagos evalúa reembolso; cliente recibe notificación
+    # Reserva cancelada → pagos evalúa reembolso; screenings libera asientos; cliente recibe notificación
     - event: ReservationCancelledEvent
       producer: reservations
       topic: RESERVATION_CANCELLED
       consumers:
-        - module: payments
+        - module: payments        # evalúa si aplica reembolso
+        - module: screenings      # libera ScreeningSeats → AVAILABLE (también cubre unlock de sala privada)
         - module: notifications
+
+    # Reserva expirada por timeout (sin pago) → screenings libera asientos; cliente recibe aviso (sin reembolso)
+    - event: ReservationExpiredEvent
+      producer: reservations
+      topic: RESERVATION_EXPIRED
+      consumers:
+        - module: screenings      # libera ScreeningSeats → AVAILABLE
+        - module: notifications   # avisa al cliente que su tiempo de bloqueo expiró
 
     # Función cancelada → reservas libera asientos y expira reservas activas; clientes notificados
     - event: ScreeningCancelledEvent
@@ -264,6 +274,20 @@ integrations:
         - module: notifications
 
   sync:
+    # Al programar una función se valida que la película esté activa y se obtiene su duración
+    - caller: screenings
+      calls: movies
+      port: MovieService
+      using:
+        - GET /movies/{id}
+
+    # Al programar una función se valida que la sala esté activa y se copian los asientos al mapa de la función
+    - caller: screenings
+      calls: theaters
+      port: TheaterService
+      using:
+        - GET /theaters/{id}
+
     # Al crear una reserva se consulta la función para validar disponibilidad y precio
     # ★ MODIFICADO — se agrega consulta de disponibilidad para evento privado
     - caller: reservations
