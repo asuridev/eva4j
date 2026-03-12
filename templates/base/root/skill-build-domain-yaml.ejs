@@ -1,19 +1,24 @@
 ---
 name: build-domain-yaml
-description: 'Construir o actualizar el domain.yaml de un módulo eva4j. Usar cuando se necesita modelar el dominio de un módulo: entidades, value objects, enums, relaciones, validaciones, eventos de dominio y visibilidad de campos. Lee los archivos del proyecto antes de generar.'
-argument-hint: 'Nombre del módulo y descripción del negocio (ej: módulo orders — gestión del ciclo de vida de pedidos)'
+description: 'Construir o completar el domain.yaml de un módulo eva4j en el directorio system/. Usar cuando se necesita modelar el dominio de un módulo: entidades, value objects, enums, relaciones, validaciones, eventos de dominio, listeners y ports. Lee los archivos del proyecto antes de generar.'
+argument-hint: 'Nombre del módulo a modelar, o "todos" para procesar todos los módulos del sistema (ej: módulo reservations)'
 ---
 
 Eres un arquitecto de software experto en DDD y arquitectura hexagonal trabajando en el proyecto **<%= projectName %>**.
 
-Tu tarea es construir o actualizar el `domain.yaml` de un módulo específico.
+Tu tarea es construir o completar el archivo `system/{módulo}.yaml` correspondiente al domain.yaml de un módulo específico.
+
+> ⚠️ **Los archivos se ubican en el directorio `system/`**, no en la raíz del proyecto ni en `src/`.
+> El flujo de trabajo es: `system/{módulo}.yaml` → revisar y completar → copiar a `src/main/java/<package>/<módulo>/domain.yaml` → `eva g entities <módulo>`
 
 Documentos de referencia del proyecto:
 - [AGENTS.md](/AGENTS.md) — patrones, convenciones y checklist de este proyecto eva4j
-- [system.yaml](/system.yaml) — arquitectura del sistema (módulos, endpoints, eventos)
-- [references/GENERATE_ENTITIES.md](references/GENERATE_ENTITIES.md) — referencia técnica completa del generador: tipos soportados, propiedades de campo, relaciones, auditoría, validaciones, enums con transiciones, eventos de dominio y lista de archivos generados
+- [system/system.yaml](/system/system.yaml) — arquitectura del sistema (módulos, endpoints, eventos, integraciones)
+- [system/system.md](/system/system.md) — documentación narrativa del sistema: rol de cada módulo, casos de uso, flujos de integración
+- [references/GENERATE_ENTITIES.md](references/GENERATE_ENTITIES.md) — referencia técnica completa del generador
 
-> **Lee siempre los tres archivos antes de proponer cualquier cambio.**
+> **Lee siempre los cuatro archivos antes de proponer cualquier cambio.**
+> En particular, lee `system/system.md` para entender el rol del módulo dentro del sistema completo antes de modelar sus entidades.
 
 ---
 
@@ -25,36 +30,49 @@ Antes de escribir cualquier YAML, verifica que NO estás haciendo ninguno de est
 2. ❌ **No incluir campos de auditoría como `createdAt`, `updatedAt`, `createdBy`, `updatedBy` en `fields:`** — los genera la infraestructura automáticamente si `audit.enabled: true`
 3. ❌ **No usar `defaultValue` en campos que no son `readOnly: true`** — solo aplica a campos readOnly
 4. ❌ **No declarar `transitions` sin `initialValue` en el enum** — si hay lifecycle declarar ambos
-5. ❌ **No inventar módulos en `reference.module`** — solo los que existen en `system.yaml → modules:`
+5. ❌ **No inventar módulos en `reference.module`** — solo los declarados en `system/system.yaml → modules:`
 6. ❌ **No poner validaciones JSR-303 en entidades de dominio** — van solo en Commands y DTOs (el generador lo hace; tú solo declara `validations:` en el campo)
-7. ❌ **No incluir endpoints REST en `domain.yaml`** si ya están declarados en `system.yaml → exposes:` — usa `endpoints:` solo para detalles adicionales no cubiertos
+7. ❌ **No duplicar en `endpoints:`** lo que ya está en `system/system.yaml → exposes:` — usa `endpoints:` solo para operaciones adicionales no cubiertas ahí
+8. ❌ **No inventar eventos en `events:`** — deben coincidir con `system/system.yaml → integrations.async[]` donde `producer` es este módulo
+9. ❌ **No inventar listeners** — deben coincidir con `system/system.yaml → integrations.async[].consumers[]` donde `module` es este módulo
+10. ❌ **No inventar ports** — deben coincidir con `system/system.yaml → integrations.sync[]` donde `caller` es este módulo
 
 ---
 
-## Paso 1 — Recopilar información
+## Paso 1 — Leer el contexto del sistema
 
-Lee `system.yaml` para obtener:
-- Módulos existentes (para referencias cross-aggregate)
-- Endpoints expuestos por el módulo (alimentan `endpoints:` → `useCase`)
-- Eventos que produce el módulo (alimentan `events:`)
-- Puertos síncronos que consume (alimentan `ports:`)
+Antes de hacer cualquier pregunta, lee los siguientes archivos en orden:
 
-Luego pregunta al usuario lo que no puedas inferir:
+1. **`system/system.yaml`** — extrae para el módulo objetivo:
+   - `exposes:` → alimenta la sección `endpoints:` del domain.yaml
+   - `integrations.async[]` donde `producer = módulo` → alimenta `events:`
+   - `integrations.async[].consumers[]` donde `module = módulo` → alimenta `listeners:` (con `useCase`)
+   - `integrations.sync[]` donde `caller = módulo` → alimenta `ports:` (con `port`, `calls`, `using`)
 
-1. **¿Cuál es el módulo?** (nombre en kebab-case)
-2. **¿Cuáles son las entidades principales?** ¿Cuál es la raíz del agregado?
-3. **¿Qué campos tiene cada entidad?** Para cada campo: nombre, tipo, ¿es requerido en creación?, ¿debe ocultarse en la respuesta?, ¿tiene validaciones?
-4. **¿Algún campo es calculado/derivado?** (→ `readOnly: true`) ¿Con qué valor inicial? (→ `defaultValue`)
-5. **¿Algún campo es sensible?** (passwords, tokens) (→ `hidden: true`)
-6. **¿Hay Value Objects?** (dirección, dinero, coordenadas) ¿Necesitan métodos de negocio?
-7. **¿La entidad tiene un ciclo de vida/estados?** ¿Cuáles son y qué transiciones son válidas?
-8. **¿Hay relaciones dentro del mismo agregado?** (OneToOne, OneToMany)
-9. **¿Necesita soft delete?** (borrado lógico con `deletedAt`)
-10. **¿Necesita auditoría?** ¿Solo timestamps (`audit.enabled`) o también usuario (`audit.trackUser`)?
+2. **`system/system.md`** — lee el rol del módulo, sus responsabilidades de negocio y sus interacciones con otros módulos para tomar decisiones de modelado informadas.
 
-> Si el `domain.yaml` del módulo ya existe, léelo primero y pregunta solo por lo que falta o cambia.
+3. **`system/{módulo}.yaml`** — si ya existe (generado por `eva g system`), léelo como punto de partida. Contiene el esqueleto con los `TODO:` que debes completar.
 
-> Consulta [references/GENERATE_ENTITIES.md](references/GENERATE_ENTITIES.md) para verificar qué propiedades son válidas, qué tipos están soportados y qué código produce cada configuración antes de proponer el YAML.
+Con esta información ya puedes inferir:
+- Qué entidades probablemente existen y su aggregate root
+- Qué campos de ID externo se necesitan (referencias cross-aggregate)
+- Qué enum de estado y transiciones tiene el ciclo de vida
+- Qué eventos produce, qué listeners necesita y qué puertos HTTP llama
+
+Luego pregunta al usuario **solo lo que no puedas inferir** del sistema:
+
+1. **¿Campos adicionales de negocio?** (más allá del ID y FKs obvias)
+2. **¿Campos calculados/derivados?** (→ `readOnly: true` + `defaultValue`)
+3. **¿Campos sensibles?** (passwords, tokens → `hidden: true`)
+4. **¿Hay Value Objects?** (dirección, dinero, coordenadas) ¿Con métodos de negocio?
+5. **¿Hay entidades secundarias dentro del mismo agregado?** (ej: `OrderItem` dentro de `Order`)
+6. **¿Qué validaciones JSR-303 aplican a los campos de entrada?**
+7. **¿Necesita soft delete?**
+8. **¿`audit.trackUser: true`** (además de timestamps)?
+9. **¿Qué campos lleva el payload de cada evento producido?**
+10. **¿Qué campos lleva el payload de cada listener consumido?**
+
+> Consulta [references/GENERATE_ENTITIES.md](references/GENERATE_ENTITIES.md) para verificar qué propiedades son válidas y qué código produce cada configuración antes de proponer el YAML.
 
 ---
 
@@ -157,30 +175,92 @@ aggregates:
           - name: confirmedAt
             type: LocalDateTime
 
-endpoints:                              # Opcional — solo si system.yaml ya declara exposes: para este módulo
+endpoints:                              # Opcional — solo si system/system.yaml ya declara exposes: para este módulo
   basePath: /orders
   versions:
     - version: v1
       operations:
-        - useCase: GetOrder             # debe coincidir con system.yaml → exposes[].useCase
+        - useCase: GetOrder             # debe coincidir con system/system.yaml → exposes[].useCase
           method: GET
-          path: /orders/{id}
+          path: /{id}                   # relativo al basePath
         - useCase: FindAllOrders
           method: GET
-          path: /orders
+          path: /
         - useCase: CreateOrder
           method: POST
-          path: /orders
+          path: /
         - useCase: ConfirmOrder         # nombre de negocio → genera scaffold
           method: PUT
-          path: /orders/{id}/confirm
+          path: /{id}/confirm
 
-ports:                                  # Opcional — solo si el módulo consume servicios síncronos
-  - name: CustomerService               # debe coincidir con system.yaml → integrations.sync[].port
-    module: customers
-    operations:
-      - method: GET
-        path: /customers/{id}
+# Listeners: eventos externos que CONSUME este módulo
+# Inferidos de system/system.yaml → integrations.async[].consumers[] donde module = este módulo
+listeners:
+  - event: PaymentApprovedEvent         # debe coincidir con integrations.async[].event
+    producer: payments                  # módulo origen (referencia documental)
+    topic: PAYMENT_APPROVED             # debe coincidir con integrations.async[].topic
+    useCase: ConfirmOrder               # debe coincidir con consumers[].useCase
+    fields:
+      - name: orderId
+        type: String
+      - name: approvedAt
+        type: LocalDateTime
+      - name: paymentDetails            # tipo objeto → DEBE declararse en nestedTypes:
+        type: PaymentDetails
+    nestedTypes:                        # un entry por cada tipo objeto en fields:
+      - name: paymentDetails            # camelCase → record PaymentDetails en application/events/
+        fields:                         # compartido por IntegrationEvent, Command y KafkaListener
+          - name: paymentId
+            type: String
+          - name: amount
+            type: BigDecimal
+
+# Ports: servicios HTTP síncronos que LLAMA este módulo (un entry por endpoint HTTP)
+# Inferidos de system/system.yaml → integrations.sync[] donde caller = este módulo
+ports:
+  - name: findCustomerById              # camelCase — derivado del endpoint
+    service: CustomerService            # debe coincidir con integrations.sync[].port
+    target: customers                   # módulo destino
+    baseUrl: http://localhost:8080      # solo en la primera entrada de cada service
+    http: GET /customers/{id}           # debe coincidir con integrations.sync[].using[]
+    fields:
+      - name: id
+        type: String
+      - name: email
+        type: String
+  - name: findAvailableSeats            # segunda entrada del mismo service — sin baseUrl
+    service: CustomerService
+    target: customers
+    http: GET /customers/{id}/available-seats
+    returnList: true                    # retorna List<>
+    domainType: Seat                    # auto-deriva "AvailableSeat" → override a "Seat"
+    fields:
+      - name: seatId
+        type: String
+      - name: seatType
+        type: String
+  - name: processPayment                # entrada de otro service — POST con body:
+    service: PaymentGateway
+    target: payments
+    baseUrl: https://api.payments.example.com
+    http: POST /payments
+    body:                               # @RequestBody — solo POST/PUT/PATCH
+      - name: reservationId
+        type: String
+      - name: paymentMethod
+        type: PaymentMethodInput        # tipo objeto en el body → declarar en nestedTypes:
+    nestedTypes:                        # genera PaymentMethodInput.java en application/dtos/
+      - name: paymentMethodInput        # camelCase → normalizado a PaymentMethodInput
+        fields:
+          - name: type
+            type: String
+          - name: cardToken
+            type: String
+    fields:                             # respuesta del POST
+      - name: paymentId
+        type: String
+      - name: status
+        type: String
 ```
 
 ---
@@ -235,14 +315,126 @@ ports:                                  # Opcional — solo si el módulo consum
 
 ---
 
-## Paso 5 — Consistencia con system.yaml
+## Propiedades avanzadas: `nestedTypes` y `domainType`
 
-Verifica antes de entregar:
+### `nestedTypes` en `listeners:` — campos de tipo objeto en el payload
 
-- **`events[].name`** debe coincidir con los eventos en `system.yaml → integrations.async[].event` del módulo
-- **`endpoints[].operations[].useCase`** debe coincidir con `system.yaml → modules[].exposes[].useCase`
-- **`ports[].name`** debe coincidir con `system.yaml → integrations.sync[].port` donde `caller` es este módulo
-- **`reference.module`** debe ser un módulo declarado en `system.yaml → modules[].name`
+Declara `nestedTypes:` cuando un campo de `fields:` tiene un **tipo que no es escalar** (es decir, no es `String`, `Integer`, `Long`, `BigDecimal`, `Boolean`, `LocalDate`, `LocalDateTime` ni `UUID`).
+
+**Reglas:**
+- Un entry en `nestedTypes:` por cada tipo objeto referenciado en `fields:`
+- El `name:` del entry debe ser **camelCase** — el generador lo normaliza a PascalCase para el record
+- El record generado vive en `application/events/` y es compartido por el `IntegrationEvent`, el `Command` y el `KafkaListener`
+- Si omites `nestedTypes:` para un campo de tipo objeto, el listener compilará con `Map<String,Object>` — se pierde tipado estático
+
+```yaml
+listeners:
+  - event: OrderShippedEvent
+    ...
+    fields:
+      - name: shippedAt
+        type: LocalDateTime           # ✅ escalar — no necesita nestedTypes:
+      - name: shippingAddress
+        type: ShippingAddress         # ❌ objeto → DEBE aparecer en nestedTypes:
+    nestedTypes:
+      - name: shippingAddress         # → record ShippingAddress.java en application/events/
+        fields:
+          - name: street
+            type: String
+          - name: city
+            type: String
+```
+
+### `nestedTypes` en `ports:` — campos de tipo objeto en el body
+
+La misma lógica aplica cuando `body:` contiene un tipo objeto. El record generado vive en `application/dtos/` (no en `application/events/`).
+
+```yaml
+ports:
+  - name: createShipment
+    service: LogisticsService
+    http: POST /shipments
+    body:
+      - name: destinationAddress
+        type: AddressInput            # objeto en el body → declarar en nestedTypes:
+    nestedTypes:
+      - name: addressInput            # → record AddressInput.java en application/dtos/
+        fields:
+          - name: street
+            type: String
+          - name: city
+            type: String
+```
+
+---
+
+### `domainType` en `ports:` — control del nombre del modelo de dominio ACL
+
+El generador **auto-deriva** el nombre del modelo de dominio eliminando el prefijo de verbo (`find`, `get`, `check`, `fetch`) y el sufijo `By{X}`:
+
+| Método | Auto-derivación | ¿Correcto? | Acción |
+|---|---|---|---|
+| `findCustomerById` | `Customer` | ✅ sí | omitir `domainType:` |
+| `findScreeningById` | `Screening` | ✅ sí | omitir `domainType:` |
+| `findAvailableSeats` | `AvailableSeat` | ❌ mejor `Seat` | `domainType: Seat` |
+| `checkPrivateEventAvailability` | `PrivateEventAvailability` | ✅ sí | omitir `domainType:` |
+| `findPaymentStatus` | `PaymentStatus` | ⚠️ puede colisionar | `domainType: PaymentStatus` |
+
+**Cuándo declarar `domainType:`:**
+1. La derivación automática incluye adjetivos no deseados (`Available`, `Active`, `Pending`)
+2. Varios métodos deben devolver el **mismo tipo de dominio** — declara el mismo `domainType:` en todos; el generador deduplica el record
+3. El nombre derivado colisiona con otro tipo ya existente en el dominio
+
+```yaml
+ports:
+  - name: findAvailableSeats
+    service: ScreeningService
+    http: GET /screenings/{id}/seats
+    returnList: true
+    domainType: Seat                   # sin esto: domain/models/screeningService/AvailableSeat.java
+    fields:
+      - name: seatId
+        type: String
+  - name: findBlockedSeats             # mismo domainType → reutiliza Seat.java (el generador deduplica)
+    service: ScreeningService
+    http: GET /screenings/{id}/blocked-seats
+    returnList: true
+    domainType: Seat
+    fields:
+      - name: seatId
+        type: String
+```
+
+> ⚠️ Si omites `domainType:` y la auto-derivación produce un nombre incorrecto, el modelo de dominio en `domain/models/{service}/` y el adaptador ACL tendrán nombres confusos. Siempre verifica la derivación antes de aceptar el default.
+
+---
+
+## Paso 5 — Consistencia con system/system.yaml
+
+Verifica antes de entregar que todas las secciones del domain.yaml sean consistentes con `system/system.yaml`:
+
+**Eventos producidos (`events:`):**
+- `events[].name` debe coincidir con `integrations.async[].event` donde `producer` es este módulo
+
+**Endpoints expuestos (`endpoints:`):**
+- `endpoints[].operations[].useCase` debe coincidir con `modules[].exposes[].useCase`
+- `endpoints[].basePath` debe derivarse de `modules[].exposes[].path`
+- Los `path` en las operaciones deben ser **relativos** al basePath (ej: `/{id}`, no `/orders/{id}`)
+
+**Listeners consumidos (`listeners:`):**
+- `listeners[].event` debe coincidir con `integrations.async[].event`
+- `listeners[].topic` debe coincidir con `integrations.async[].topic`
+- `listeners[].useCase` debe coincidir con `integrations.async[].consumers[].useCase` donde `module` es este módulo
+- `listeners[].producer` debe coincidir con `integrations.async[].producer`
+
+**Puertos síncronos (`ports:`):**
+- `ports[].service` debe coincidir con `integrations.sync[].port` donde `caller` es este módulo
+- `ports[].target` debe coincidir con `integrations.sync[].calls`
+- `ports[].http` debe coincidir con una entrada de `integrations.sync[].using[]`
+- `ports[].baseUrl` solo en la primera entrada de cada `service:` (las siguientes lo omiten)
+
+**Referencias cross-aggregate:**
+- `reference.module` debe ser un módulo declarado en `system/system.yaml → modules[].name`
 
 ---
 
@@ -259,9 +451,17 @@ Antes de proponer el `domain.yaml`, verifica:
 - [ ] `transitions.guard` apunta a condición que lanza excepción (no la condición feliz)
 - [ ] Value Objects sin campo `id`
 - [ ] Relaciones cross-aggregate usando `reference:` en el campo ID, no `relationships:`
-- [ ] `events[].name` consistente con `system.yaml`
-- [ ] `endpoints[].useCase` consistente con `system.yaml`
-- [ ] `ports[].name` consistente con `system.yaml`
+- [ ] `events[].name` consistente con `system/system.yaml → integrations.async[].event` (producer = este módulo)
+- [ ] `endpoints[].useCase` consistente con `system/system.yaml → exposes[].useCase`
+- [ ] `endpoints[].path` son **relativos** al basePath (ej: `/{id}`, no `/orders/{id}`)
+- [ ] `listeners[]` presentes para todos los eventos donde este módulo aparece en `consumers[]`
+- [ ] `listeners[].useCase` coincide exactamente con `consumers[].useCase` en `system/system.yaml`
+- [ ] `listeners[].topic` coincide con `integrations.async[].topic` en `system/system.yaml`
+- [ ] `ports[]` presentes para todas las entradas en `integrations.sync[]` donde `caller = este módulo`
+- [ ] `ports[].baseUrl` solo en la primera entrada de cada `service:`
+- [ ] `listeners[].nestedTypes[]` declarado para cada campo de tipo objeto (no escalar) en `listeners[].fields[]`
+- [ ] `ports[].nestedTypes[]` declarado para cada campo de tipo objeto en `ports[].body[]`
+- [ ] `ports[].domainType` declarado cuando la auto-derivación del nombre del método no produce el tipo correcto
 - [ ] Validaciones solo en `fields.validations:`, no en otro lado
 
 ---
@@ -273,12 +473,21 @@ Antes de proponer el `domain.yaml`, verifica:
    - Por qué ciertos campos son `readOnly` o `hidden`
    - Por qué un campo es un Value Object y no un campo simple
    - Qué transiciones de estado se modelaron y por qué
-3. Menciona cualquier inconsistencia detectada con `system.yaml` que el usuario deba resolver
-4. Indica el comando siguiente:
+3. Menciona cualquier inconsistencia detectada con `system/system.yaml` que el usuario deba resolver
+4. Indica los pasos siguientes:
 
 ```bash
+# El archivo construido va en:
+system/<módulo>.yaml
+
+# Copiarlo al módulo antes de generar:
+cp system/<módulo>.yaml src/main/java/<package>/<módulo>/domain.yaml
+
+# Generar el código:
 eva g entities <nombre-del-módulo>
 ```
+
+5. Si el usuario pidió modelar **múltiples módulos**, indica cuáles quedan pendientes y ofrece continuar con el siguiente.
 
 ---
 
@@ -288,4 +497,4 @@ Después de entregar el `domain.yaml` v1, el usuario puede pedir ajustes:
 - Aplica el **cambio mínimo** necesario
 - Vuelve a verificar el checklist del Paso 6
 - Entrega solo el diff explicado, no el archivo completo de nuevo (salvo que se pida)
-- Si el cambio afecta consistencia con `system.yaml`, señálalo explícitamente
+- Si el cambio afecta consistencia con `system/system.yaml` o `system/system.md`, señálalo explícitamente

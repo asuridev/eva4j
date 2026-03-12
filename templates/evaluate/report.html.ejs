@@ -11,6 +11,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0a0a0f; color: #e8e8f0; font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif; }
@@ -45,6 +46,7 @@
       endpoints: ENDPOINTS,
       flows: FLOWS_LIST,
       validation: VALIDATION,
+      domainValidation: DOMAIN_VALIDATION,
       generatedAt,
     } = window.__EVA_DATA__;
 
@@ -885,7 +887,393 @@
         </div>
       );
     }
+    // ─── Mermaid helper ──────────────────────────────────────────────────────────────
+    let _mermaidReady = false;
+    function ensureMermaid() {
+      if (!_mermaidReady && typeof window.mermaid !== 'undefined') {
+        window.mermaid.initialize({
+          startOnLoad: false,
+          theme: 'dark',
+          themeVariables: {
+            background: '#0a0a0f',
+            primaryColor: '#1e1e2e',
+            primaryBorderColor: '#4a4a8a',
+            lineColor: '#8c8caa',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '13px',
+          },
+        });
+        _mermaidReady = true;
+      }
+      return _mermaidReady;
+    }
 
+    // ─── DiagramPanel ────────────────────────────────────────────────────────────────
+    function DiagramPanel({ moduleKey, diagramText }) {
+      const containerRef = useRef(null);
+      const wrapperRef = useRef(null);
+      const [renderState, setRenderState] = useState('idle');
+      const [errorMsg, setErrorMsg] = useState('');
+      const [wrapperJustify, setWrapperJustify] = useState('flex-start');
+
+      useEffect(() => {
+        if (!diagramText) return;
+        let cancelled = false;
+        setRenderState('loading');
+        (async () => {
+          try {
+            // Wait up to 4s for mermaid to load (deferred script)
+            let waited = 0;
+            while (!ensureMermaid() && waited < 4000) {
+              await new Promise((r) => setTimeout(r, 100));
+              waited += 100;
+            }
+            if (!ensureMermaid()) throw new Error('Mermaid no está disponible');
+            if (cancelled) return;
+            const id = 'mmd-' + moduleKey.replace(/[^a-zA-Z0-9]/g, '-') + '-' + Date.now();
+            const { svg } = await window.mermaid.render(id, diagramText);
+            if (cancelled || !containerRef.current) return;
+            containerRef.current.innerHTML = svg;
+            const svgEl = containerRef.current.querySelector('svg');
+            if (svgEl) {
+              svgEl.removeAttribute('height');
+              svgEl.removeAttribute('width');
+
+              // Measure intrinsic width from viewBox to decide sizing strategy
+              const vb = svgEl.getAttribute('viewBox');
+              const intrinsicW = vb ? parseFloat(vb.split(/\s+/)[2]) : 0;
+              const containerW = wrapperRef.current ? wrapperRef.current.clientWidth - 40 : 0;
+
+              if (intrinsicW > 0 && intrinsicW < containerW * 0.65) {
+                // Small diagram (1-2 classes): render at natural size and center
+                svgEl.style.width = intrinsicW + 'px';
+                svgEl.style.maxWidth = '100%';
+                setWrapperJustify('center');
+              } else {
+                // Large diagram: expand to fill; overflow: auto handles horizontal scroll
+                svgEl.style.width = Math.max(intrinsicW, containerW) + 'px';
+                svgEl.style.maxWidth = 'none';
+                setWrapperJustify('flex-start');
+              }
+            }
+            setRenderState('done');
+          } catch (err) {
+            if (!cancelled) {
+              setErrorMsg(err.message || String(err));
+              setRenderState('error');
+            }
+          }
+        })();
+        return () => { cancelled = true; };
+      }, [moduleKey, diagramText]);
+
+      if (!diagramText) {
+        return (
+          <div style={{ padding: 40, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+            No hay diagrama disponible para este módulo
+          </div>
+        );
+      }
+      return (
+        <div
+          ref={wrapperRef}
+          style={{
+            background: '#0d0d15', borderRadius: 10, padding: 20,
+            overflow: 'auto', border: `1px solid ${C.border}`, minHeight: 200,
+            display: 'flex', justifyContent: wrapperJustify,
+          }}
+        >
+          {renderState === 'loading' && (
+            <div style={{ color: C.textMuted, fontSize: 13, textAlign: 'center', padding: 30, width: '100%' }}>
+              ⏳ Renderizando diagrama...
+            </div>
+          )}
+          {renderState === 'error' && (
+            <div style={{ color: C.accent, fontSize: 12, padding: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+              ⚠ {errorMsg}
+            </div>
+          )}
+          <div ref={containerRef} style={{ display: renderState === 'done' ? 'block' : 'none' }} />
+        </div>
+      );
+    }
+
+    // ─── DomainTab ──────────────────────────────────────────────────────────────────
+    function DomainTab() {
+      const [expandedChecks, setExpandedChecks] = useState({});
+      const [selectedModule, setSelectedModule] = useState('all');
+      const [view, setView] = useState('findings');
+      if (!DOMAIN_VALIDATION) return null;
+
+      const { summary, categories, diagrams } = DOMAIN_VALIDATION;
+
+      // Collect all unique module names that have at least one finding
+      const allModules = [...new Set(
+        categories.flatMap(cat =>
+          cat.checks.flatMap(check => check.findings.map(f => f.module))
+        )
+      )].sort();
+
+      const SEV_COLOR = {
+        error:   C.accent,
+        warning: C.gold,
+        info:    C.blue,
+        ok:      C.green,
+      };
+      const SEV_LABEL = {
+        error:   'Error',
+        warning: 'Warning',
+        info:    'Info',
+        ok:      'OK',
+      };
+      const SEV_ICON = {
+        error:   '🔴',
+        warning: '🟡',
+        info:    '🔵',
+        ok:      '🟢',
+      };
+
+      function toggleCheck(id) {
+        setExpandedChecks(prev => ({ ...prev, [id]: !prev[id] }));
+      }
+
+      function changeModule(mod) {
+        setSelectedModule(mod);
+        setExpandedChecks({});
+      }
+
+      return (
+        <div style={{ animation: 'fadeIn 0.25s ease' }}>
+
+          {/* Summary bar */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+            {[
+              { label: 'Errors',   count: summary.errors,   color: C.accent },
+              { label: 'Warnings', count: summary.warnings, color: C.gold },
+              { label: 'Info',     count: summary.info,     color: C.blue },
+              { label: 'OK',       count: summary.ok,       color: C.green },
+            ].map(stat => (
+              <div key={stat.label} style={{
+                background: C.surface, border: `1px solid ${stat.color}44`,
+                borderRadius: 10, padding: '16px 20px', textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 28, fontWeight: 900, color: stat.color }}>{stat.count}</div>
+                <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>{stat.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Module filter */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20,
+            padding: '12px 16px', background: C.surface,
+            border: `1px solid ${C.border}`, borderRadius: 8,
+          }}>
+            <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 600, flexShrink: 0 }}>Filtrar por módulo</span>
+            <select
+              value={selectedModule}
+              onChange={e => changeModule(e.target.value)}
+              style={{
+                background: C.bg, color: C.text,
+                border: `1px solid ${selectedModule !== 'all' ? C.blue : C.borderBright}`,
+                borderRadius: 6, padding: '6px 32px 6px 12px', fontSize: 13,
+                cursor: 'pointer', fontFamily: 'inherit', outline: 'none',
+                appearance: 'none', WebkitAppearance: 'none',
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238c8caa'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
+              }}
+            >
+              <option value="all">Todos los módulos ({allModules.length})</option>
+              {allModules.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            {selectedModule !== 'all' && (
+              <button
+                onClick={() => changeModule('all')}
+                style={{
+                  background: C.accent + '22', color: C.accent,
+                  border: `1px solid ${C.accent}44`, borderRadius: 6,
+                  padding: '4px 12px', fontSize: 12, cursor: 'pointer',
+                  fontFamily: 'inherit', fontWeight: 600,
+                }}
+              >
+                ✕ limpiar
+              </button>
+            )}
+            {selectedModule !== 'all' && (
+              <span style={{ color: C.blue, fontSize: 12, marginLeft: 4 }}>
+                Mostrando hallazgos de <strong style={{ color: C.text }}>{selectedModule}</strong>
+              </span>
+            )}
+          </div>
+
+          {/* View toggle pill (only rendered when diagrams are available) */}
+          {diagrams && Object.keys(diagrams).length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 20 }}>
+              {[{ id: 'findings', label: '📋 Hallazgos' }, { id: 'diagram', label: '🗺 Diagrama' }].map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => setView(v.id)}
+                  style={{
+                    background: view === v.id ? C.purple + '33' : 'transparent',
+                    color: view === v.id ? C.purple : C.textMuted,
+                    border: `1px solid ${view === v.id ? C.purple + '66' : C.border}`,
+                    borderRadius: 6, padding: '6px 16px', fontSize: 12,
+                    fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    transition: 'all 0.15s',
+                  }}
+                >{v.label}</button>
+              ))}
+            </div>
+          )}
+
+          {/* Diagram view */}
+          {view === 'diagram' && (
+            <div>
+              {selectedModule === 'all' ? (
+                <div style={{ padding: 32, textAlign: 'center', background: C.surface, borderRadius: 10, border: `1px solid ${C.border}`, color: C.textMuted, fontSize: 13 }}>
+                  Selecciona un módulo en el filtro de arriba para ver su diagrama de clases
+                </div>
+              ) : (
+                <DiagramPanel moduleKey={selectedModule} diagramText={diagrams && diagrams[selectedModule]} />
+              )}
+            </div>
+          )}
+
+          {/* Category cards */}
+          {view === 'findings' && categories.map(cat => {
+            // Apply module filter to each check's findings
+            const filteredChecks = cat.checks.map(check => ({
+              ...check,
+              visibleFindings: selectedModule === 'all'
+                ? check.findings
+                : check.findings.filter(f => f.module === selectedModule),
+            }));
+            // If filtering and no check in this category has visible findings, skip the card
+            const anyVisible = filteredChecks.some(c => c.visibleFindings.length > 0 || c.severity === 'ok');
+
+            return (
+              <div key={cat.id} style={{
+                marginBottom: 20, border: `1px solid ${C.border}`,
+                borderRadius: 10, overflow: 'hidden',
+                opacity: selectedModule !== 'all' && !filteredChecks.some(c => c.visibleFindings.length > 0) ? 0.45 : 1,
+                transition: 'opacity 0.2s',
+              }}>
+                {/* Category header */}
+                <div style={{
+                  background: C.surface, padding: '14px 18px',
+                  borderBottom: `1px solid ${C.border}`,
+                  display: 'flex', alignItems: 'flex-start', gap: 12,
+                }}>
+                  <span style={{
+                    background: C.purple + '33', color: C.purple,
+                    border: `1px solid ${C.purple}44`, borderRadius: 6,
+                    padding: '2px 10px', fontSize: 12, fontWeight: 700,
+                    fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, marginTop: 2,
+                  }}>{cat.id}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{cat.label}</div>
+                    <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{cat.description}</div>
+                  </div>
+                  {selectedModule !== 'all' && (
+                    <span style={{ fontSize: 11, color: C.textMuted, flexShrink: 0, marginTop: 4 }}>
+                      {filteredChecks.reduce((n, c) => n + c.visibleFindings.length, 0)} hallazgo(s)
+                    </span>
+                  )}
+                </div>
+
+                {/* Checks list */}
+                <div>
+                  {filteredChecks.map((check, idx) => {
+                    const color = SEV_COLOR[check.severity] || C.textMuted;
+                    const isExpanded = expandedChecks[check.id];
+                    const hasFindings = check.visibleFindings.length > 0;
+                    return (
+                      <div key={check.id} style={{
+                        borderBottom: idx < filteredChecks.length - 1 ? `1px solid ${C.border}` : 'none',
+                      }}>
+                        {/* Check row */}
+                        <div
+                          onClick={() => hasFindings && toggleCheck(check.id)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 12,
+                            padding: '11px 18px',
+                            cursor: hasFindings ? 'pointer' : 'default',
+                            background: isExpanded ? C.surfaceHover : 'transparent',
+                            transition: 'background 0.15s',
+                          }}
+                        >
+                          <span style={{
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontSize: 11, color: C.textMuted, flexShrink: 0, width: 60,
+                          }}>{check.id}</span>
+
+                          <span style={{
+                            background: color + '22', color, border: `1px solid ${color}44`,
+                            borderRadius: 4, padding: '1px 8px', fontSize: 11, fontWeight: 700,
+                            flexShrink: 0, minWidth: 64, textAlign: 'center',
+                          }}>
+                            {SEV_ICON[check.severity]} {SEV_LABEL[check.severity]}
+                          </span>
+
+                          <span style={{ fontSize: 13, color: C.textDim, flex: 1 }}>{check.label}</span>
+
+                          {hasFindings && (
+                            <span style={{
+                              background: color + '22', color, borderRadius: 20,
+                              padding: '2px 10px', fontSize: 11, fontWeight: 700, flexShrink: 0,
+                            }}>
+                              {check.visibleFindings.length}
+                              {selectedModule === 'all' ? '' : ` / ${check.findings.length}`}
+                              {' '}hallazgo{check.visibleFindings.length !== 1 ? 's' : ''}
+                            </span>
+                          )}
+
+                          {hasFindings && (
+                            <span style={{ color: C.textMuted, fontSize: 12, flexShrink: 0, transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'none' }}>&#9654;</span>
+                          )}
+                        </div>
+
+                        {/* Findings panel */}
+                        {isExpanded && hasFindings && (
+                          <div style={{
+                            background: '#0d0d15', borderTop: `1px solid ${C.border}`,
+                            padding: '0 18px 12px 18px',
+                          }}>
+                            {check.visibleFindings.map((f, fi) => (
+                              <div key={fi} style={{
+                                padding: '10px 0',
+                                borderBottom: fi < check.visibleFindings.length - 1 ? `1px solid ${C.border}` : 'none',
+                                display: 'flex', alignItems: 'flex-start', gap: 12,
+                              }}>
+                                <span style={{
+                                  background: color + '22', color,
+                                  border: `1px solid ${color}44`, borderRadius: 4,
+                                  padding: '1px 8px', fontSize: 11, fontWeight: 600,
+                                  flexShrink: 0, marginTop: 1,
+                                  fontFamily: "'JetBrains Mono', monospace",
+                                }}>{f.module}</span>
+                                <div>
+                                  <div style={{ fontSize: 13, color: C.text }}>{f.message}</div>
+                                  {f.context && (
+                                    <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>{f.context}</div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
     // ─── App root ───────────────────────────────────────────────────────────
     function App() {
       const [tab, setTab] = useState("validation");
@@ -895,6 +1283,7 @@
         { id: "flows",        label: "Simulador de flujos",   icon: "▶" },
         { id: "architecture", label: "Arquitectura",          icon: "🗺️" },
         { id: "diagram",      label: "Diagrama",              icon: "◈" },
+        ...(DOMAIN_VALIDATION ? [{ id: "domain", label: "Dominio", icon: "🏛️" }] : []),
       ];
 
       const sys = window.__EVA_DATA__;
@@ -958,6 +1347,7 @@
             {tab === "flows"        && <FlowSimulator />}
             {tab === "architecture" && <ArchitectureTab />}
             {tab === "diagram"      && <DiagramTab />}
+            {tab === "domain"       && DOMAIN_VALIDATION && <DomainTab />}
           </div>
         </div>
       );

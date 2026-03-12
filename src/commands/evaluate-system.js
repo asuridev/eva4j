@@ -9,6 +9,7 @@ const ejs = require('ejs');
 const ora = require('ora');
 
 const { validateSystem } = require('../utils/system-validator');
+const { validateDomain } = require('../utils/domain-validator');
 
 // ── Module icon heuristic ────────────────────────────────────────────────────
 
@@ -208,7 +209,7 @@ function buildEventFlows(systemConfig, modulesMap) {
 
 // ── Data extraction ──────────────────────────────────────────────────────────
 
-function extractReportData(systemConfig, validation) {
+function extractReportData(systemConfig, validation, domainValidation) {
   const modulesConfig = systemConfig.modules || [];
   const asyncEvents = (systemConfig.integrations || {}).async || [];
   const syncIntegrations = (systemConfig.integrations || {}).sync || [];
@@ -259,6 +260,7 @@ function extractReportData(systemConfig, validation) {
     endpoints,
     flows,
     validation,
+    domainValidation,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -299,8 +301,37 @@ async function evaluateSystemCommand(type, options = {}) {
   // ── 2. Run validation ───────────────────────────────────────────────────
   const validation = validateSystem(systemConfig);
 
+  // ── 2b. Load domain YAMLs (--domain flag) ──────────────────────────────
+  let domainValidation = null;
+  if (options.domain) {
+    const systemDir = path.join(process.cwd(), 'system');
+    let allFiles;
+    try {
+      allFiles = await fs.readdir(systemDir);
+    } catch {
+      allFiles = [];
+    }
+    const domainFiles = allFiles.filter((f) => f.endsWith('.yaml') && f !== 'system.yaml');
+
+    if (domainFiles.length === 0) {
+      console.warn(chalk.yellow('⚠  --domain: no domain YAML files found in system/ (excluding system.yaml). Domain tab will be hidden.'));
+    } else {
+      const domainConfigs = {};
+      for (const file of domainFiles) {
+        const moduleName = path.basename(file, '.yaml');
+        try {
+          const content = await fs.readFile(path.join(systemDir, file), 'utf-8');
+          domainConfigs[moduleName] = yaml.load(content) || {};
+        } catch (err) {
+          console.warn(chalk.yellow(`⚠  --domain: could not parse ${file}: ${err.message}`));
+        }
+      }
+      domainValidation = validateDomain(domainConfigs, systemConfig);
+    }
+  }
+
   // ── 3. Extract report data ──────────────────────────────────────────────
-  const reportData = extractReportData(systemConfig, validation);
+  const reportData = extractReportData(systemConfig, validation, domainValidation);
 
   // ── 4. Render HTML ──────────────────────────────────────────────────────
   const templatePath = path.join(__dirname, '../../templates/evaluate/report.html.ejs');
@@ -317,6 +348,11 @@ async function evaluateSystemCommand(type, options = {}) {
   // ── 5. Write HTML file ──────────────────────────────────────────────────
   await fs.ensureDir(path.dirname(outputPath));
   await fs.writeFile(outputPath, htmlContent, 'utf-8');
+
+  // ── 5b. Write domain assets (--domain flag) ─────────────────────────────
+  if (domainValidation) {
+    await writeDomainAssets(domainValidation, process.cwd());
+  }
 
   spinner.succeed(chalk.green('Analysis complete!'));
 
@@ -350,6 +386,18 @@ async function evaluateSystemCommand(type, options = {}) {
     console.log();
   }
 
+  // ── 6b. Print domain validation summary ────────────────────────────────
+  if (domainValidation) {
+    const ds = domainValidation.summary;
+    console.log(chalk.bold('🏛️  Domain Validation Summary'));
+    console.log(chalk.gray('─'.repeat(40)));
+    console.log(`  ${chalk.red('🔴 Errors:')}     ${chalk.red.bold(ds.errors)}`);
+    console.log(`  ${chalk.yellow('🟡 Warnings:')}   ${chalk.yellow.bold(ds.warnings)}`);
+    console.log(`  ${chalk.blue('🔵 Info:')}       ${chalk.blue.bold(ds.info)}`);
+    console.log(`  ${chalk.green('🟢 OK:')}         ${chalk.green.bold(ds.ok)}`);
+    console.log();
+  }
+
   // ── 7. Start HTTP server ─────────────────────────────────────────────────
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -380,6 +428,122 @@ function toPascalCase(str) {
   return str
     .replace(/[-_ ]+(.)/g, (_, c) => c.toUpperCase())
     .replace(/^(.)/, (c) => c.toUpperCase());
+}
+
+// ── writeDomainAssets ─────────────────────────────────────────────────────────
+async function writeDomainAssets(domainValidation, cwd) {
+  const assetsDir = path.join(cwd, 'assets', 'evaluation');
+  await fs.ensureDir(assetsDir);
+
+  const { categories, diagrams, summary } = domainValidation;
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+  // ── 1. Write per-module .mmd files ──────────────────────────────────────
+  if (diagrams) {
+    for (const [moduleName, diagramText] of Object.entries(diagrams)) {
+      if (diagramText) {
+        await fs.writeFile(path.join(assetsDir, `${moduleName}.mmd`), diagramText, 'utf-8');
+      }
+    }
+  }
+
+  // ── 2. Build evaluation.md ──────────────────────────────────────────────
+
+  // Collect all findings grouped by module
+  const byModule = {};
+  for (const cat of categories) {
+    for (const check of cat.checks) {
+      for (const finding of check.findings) {
+        const mod = finding.module || '(sin módulo)';
+        if (!byModule[mod]) byModule[mod] = [];
+        byModule[mod].push({
+          category: `${cat.id} – ${cat.label}`,
+          checkId: check.id,
+          checkLabel: check.label,
+          severity: check.severity,
+          message: finding.message,
+          context: finding.context || '',
+        });
+      }
+    }
+  }
+
+  const SEV_EMOJI = { error: '🔴', warning: '🟡', info: '🔵', ok: '🟢' };
+
+  const lines = [];
+  lines.push(`# Domain Evaluation Report`);
+  lines.push(`> Generated: ${now}`);
+  lines.push('');
+
+  // Summary table
+  lines.push(`## Summary`);
+  lines.push('');
+  lines.push(`| 🔴 Errors | 🟡 Warnings | 🔵 Info | 🟢 OK |`);
+  lines.push(`|-----------|-------------|---------|-------|`);
+  lines.push(`| ${summary.errors} | ${summary.warnings} | ${summary.info} | ${summary.ok} |`);
+  lines.push('');
+
+  const moduleNames = Object.keys(byModule).sort();
+
+  if (moduleNames.length === 0) {
+    lines.push('_No findings detected across all modules._');
+  } else {
+    lines.push(`## Findings by Module`);
+    lines.push('');
+
+    for (const moduleName of moduleNames) {
+      const findings = byModule[moduleName];
+      const errorCount   = findings.filter(f => f.severity === 'error').length;
+      const warningCount = findings.filter(f => f.severity === 'warning').length;
+      const infoCount    = findings.filter(f => f.severity === 'info').length;
+
+      const badges = [
+        errorCount   ? `🔴 ${errorCount} error${errorCount   !== 1 ? 's' : ''}` : null,
+        warningCount ? `🟡 ${warningCount} warning${warningCount !== 1 ? 's' : ''}` : null,
+        infoCount    ? `🔵 ${infoCount} info` : null,
+      ].filter(Boolean).join(' · ');
+
+      lines.push(`### \`${moduleName}\`${badges ? `  <sub>${badges}</sub>` : ''}`);
+      lines.push('');
+
+      if (diagrams && diagrams[moduleName]) {
+        lines.push(`> 📊 Diagram: [${moduleName}.mmd](./${moduleName}.mmd)`);
+        lines.push('');
+      }
+
+      lines.push(`| Severity | Check | Message | Context |`);
+      lines.push(`|----------|-------|---------|---------|`);
+
+      for (const f of findings) {
+        const sev = `${SEV_EMOJI[f.severity] || ''} ${f.severity}`;
+        const checkCell = `**${f.checkId}** ${f.checkLabel}`;
+        const msg = f.message.replace(/\|/g, '\\|');
+        const ctx = f.context.replace(/\|/g, '\\|');
+        lines.push(`| ${sev} | ${checkCell} | ${msg} | ${ctx} |`);
+      }
+      lines.push('');
+    }
+  }
+
+  // Modules with diagrams but no findings
+  if (diagrams) {
+    const cleanModules = Object.keys(diagrams)
+      .filter(m => diagrams[m] && !byModule[m])
+      .sort();
+    if (cleanModules.length > 0) {
+      lines.push(`## Clean Modules (no findings)`);
+      lines.push('');
+      for (const m of cleanModules) {
+        lines.push(`- \`${m}\` — 🟢 no findings · [${m}.mmd](./${m}.mmd)`);
+      }
+      lines.push('');
+    }
+  }
+
+  await fs.writeFile(path.join(assetsDir, 'evaluation.md'), lines.join('\n'), 'utf-8');
+
+  const mmdFiles = diagrams ? Object.keys(diagrams).filter(m => diagrams[m]) : [];
+  console.log(chalk.gray(`  Domain assets → assets/evaluation/  (evaluation.md + ${mmdFiles.length} .mmd files)`));
 }
 
 module.exports = evaluateSystemCommand;
