@@ -6,17 +6,8 @@ const fs = require('fs-extra');
 const yaml = require('js-yaml');
 const pluralize = require('pluralize');
 
-const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toCamelCase, toPascalCase, toPackagePath } = require('../utils/naming');
-
-const addModuleCommand = require('./add-module');
-const addKafkaClientCommand = require('./add-kafka-client');
-
-// Supported brokers → add-client command mapping
-const BROKER_CLIENT_COMMANDS = {
-  kafka: addKafkaClientCommand,
-};
+const { toCamelCase, toPascalCase } = require('../utils/naming');
 
 async function generateSystemCommand() {
   const projectDir = process.cwd();
@@ -27,11 +18,13 @@ async function generateSystemCommand() {
     process.exit(1);
   }
 
-  // ── Read system.yaml ──────────────────────────────────────────────────────
-  const systemYamlPath = path.join(projectDir, 'system.yaml');
+  // ── Read system/system.yaml ───────────────────────────────────────────────
+  const systemDir      = path.join(projectDir, 'system');
+  const systemYamlPath = path.join(systemDir, 'system.yaml');
+
   if (!(await fs.pathExists(systemYamlPath))) {
-    console.error(chalk.red('❌ system.yaml not found in project root'));
-    console.error(chalk.gray('Create a system.yaml file first'));
+    console.error(chalk.red('❌ system/system.yaml not found'));
+    console.error(chalk.gray('Create system/system.yaml first (run: eva build-system-yaml)'));
     process.exit(1);
   }
 
@@ -40,85 +33,43 @@ async function generateSystemCommand() {
     const content = await fs.readFile(systemYamlPath, 'utf-8');
     systemConfig = yaml.load(content);
   } catch (err) {
-    console.error(chalk.red('❌ Failed to parse system.yaml:'), err.message);
+    console.error(chalk.red('❌ Failed to parse system/system.yaml:'), err.message);
     process.exit(1);
   }
 
-  const { messaging, modules = [] } = systemConfig;
+  const { modules = [] } = systemConfig;
 
   if (!modules.length) {
-    console.log(chalk.yellow('⚠️  No modules defined in system.yaml'));
+    console.log(chalk.yellow('⚠️  No modules defined in system/system.yaml'));
     process.exit(0);
   }
 
   console.log(chalk.blue('\n🚀 eva generate system\n'));
+  console.log(chalk.gray('  Source : system/system.yaml'));
+  console.log(chalk.gray('  Output : system/{module}.yaml\n'));
 
-  const configManager = new ConfigManager(projectDir);
-
-  // ── Step 1: Add modules ───────────────────────────────────────────────────
-  console.log(chalk.blue('\n📦 Adding modules...\n'));
-
-  for (const mod of modules) {
-    const modulePackageName = toCamelCase(mod.name);
-    const alreadyExists = await configManager.moduleExists(modulePackageName);
-
-    if (alreadyExists) {
-      console.log(chalk.gray(`  ✓ Module '${mod.name}' already exists, skipping`));
-    } else {
-      await addModuleCommand(mod.name, {});
-    }
-  }
-
-  // ── Step 2: Messaging broker client ──────────────────────────────────────
-  if (messaging && messaging.enabled === true) {
-    const broker = messaging.broker;
-    const addClientFn = BROKER_CLIENT_COMMANDS[broker];
-
-    if (!addClientFn) {
-      console.log(chalk.yellow(`  ⚠️  Broker '${broker}' is not yet supported. Skipping client setup.`));
-    } else {
-      const alreadyInstalled = await configManager.featureExists(broker);
-      if (alreadyInstalled) {
-        console.log(chalk.gray(`  ✓ ${broker}-client already installed, skipping\n`));
-      } else {
-        console.log(chalk.blue(`\n📡 Adding ${broker}-client...\n`));
-        await addClientFn();
-      }
-    }
-  }
-
-  // ── Step 3: Generate domain.yaml per module ───────────────────────────────
-  const projectConfig = await configManager.loadProjectConfig();
-  if (!projectConfig) {
-    console.error(chalk.red('❌ Could not load project configuration'));
-    process.exit(1);
-  }
-
-  const packagePath = toPackagePath(projectConfig.packageName);
-
-  console.log(chalk.blue('\n📄 Generating domain.yaml skeletons...\n'));
+  // ── Generate one domain.yaml skeleton per module inside system/ ───────────
+  await fs.ensureDir(systemDir);
 
   for (const mod of modules) {
-    const modulePackageName = toCamelCase(mod.name);
-    const moduleDir = path.join(projectDir, 'src', 'main', 'java', packagePath, modulePackageName);
-    const domainYamlPath = path.join(moduleDir, 'domain.yaml');
-
-    const existed = await fs.pathExists(domainYamlPath);
-    const content = buildDomainYaml(mod, systemConfig);
-    await fs.writeFile(domainYamlPath, content, 'utf-8');
+    const outputPath = path.join(systemDir, `${mod.name}.yaml`);
+    const existed    = await fs.pathExists(outputPath);
+    const content    = buildDomainYaml(mod, systemConfig);
+    await fs.writeFile(outputPath, content, 'utf-8');
 
     if (existed) {
-      console.log(chalk.yellow(`  ♻️  ${modulePackageName}/domain.yaml overwritten`));
+      console.log(chalk.yellow(`  ♻️  system/${mod.name}.yaml overwritten`));
     } else {
-      console.log(chalk.green(`  ✨ ${modulePackageName}/domain.yaml created`));
+      console.log(chalk.green(`  ✨ system/${mod.name}.yaml created`));
     }
   }
 
-  console.log(chalk.blue('\n✅ System bootstrap complete!\n'));
+  console.log(chalk.blue(`\n✅ Generated ${modules.length} domain.yaml skeleton(s)\n`));
   console.log(chalk.white('Next steps:'));
-  console.log(chalk.gray("  1. Edit each module's domain.yaml — add fields, enums, and refine the aggregate"));
-  console.log(chalk.gray('  2. Run: eva g entities <module>  (for each module)'));
-  console.log(chalk.gray('\n  Tip: run eva system validate to check cross-module consistency'));
+  console.log(chalk.gray('  1. Open each system/{module}.yaml and complete entity fields'));
+  console.log(chalk.gray('  2. Copy each file to its module source directory:'));
+  console.log(chalk.gray('       src/main/java/<package>/<module>/domain.yaml'));
+  console.log(chalk.gray('  3. Run: eva g entities <module>  (for each module)'));
   console.log();
 }
 
@@ -126,32 +77,48 @@ async function generateSystemCommand() {
 
 function buildDomainYaml(mod, systemConfig) {
   const integrations = systemConfig.integrations || {};
-  const asyncEvents = integrations.async || [];
-  const syncCalls = integrations.sync || [];
+  const asyncEvents  = integrations.async || [];
+  const syncCalls    = integrations.sync  || [];
 
-  const moduleName = mod.name;
+  const moduleName    = mod.name;
   const aggregateName = toPascalCase(pluralize.singular(moduleName));
-  const entityName = aggregateName.charAt(0).toLowerCase() + aggregateName.slice(1);
-  const tableName = moduleName.replace(/-/g, '_');
+  const entityName    = aggregateName.charAt(0).toLowerCase() + aggregateName.slice(1);
+  const tableName     = moduleName.replace(/-/g, '_');
 
   // Events this module produces
   const producedEvents = asyncEvents.filter(e => e.producer === moduleName);
+
+  // Events this module consumes (one entry per consumer match)
+  const consumedEvents = asyncEvents.flatMap(e =>
+    (e.consumers || [])
+      .filter(c => c.module === moduleName)
+      .map(c => ({ ...e, consumerUseCase: c.useCase }))
+  );
+
   // Sync calls this module makes as caller
-  const outboundPorts = syncCalls.filter(s => s.caller === moduleName);
-  // REST endpoints exposed by this module
+  const outboundCalls = syncCalls.filter(s => s.caller === moduleName);
+
+  // REST endpoints this module exposes
   const exposes = mod.exposes || [];
 
-  const lines = [];
   const today = new Date().toISOString().split('T')[0];
+  const lines = [];
 
-  lines.push(`# domain.yaml — ${moduleName}`);
+  // ── Header ────────────────────────────────────────────────────────────────
+  lines.push(`# ${mod.name}.yaml — domain model skeleton`);
   lines.push(`# Generated by: eva generate system  (${today})`);
+  lines.push(`# Source: system/system.yaml`);
   lines.push(`#`);
-  lines.push(`# TODO: Complete this file:`);
-  lines.push(`#   - Add entity fields under aggregates[].entities[].fields`);
-  if (producedEvents.length) lines.push(`#   - Add event fields under aggregates[].events[].fields`);
-  if (outboundPorts.length)  lines.push(`#   - Add response shapes to ports[].methods[].response`);
-  if (exposes.length)        lines.push(`#   - Verify endpoints[].operations match the use cases in aggregates[]`);
+  lines.push(`# ─── HOW TO COMPLETE THIS FILE ──────────────────────────────────────`);
+  lines.push(`#  1. Add entity fields under aggregates[].entities[].fields`);
+  lines.push(`#  2. Add enums / value objects as needed`);
+  if (producedEvents.length)
+    lines.push(`#  3. Add event payload fields under aggregates[].events[].fields`);
+  if (consumedEvents.length)
+    lines.push(`#  4. Add payload fields under listeners[].fields (match producer's event)`);
+  if (outboundCalls.length)
+    lines.push(`#  5. Add response fields under ports[].fields`);
+  lines.push(`# ────────────────────────────────────────────────────────────────────`);
   lines.push(``);
 
   // ── aggregates ────────────────────────────────────────────────────────────
@@ -166,14 +133,17 @@ function buildDomainYaml(mod, systemConfig) {
   lines.push(`        fields:`);
   lines.push(`          - name: id`);
   lines.push(`            type: String`);
-  lines.push(`          # TODO: add more fields`);
+  lines.push(`          # TODO: add fields`);
 
   if (producedEvents.length) {
+    lines.push(``);
     lines.push(`    events:`);
     for (const ev of producedEvents) {
       lines.push(`      - name: ${ev.event}`);
-      lines.push(`        fields: []  # TODO: add event fields`);
-      lines.push(`        kafka: true`);
+      lines.push(`        fields:`);
+      lines.push(`          # TODO: add event payload fields`);
+      lines.push(`          # - name: fieldName`);
+      lines.push(`          #   type: String`);
     }
   }
 
@@ -181,34 +151,63 @@ function buildDomainYaml(mod, systemConfig) {
 
   // ── endpoints ─────────────────────────────────────────────────────────────
   if (exposes.length) {
-    // Derive basePath from the first exposed endpoint (e.g. /orders/{id} → /orders)
-    const basePath = '/' + (exposes[0].path || '').replace(/^\//, '').split('/')[0];
+    const basePath = deriveBasePath(exposes[0].path);
     lines.push(`endpoints:`);
     lines.push(`  basePath: ${basePath}`);
     lines.push(`  versions:`);
     lines.push(`    - version: v1`);
     lines.push(`      operations:`);
     for (const ep of exposes) {
-      lines.push(`        - useCase: ${ep.useCase}`);
-      lines.push(`          method: ${ep.method}`);
-      lines.push(`          path: ${ep.path}`);
+      const relativePath = makeRelativePath(ep.path, basePath);
+      lines.push(`        - method: ${ep.method}`);
+      lines.push(`          path: ${relativePath}`);
+      lines.push(`          useCase: ${ep.useCase}`);
       if (ep.description) lines.push(`          description: "${ep.description}"`);
     }
     lines.push(``);
   }
 
+  // ── listeners ─────────────────────────────────────────────────────────────
+  if (consumedEvents.length) {
+    lines.push(`# Events consumed from other modules`);
+    lines.push(`listeners:`);
+    for (const ev of consumedEvents) {
+      lines.push(`  - event: ${ev.event}`);
+      lines.push(`    producer: ${ev.producer}`);
+      lines.push(`    topic: ${ev.topic}`);
+      lines.push(`    useCase: ${ev.consumerUseCase}`);
+      lines.push(`    fields:`);
+      lines.push(`      # TODO: add payload fields — must match ${ev.producer} module's event declaration`);
+      lines.push(`      # - name: fieldName`);
+      lines.push(`      #   type: String`);
+    }
+    lines.push(``);
+  }
+
   // ── ports ─────────────────────────────────────────────────────────────────
-  if (outboundPorts.length) {
+  if (outboundCalls.length) {
+    const seenServices = new Set();
+
+    lines.push(`# HTTP clients called synchronously by this module`);
     lines.push(`ports:`);
-    for (const port of outboundPorts) {
-      lines.push(`  - name: ${port.port}`);
-      lines.push(`    target: ${port.calls}  # from system.yaml integrations.sync`);
-      lines.push(`    methods:`);
-      for (const endpoint of (port.using || [])) {
-        const methodName = deriveMethodName(endpoint);
-        lines.push(`      - name: ${methodName}  # TODO: rename if needed`);
-        lines.push(`        http: ${endpoint}`);
-        lines.push(`        response: []  # TODO: add response fields`);
+    for (const call of outboundCalls) {
+      const serviceName      = call.port;
+      const isFirstOfService = !seenServices.has(serviceName);
+      seenServices.add(serviceName);
+
+      for (const httpEntry of (call.using || [])) {
+        const methodName = deriveMethodName(httpEntry, call.calls);
+        lines.push(`  - name: ${methodName}`);
+        lines.push(`    service: ${serviceName}`);
+        lines.push(`    target: ${call.calls}`);
+        if (isFirstOfService) {
+          lines.push(`    baseUrl: http://localhost:8080  # TODO: set ${call.calls} service URL`);
+        }
+        lines.push(`    http: ${httpEntry}`);
+        lines.push(`    fields:`);
+        lines.push(`      # TODO: add response fields`);
+        lines.push(`      # - name: fieldName`);
+        lines.push(`      #   type: String`);
       }
     }
     lines.push(``);
@@ -217,27 +216,57 @@ function buildDomainYaml(mod, systemConfig) {
   return lines.join('\n');
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 /**
- * Derive a camelCase Java method name from an HTTP entry like "GET /customers/{id}"
+ * Extract the basePath (first non-param segment) from a full endpoint path.
+ * e.g. "/orders/{id}/confirm" → "/orders"
  */
-function deriveMethodName(httpEntry) {
-  const parts = httpEntry.trim().split(/\s+/);
-  const method = (parts[0] || 'GET').toUpperCase();
+function deriveBasePath(fullPath) {
+  const segment = (fullPath || '').replace(/^\//, '').split('/')[0];
+  return '/' + segment;
+}
+
+/**
+ * Return a path relative to basePath for use in endpoints[].operations[].path.
+ * e.g. ("/orders/{id}", "/orders") → "/{id}"
+ *      ("/orders",      "/orders") → "/"
+ */
+function makeRelativePath(fullPath, basePath) {
+  const normalized = '/' + (fullPath || '').replace(/^\//, '');
+  const base       = '/' + (basePath || '').replace(/^\//, '').replace(/\/$/, '');
+  if (normalized === base) return '/';
+  if (normalized.startsWith(base + '/')) return normalized.slice(base.length);
+  return normalized;
+}
+
+/**
+ * Derive a camelCase Java method name from "VERB /path" (e.g. "GET /customers/{id}").
+ * Handles sub-resources: "GET /screenings/{id}/seats" → "findAvailableSeats".
+ */
+function deriveMethodName(httpEntry, targetModule) {
+  const parts  = httpEntry.trim().split(/\s+/);
+  const verb   = (parts[0] || 'GET').toUpperCase();
   const urlPath = parts[1] || '/';
 
-  const segments = urlPath.split('/').filter(s => s.length > 0);
-  const hasId = segments.some(s => s.charAt(0) === '{');
-  const resourceSegments = segments.filter(s => s.charAt(0) !== '{');
-  const lastResource = resourceSegments[resourceSegments.length - 1] || 'resource';
+  const segments     = urlPath.split('/').filter(s => s.length > 0);
+  const hasId        = segments.some(s => s.startsWith('{'));
+  const resourceSegs = segments.filter(s => !s.startsWith('{'));
+  const lastResource = resourceSegs[resourceSegs.length - 1]
+    || toCamelCase(targetModule || 'resource');
   const singular = pluralize.singular(lastResource);
-  const pascal = toPascalCase(singular);
+  const pascal   = toPascalCase(singular);
 
-  if (method === 'GET' && hasId) return `find${pascal}ById`;
-  if (method === 'GET') return `findAll${toPascalCase(lastResource)}`;
-  if (method === 'POST') return `create${pascal}`;
-  if (method === 'PUT' || method === 'PATCH') return `update${pascal}`;
-  if (method === 'DELETE') return `delete${pascal}`;
-  return toCamelCase(`${method.toLowerCase()}_${lastResource}`);
+  // Sub-resource with path param: GET /screenings/{id}/seats → findAvailableSeats
+  if (verb === 'GET' && hasId && resourceSegs.length > 1) {
+    return `find${toPascalCase(lastResource)}`;
+  }
+  if (verb === 'GET' && hasId)            return `find${pascal}ById`;
+  if (verb === 'GET')                      return `findAll${toPascalCase(lastResource)}`;
+  if (verb === 'POST')                     return `create${pascal}`;
+  if (verb === 'PUT' || verb === 'PATCH') return `update${pascal}`;
+  if (verb === 'DELETE')                   return `delete${pascal}`;
+  return toCamelCase(`${verb.toLowerCase()}_${lastResource}`);
 }
 
 module.exports = generateSystemCommand;
