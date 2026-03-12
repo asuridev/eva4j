@@ -328,13 +328,21 @@ aggregates:
           - CANCELLED
     
     events:                          # Domain Events emitted by this aggregate
-      - name: OrderConfirmedEvent
-        fields:
-          - name: orderId
+      - name: OrderConfirmedEvent    # Nota: kafka: true ya NO es necesario.
+        fields:                      # Si hay kafka-client instalado, eva g entities
+          - name: orderId            # cableará automáticamente todos los eventos.
             type: String
           - name: confirmedAt
             type: LocalDateTime
-        # kafka: true                # Optional — publishes to Kafka via MessageBroker
+
+# listeners:                        # Sibling de aggregates: — eventos externos que CONSUME
+#   - event: PaymentApprovedEvent
+#     producer: payments
+#     topic: PAYMENT_APPROVED        # obligatorio en módulos standalone
+#     useCase: ConfirmOrder
+#     fields:
+#       - name: orderId
+#         type: String
 ```
 
 ### Supported Field Types
@@ -1533,16 +1541,13 @@ aggregates:
         isRoot: true
         # ...
     events:
-      - name: OrderConfirmedEvent
+      - name: OrderConfirmed
         fields:
           - name: orderId
             type: String
           - name: confirmedAt
             type: LocalDateTime
-        # kafka: true            # Optional — generates messageBroker.sendOrderConfirmedEvent()
-      
-      - name: OrderShippedEvent
-        kafka: true              # Publishes to Kafka after commit
+      - name: OrderShipped
         fields:
           - name: orderId
             type: String
@@ -1550,35 +1555,29 @@ aggregates:
             type: String
 ```
 
-**Archivos generados:**
+Genera `OrderConfirmed.java` (en `domain/models/events/`) que extiende `DomainEvent`, y `OrderDomainEventHandler.java` (en `application/usecases/`) con `@TransactionalEventListener(AFTER_COMMIT)`.
 
-`OrderConfirmedEvent.java` — en `domain/models/events/`:
+**Auto-wiring de broker:** Si el proyecto tiene `eva add kafka-client` instalado, `eva g entities` genera automáticamente la capa de Integration Events para **todos** los eventos declarados:
+
+| Archivo generado | Descripción |
+|---|---|
+| `application/events/OrderConfirmedIntegrationEvent.java` | Record broker-facing (Integration Event) |
+| `application/ports/MessageBroker.java` | Puerto broker-agnóstico (creado/actualizado) |
+| `infrastructure/adapters/kafkaMessageBroker/…` | Adaptador Kafka (creado/actualizado) |
+| `shared/…/kafkaConfig/KafkaConfig.java` | Bean `NewTopic` (actualizado) |
+| `parameters/*/kafka.yaml` | Configuración de topic (actualizada) |
+
+**Domain Event vs Integration Event:**
+- **Domain Event** (`domain/models/events/OrderConfirmed.java`) — señal interna del bounded context. Nunca depende de infraestructura.
+- **Integration Event** (`application/events/OrderConfirmedIntegrationEvent.java`) — proyección para el broker. Cambiar de Kafka a RabbitMQ solo requiere cambiar el adaptador `MessageBroker`.
+
+El `DomainEventHandler` mapea un Domain Event a un Integration Event:
 ```java
-public final class OrderConfirmedEvent extends DomainEvent {
-    private final String orderId;
-    private final LocalDateTime confirmedAt;
-
-    public OrderConfirmedEvent(String aggregateId, String orderId, LocalDateTime confirmedAt) {
-        super(aggregateId);
-        this.orderId = orderId;
-        this.confirmedAt = confirmedAt;
-    }
-    // getters
-}
-```
-
-`OrderDomainEventHandler.java` — en `application/usecases/`:
-```java
-@Component
-public class OrderDomainEventHandler {
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void handle(OrderConfirmedEvent event) { /* lógica post-commit */ }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void handle(OrderShippedEvent event) {
-        messageBroker.sendOrderShippedEvent(event);  // kafka: true
-    }
+@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+public void onOrderConfirmed(OrderConfirmed event) {
+    messageBroker.publishOrderConfirmedIntegrationEvent(
+        new OrderConfirmedIntegrationEvent(event.getOrderId(), event.getConfirmedAt())
+    );
 }
 ```
 
@@ -1586,8 +1585,67 @@ public class OrderDomainEventHandler {
 ```java
 public void confirm() {
     this.status = this.status.transitionTo(OrderStatus.CONFIRMED);
-    raise(new OrderConfirmedEvent(this.id, this.id, LocalDateTime.now()));
+    raise(new OrderConfirmed(this.id, LocalDateTime.now()));
 }
+```
+
+**Nota:** el flag `kafka: true` por evento ya **no es necesario** — todos los eventos se cablearán automáticamente cuando haya un broker instalado.
+
+### Consumo de Eventos Externos (`listeners[]`)
+
+```yaml
+# Nivel raíz, sibling de aggregates:
+listeners:
+  - event: PaymentApprovedEvent    # PascalCase + sufijo Event
+    producer: payments             # Módulo que lo produce (referencia documental)
+    topic: PAYMENT_APPROVED        # Topic Kafka — obligatorio en módulos standalone
+    useCase: ConfirmOrder          # Caso de uso que maneja el evento (PascalCase)
+    fields:                        # Campos del payload recibido
+      - name: orderId
+        type: String
+      - name: approvedAt
+        type: LocalDateTime
+      - name: details              # Tipo complejo → declarar en nestedTypes
+        type: PaymentDetails
+    nestedTypes:                   # Records auxiliares para campos de tipo objeto
+      - name: paymentDetails       # camelCase → normalizado a PaymentDetails
+        fields:
+          - name: paymentId
+            type: String
+          - name: method
+            type: String
+          - name: amount
+            type: BigDecimal
+```
+
+Genera por cada entrada (hasta **5 artefactos**):
+
+| Artefacto | Descripción |
+|---|---|
+| `application/events/PaymentDetails.java` | Record auxiliar (uno por `nestedTypes` entry) |
+| `application/events/PaymentApprovedIntegrationEvent.java` | Record tipado con los `fields` declarados |
+| `infrastructure/kafkaListener/PaymentApprovedKafkaListener.java` | `@KafkaListener` → deserializa y despacha al `useCase` |
+| `parameters/*/kafka.yaml` | Registro del topic en `topics:` |
+| `application/commands/ConfirmOrderCommand.java` | Command tipado para el `useCase` |
+
+> **Nota:** el `CommandHandler` del `useCase` declarado debe existir previamente (generado con `eva g usecase` o `eva g entities` con `endpoints:`). El listener lo invoca vía `UseCaseMediator`.
+
+**Deserialization:** el listener usa `EventEnvelope<Map<String,Object>>` + `objectMapper.convertValue()` para deserializar cada campo del payload de forma robusta y tipada.
+
+**Regla de `topic:`:**
+- Módulo standalone (sin `system.yaml`) → `topic:` **obligatorio**
+- Proyecto con `system.yaml` → puede omitirse; el generador lo infiere
+- Declarado explícitamente → tiene **precedencia** sobre la inferencia
+
+**`nestedTypes:` — cuándo usarlo:**  
+Declara un `nestedType` cuando un campo del payload es un **objeto anidado** (no un escalar). El generador produce un record en el mismo paquete `application/events/`, que tanto la `IntegrationEvent` como el `Command` y el `KafkaListener` usarán directamente.
+
+**Contraste producidos vs. consumidos:**
+```
+aggregates:
+  └── events:     → Domain Events que PRODUCE (domain/models/events/)
+
+listeners:          → Integration Events que CONSUME (infrastructure/kafkaListener/)
 ```
 
 ### Estrategias de Cascade
@@ -1995,8 +2053,9 @@ public record UserResponseDto(
 2. **SI** el módulo requiere ciclo de vida → usar `transitions` + `initialValue` en el enum
 3. **SI** un Value Object tiene comportamiento → declarar `methods` en `domain.yaml`
 4. **SI** ocurren hechos relevantes de negocio → declarar `events[]` en el agregado
-5. **SI** el evento debe propagarse a otros servicios → agregar `kafka: true` al evento
-6. **DESPUÉS** de generar el `domain.yaml` → ejecutar `eva g entities <module>`
+5. **SI** el evento debe propagarse vía broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
+6. **SI** el módulo consume eventos de otros servicios → declarar `listeners:` (sibling de `aggregates:`) con `topic:` obligatorio en módulos standalone
+7. **DESPUÉS** de generar el `domain.yaml` → ejecutar `eva g entities <module>`
 
 ### Al Generar Código de Dominio
 
@@ -2089,7 +2148,11 @@ Al generar o modificar código, verificar:
 - [ ] Enum con ciclo de vida → `transitions` + `initialValue`, no setters
 - [ ] Value Object con comportamiento → `methods` en domain.yaml
 - [ ] Evento de dominio → `events[]`, publicar con `raise()` en método de negocio
-- [ ] Evento con Kafka → `kafka: true` en el evento
+- [ ] Evento con broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
+- [ ] Distinguir Domain Event (`domain/models/events/`) e Integration Event (`application/events/`) — cambios de broker solo afectan al adaptador `MessageBroker`
+- [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
+- [ ] Cada `listener` genera hasta 5 artefactos: NestedType(s) → IntegrationEvent → KafkaListener → kafka.yaml → Command
+- [ ] Campos de tipo objeto en listeners → declarar `nestedTypes:` para generar records auxiliares en `application/events/`
 
 ---
 

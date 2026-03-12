@@ -1693,6 +1693,15 @@ listeners:
         type: String
       - name: approvedAt
         type: LocalDateTime
+      - name: details
+        type: PaymentDetails       # Campo objeto → declarado en nestedTypes:
+    nestedTypes:                   # Opcional: records auxiliares para campos objeto
+      - name: paymentDetails       # camelCase → PascalCase en el record generado
+        fields:
+          - name: paymentId
+            type: String
+          - name: amount
+            type: BigDecimal
 ```
 
 ### Propiedades
@@ -1703,50 +1712,129 @@ listeners:
 | `producer` | ✅ | Módulo que produce el evento (solo referencia documental, no genera código) |
 | `topic` | ✅ | Topic Kafka. Si existe `system.yaml`, el generador puede inferirlo de `integrations.async[].topic`; en módulos **standalone** es obligatorio declararlo explícitamente. |
 | `useCase` | ✅ | Nombre del caso de uso que maneja el evento (PascalCase) |
-| `fields` | ✅ | Campos del payload recibido; genera el record `IntegrationEvent` y tipifica el listener |
+| `fields` | ✅ | Campos del payload recibido; genera el record `IntegrationEvent` y tipifica el Command despachado |
+| `nestedTypes` | ❌ | Records auxiliares para campos de tipo objeto en `fields:`. Cada entrada genera un `.java` record en `application/events/`. |
 
 ### Archivos generados
 
-Para cada entrada en `listeners:`, eva4j genera dos archivos:
+Para cada entrada en `listeners:`, eva4j genera **5 archivos** (más un record por cada entrada en `nestedTypes:`):
 
-**1. `PaymentApprovedIntegrationEvent.java`** — en `application/events/`
+| # | Archivo | Ubicación | Descripción |
+|---|---------|-----------|-------------|
+| 0 | `{NestedName}.java` *(por nestedType)* | `application/events/` | Record auxiliar para campos objeto |
+| 1 | `{Name}IntegrationEvent.java` | `application/events/` | Record contrato tipado (documentación + tests) |
+| 2 | `{Name}KafkaListener.java` | `infrastructure/kafkaListener/` | `@KafkaListener` — deserializa y despacha |
+| 3 | `kafka.yaml` *(todas las envs)* | `resources/parameters/*/` | Topic registrado bajo `topics:` |
+| 4 | `{UseCase}Command.java` | `application/commands/` | Comando tipado despachado desde el listener |
+| 5 | `{UseCase}CommandHandler.java` | `application/usecases/` | Stub del handler (implementar la lógica aquí) |
+
+### Código generado
+
+**`PaymentDetails.java`** — `application/events/` (de `nestedTypes:`)
 ```java
-public record PaymentApprovedIntegrationEvent(
-    String orderId,
-    LocalDateTime approvedAt
+public record PaymentDetails(
+    String paymentId,
+    BigDecimal amount
 ) {}
 ```
 
-**2. `PaymentApprovedKafkaListener.java`** — en `infrastructure/kafkaListener/`
+**`PaymentApprovedIntegrationEvent.java`** — `application/events/`
 ```java
+public record PaymentApprovedIntegrationEvent(
+    String orderId,
+    LocalDateTime approvedAt,
+    PaymentDetails details
+) {}
+```
+
+**`ConfirmOrderCommand.java`** — `application/commands/`
+```java
+import com.example.orders.application.events.PaymentDetails;
+
+public record ConfirmOrderCommand(
+    String orderId,
+    LocalDateTime approvedAt,
+    PaymentDetails details
+) implements Command {}
+```
+
+**`PaymentApprovedKafkaListener.java`** — `infrastructure/kafkaListener/`
+```java
+import com.example.orders.application.events.PaymentDetails;
+
 @Component
 public class PaymentApprovedKafkaListener {
 
     private final UseCaseMediator useCaseMediator;
+    private final ObjectMapper objectMapper;
 
-    @Value("${kafka.topics.PAYMENT_APPROVED}")
+    @Value("${topics.payment-approved}")
     private String paymentApprovedTopic;
 
-    public PaymentApprovedKafkaListener(UseCaseMediator useCaseMediator) {
+    public PaymentApprovedKafkaListener(UseCaseMediator useCaseMediator,
+                                        ObjectMapper objectMapper) {
         this.useCaseMediator = useCaseMediator;
+        this.objectMapper = objectMapper;
     }
 
-    @KafkaListener(topics = "${kafka.topics.PAYMENT_APPROVED}")
-    public void handle(EventEnvelope<PaymentApprovedIntegrationEvent> envelope,
-                       Acknowledgment ack) {
-        PaymentApprovedIntegrationEvent event = envelope.data();
-        useCaseMediator.dispatch(new ConfirmOrderCommand(event.orderId()));
+    @KafkaListener(topics = "${topics.payment-approved}")
+    public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+        String orderId = objectMapper.convertValue(event.data().get("orderId"), String.class);
+        LocalDateTime approvedAt = objectMapper.convertValue(
+                event.data().get("approvedAt"), LocalDateTime.class);
+        PaymentDetails details = objectMapper.convertValue(
+                event.data().get("details"), PaymentDetails.class);
+        useCaseMediator.dispatch(new ConfirmOrderCommand(orderId, approvedAt, details));
         ack.acknowledge();
     }
 }
 ```
+
+**`ConfirmOrderCommandHandler.java`** — `application/usecases/`
+```java
+@ApplicationComponent
+public class ConfirmOrderCommandHandler implements CommandHandler<ConfirmOrderCommand> {
+
+    @Override
+    public void handle(ConfirmOrderCommand command) {
+        // TODO: implement ConfirmOrder business logic
+        throw new UnsupportedOperationException("ConfirmOrderCommandHandler not yet implemented");
+    }
+}
+```
+
+### Deserialización — cómo funciona
+
+El consumidor Kafka recibe un `EventEnvelope<Map<String, Object>>`. El listener generado extrae cada campo con `objectMapper.convertValue()`, que maneja:
+
+- Primitivos y strings: `convertValue(map.get("field"), String.class)`
+- Fechas: `convertValue(map.get("date"), LocalDateTime.class)` — requiere el módulo Jackson JavaTime
+- Objetos / nested types: `convertValue(map.get("details"), PaymentDetails.class)` — funciona automáticamente para Java records
+- Listas: `convertValue(map.get("items"), typeFactory.constructCollectionType(List.class, ItemType.class))`
+
+### `nestedTypes:` — cuándo usarlo
+
+Usar `nestedTypes:` cuando uno de los `fields:` es un objeto estructurado (no un tipo Java primitivo). Cada entrada genera un Java record en `application/events/` que se importa automáticamente tanto en el `KafkaListener` como en el `Command`.
+
+El nombre se declara en `camelCase` y el generador lo normaliza a `PascalCase`:
+```yaml
+nestedTypes:
+  - name: paymentDetails    # → PaymentDetails.java
+    fields:
+      - name: paymentId
+        type: String
+      - name: amount
+        type: BigDecimal
+```
+
+`{Name}IntegrationEvent.java` **no necesita importar** los nested types porque vive en el mismo paquete `application/events/`.
 
 ### Regla de resolución de `topic:`
 
 | Escenario | Comportamiento |
 |-----------|---------------|
 | Módulo standalone (solo `domain.yaml`) | `topic:` **obligatorio** — no hay otra fuente de verdad |
-| Proyecto con `system.yaml` | `topic:` puede omitirse; el generador lo infiere de `integrations.async[].topic` |
+| Proyecto con `system.yaml` | `topic:` puede omitirse; se infiere de `integrations.async[].topic` |
 | `topic:` declarado explícitamente con `system.yaml` | El valor declarado tiene **precedencia** sobre la inferencia |
 
 ### Contraste: producción vs. consumo

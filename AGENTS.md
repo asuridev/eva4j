@@ -583,24 +583,45 @@ listeners:
     producer: payments             # Módulo que lo produce (referencia documental)
     topic: PAYMENT_APPROVED        # Topic Kafka — obligatorio en módulos standalone
     useCase: ConfirmOrder          # Caso de uso que maneja el evento (PascalCase)
-    fields:                        # Payload del Integration Event recibido
+    fields:                        # Campos del payload recibido
       - name: orderId
         type: String
       - name: approvedAt
         type: LocalDateTime
+      - name: details              # Tipo complejo → declarar en nestedTypes
+        type: PaymentDetails
+    nestedTypes:                   # Records auxiliares para campos de tipo objeto
+      - name: paymentDetails       # camelCase → normalizado a PaymentDetails
+        fields:
+          - name: paymentId
+            type: String
+          - name: method
+            type: String
+          - name: amount
+            type: BigDecimal
 ```
 
-Genera por cada entrada:
+Genera por cada entrada (hasta **5 artefactos**):
 
 | Archivo generado | Descripción |
 |---|---|
+| `application/events/PaymentDetails.java` | Record auxiliar (uno por `nestedTypes` entry) |
 | `application/events/PaymentApprovedIntegrationEvent.java` | Record tipado con los `fields` declarados |
-| `infrastructure/kafkaListener/PaymentApprovedKafkaListener.java` | `@KafkaListener` que despacha al `useCase` vía `UseCaseMediator` |
+| `infrastructure/kafkaListener/PaymentApprovedKafkaListener.java` | `@KafkaListener` → deserializa y despacha al `useCase` |
+| `parameters/*/kafka.yaml` | Registro del topic en `topics:` |
+| `application/commands/ConfirmOrderCommand.java` | Command tipado para el `useCase` |
+
+> **Nota:** el `CommandHandler` del `useCase` declarado debe existir previamente (generado con `eva g usecase` o `eva g entities` con `endpoints:`). El listener lo invoca vía `UseCaseMediator`.
+
+**Deserialización:** el listener usa `EventEnvelope<Map<String,Object>>` + `objectMapper.convertValue()` para deserializar cada campo del payload de forma robusta y tipada.
 
 **Regla de `topic:`:**
 - Módulo standalone (sin `system.yaml`) → `topic:` **obligatorio**
 - Proyecto con `system.yaml` → puede omitirse; el generador lo infiere de `integrations.async[].topic`
 - Declarado explícitamente → tiene **precedencia** sobre la inferencia
+
+**`nestedTypes:` — cuándo usarlo:**  
+Declara un `nestedType` cuando un campo del payload es un **objeto anidado** (no un escalar). El generador produce un record en el mismo paquete `application/events/`, que tanto la `IntegrationEvent` como el `Command` y el `KafkaListener` usan directamente.
 
 **Contraste eventos producidos vs. consumidos:**
 ```
@@ -1269,7 +1290,8 @@ Al generar o modificar código, verificar:
 - [ ] Evento con broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
 - [ ] Distinguir entre Domain Event (`domain/models/events/X.java`) e Integration Event (`application/events/XIntegrationEvent.java`) — cambios de broker solo afectan al adaptador `MessageBroker`
 - [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
-- [ ] Cada `listener` genera: `XIntegrationEvent.java` (record) + `XKafkaListener.java` (@KafkaListener con dispatch al `useCase`)
+- [ ] Cada `listener` genera hasta 5 artefactos: NestedType(s) → IntegrationEvent → KafkaListener → kafka.yaml → Command
+- [ ] Campos de tipo objeto en listeners → declarar `nestedTypes:` para generar records auxiliares en `application/events/`
 - [ ] Endpoints REST específicos → declarar `endpoints:` con versiones y operaciones; usar nombres estándar para implementación completa
 
 ---
