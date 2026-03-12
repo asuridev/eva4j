@@ -23,9 +23,10 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 - [Generación Incremental / Diff](#10-generación-incremental--diff)
 - [Comando eva4j doctor](#11-comando-eva4j-doctor)
 - [Tests Generados Completos](#12-tests-generados-completos)
+- [Diagrama Mermaid desde domain.yaml](#13-diagrama-mermaid-desde-domainyaml-eva-g-diagram)
 
 ### ✅ Implementado
-- [Auditoría de Tiempo y Usuario](#13-auditoría-implementada)
+- [Auditoría de Tiempo y Usuario](#15-auditoría-implementada)
 - [Validaciones JSR-303](#14-validaciones-jsr-303-implementado)
 - [Enums con Comportamiento y Transiciones](#7-enums-con-comportamiento-y-transiciones)
 - [Generación Incremental / Diff](#10-generación-incremental--diff)
@@ -911,11 +912,113 @@ class OrderModuleTest {
 
 ---
 
+## 13. Diagrama Mermaid desde domain.yaml (`eva g diagram`)
+
+### Descripción
+
+Generar automáticamente un diagrama **Mermaid `classDiagram`** a partir del `domain.yaml` de un módulo. El diagrama plasma visualmente la estructura del agregado: entidades, value objects, enums, relaciones y visibilidad de campos, usando estereotipos DDD.
+
+El output es un archivo `.md` con el diagrama incrustado, renderizable nativamente en GitHub, VS Code (Markdown Preview), Notion y el reporte HTML de `eva evaluate system`.
+
+### Comando propuesto
+
+```bash
+eva generate diagram <module>
+eva g diagram <module>          # alias corto
+```
+
+### Ejemplo de output para `domain-one-to-one.yaml`
+
+```mermaid
+classDiagram
+  namespace UserAggregate {
+    class User {
+      <<aggregate root>>
+      +String id
+      +String username
+      +String email
+      -String passwordHash
+      +UserStatus status
+      +LocalDateTime registrationDate
+      +LocalDateTime lastLogin
+      +LocalDateTime createdAt
+      +LocalDateTime updatedAt
+    }
+
+    class UserProfile {
+      <<entity>>
+      +Long id
+      +String firstName
+      +String lastName
+      +LocalDate dateOfBirth
+      +String phoneNumber
+      +String bio
+      +String avatarUrl
+      +Boolean isPublic
+    }
+
+    class Address {
+      <<value object>>
+      +String street
+      +String city
+      +String state
+      +String zipCode
+      +String country
+    }
+
+    class UserPreferences {
+      <<value object>>
+      +String language
+      +String timezone
+      +Boolean emailNotifications
+      +Boolean smsNotifications
+      +String theme
+    }
+
+    class UserStatus {
+      <<enum>>
+      ACTIVE
+      INACTIVE
+      SUSPENDED
+      PENDING_VERIFICATION
+      DELETED
+    }
+  }
+
+  User "1" --o "1" UserProfile : owns
+  UserProfile *-- Address : embedded
+  UserProfile *-- UserPreferences : embedded
+  User --> UserStatus : status
+```
+
+### Reglas de generación
+
+| Elemento domain.yaml | Stereotipo Mermaid | Visibilidad de campos |
+|---|---|---|
+| `isRoot: true` | `<<aggregate root>>` | `+` público, `-` hidden |
+| Entidad secundaria | `<<entity>>` | igual |
+| `valueObjects[]` | `<<value object>>` | `+` todos |
+| `enums[]` | `<<enum>>` | valores como líneas |
+| `audit.enabled: true` | campos `createdAt`, `updatedAt` en la entidad | auto-añadidos |
+| `audit.trackUser: true` | campos `createdBy`, `updatedBy` en la entidad | auto-añadidos |
+| `hidden: true` | prefijo `-` (privado) en lugar de `+` | |
+| `readOnly: true` | prefijo `~` (package) para indicar derivado | |
+
+### Variante HTML (integración con `eva evaluate system`)
+
+Otra opción es agregar un 5.º tab **"Dominio"** al reporte de `evaluate system` que renderice el diagrama Mermaid de cada módulo usando la librería [mermaid.js CDN](https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js), sin necesidad de un comando separado.
+
+### Estado
+
+⏳ Pendiente de implementación
+
+---
+
 ## ✅ IMPLEMENTADO
 
 ---
 
-## 13. Auditoría (Implementada)
+## 15. Auditoría (Implementada)
 
 | Característica | Sintaxis | Estado |
 |---|---|---|
