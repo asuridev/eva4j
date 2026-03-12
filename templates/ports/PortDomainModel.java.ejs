@@ -1,0 +1,35 @@
+package <%= packageName %>.<%= moduleName %>.domain.models.<%= adapterPackage %>;
+<% const needsBigDecimal = fields && fields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = fields && fields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
+<% const needsInstant    = fields && fields.some(f => f.javaType === 'Instant'); %>
+<% const needsUUID       = fields && fields.some(f => f.javaType === 'UUID'); %>
+<% const needsList       = fields && fields.some(f => f.javaType && f.javaType.startsWith('List')); %>
+<% if (needsBigDecimal) { %>
+import java.math.BigDecimal;
+<% } %><% if (needsLocalDate) { %>
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+<% } %><% if (needsInstant) { %>
+import java.time.Instant;
+<% } %><% if (needsUUID) { %>
+import java.util.UUID;
+<% } %><% if (needsList) { %>
+import java.util.List;
+<% } %>
+/**
+ * Domain model for the <%- name %> concept consumed from <%= target || serviceName %>.
+ *
+ * <p>ACL (Anti-Corruption Layer): this record is the domain-side abstraction.
+ * The corresponding infra DTO lives in
+ * {@code infrastructure.adapters.<%= adapterPackage %>} and is mapped
+ * by the Feign adapter — if the external API changes, only the adapter
+ * mapper needs to be updated; domain logic using this type remains untouched.
+ */
+public record <%= name %>(
+<% if (fields && fields.length > 0) { %>
+<% fields.forEach((f, i) => { %>
+    <%- f.javaType %> <%= f.name %><%= i < fields.length - 1 ? ',' : '' %>
+<% }); %>
+<% } %>
+) {}

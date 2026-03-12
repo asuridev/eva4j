@@ -1845,8 +1845,141 @@ domain.yaml
 │   └── [Aggregate]
 │       └── events:      → Domain Events que PRODUCE (domain/models/events/)
 │
-└── listeners:           → Integration Events que CONSUME (infrastructure/kafkaListener/)
+├── listeners:           → Integration Events que CONSUME (infrastructure/kafkaListener/)
+│
+└── ports:               → Servicios HTTP que LLAMA    (infrastructure/adapters/{service}/)
 ```
+
+---
+
+## Sección ports
+
+`ports:` es una sección de nivel raíz (sibling de `aggregates:` y `listeners:`) que declara los servicios HTTP síncronos que el módulo llama, implementados con Spring Cloud OpenFeign.
+
+**Regla de agrupación:** una **entrada** = un **método**. Entradas que comparten el mismo `service:` se generan en un único FeignClient.
+
+### Propiedades de una entrada en `ports[]`
+
+| Propiedad | Tipo | Obligatorio | Descripción |
+|-----------|------|-------------|-------------|
+| `name` | String | ✅ | Nombre del método (camelCase) |
+| `service` | String | ✅ | Nombre del servicio/interfaz (PascalCase). Agrupa métodos en un FeignClient |
+| `target` | String | ❌ | Módulo destino — referencia documental; no afecta la generación |
+| `baseUrl` | String | ❌* | URL base del servicio. Declarar solo en la **primera entrada** del `service:` |
+| `http` | String | ✅ | Verbo HTTP + path: `GET /resource/{id}`, `POST /resource`, etc. |
+| `fields` | Array | ❌ | Campos de la respuesta → genera `{MethodPascal}ResponseDto.java` |
+| `body` | Array | ❌ | Campos del cuerpo de la petición (solo POST/PUT/PATCH) → genera `{MethodPascal}RequestDto.java` |
+| `returnList` | Boolean | ❌ | `true` → retorno `List<{MethodPascal}ResponseDto>`. Default: `false` |
+| `nestedTypes` | Array | ❌ | Records auxiliares para campos de tipo objeto en `body:` o `fields:` |
+
+*Si se omite `baseUrl` en todas las entradas de un `service:`, se emite un warning y se usa `http://localhost:8080`.
+
+### Reglas de uso
+
+- **`baseUrl:`** — declarar únicamente en la primera entrada del `service:`. Eva4j la registra en `parameters/{env}/urls.yaml` como `{module-kebab}.{service-kebab}.base-url`.
+- **`body:`** — válido solo en POST, PUT y PATCH. En GET/DELETE emite warning y se ignora.
+- **`returnList: true`** — el tipo de retorno pasa de `{Method}ResponseDto` a `List<{Method}ResponseDto>`.
+- **`fields:` omitido** → retorno `void` en la interfaz del puerto y en el FeignClient.
+- **`nestedTypes:`** — se generan como records separados en `application/dtos/`. Se deduplican por nombre dentro del mismo `service:`. Aplica tanto para campos en `body:` como en `fields:`.
+
+### Estructura mínima
+
+```yaml
+# Un solo método GET, respuesta simple
+ports:
+  - name: findScreeningById
+    service: ScreeningService
+    target: screenings
+    baseUrl: http://localhost:8081
+    http: GET /screenings/{id}
+    fields:
+      - name: id
+        type: String
+      - name: startTime
+        type: LocalDateTime
+```
+
+### Ejemplo con todos los patrones
+
+```yaml
+ports:
+  # GET con variable de ruta
+  - name: findScreeningById
+    service: ScreeningService
+    target: screenings
+    baseUrl: http://localhost:8081          # ← solo en la primera entrada del service
+    http: GET /screenings/{id}
+    fields:
+      - name: id
+        type: String
+      - name: startTime
+        type: LocalDateTime
+
+  # GET retornando lista
+  - name: findAvailableSeats
+    service: ScreeningService              # mismo service → mismo FeignClient
+    target: screenings
+    http: GET /screenings/{id}/seats
+    returnList: true                       # → List<FindAvailableSeatResponseDto>
+    fields:
+      - name: seatId
+        type: String
+      - name: seatType
+        type: String
+
+  # POST con body + nestedType + respuesta
+  - name: processPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    baseUrl: https://api.payments.example.com
+    http: POST /payments
+    body:
+      - name: amount
+        type: BigDecimal
+      - name: paymentMethod
+        type: PaymentMethodInput            # tipo objeto → declarar en nestedTypes:
+    nestedTypes:
+      - name: paymentMethodInput
+        fields:
+          - name: type
+            type: String
+          - name: cardToken
+            type: String
+    fields:
+      - name: paymentId
+        type: String
+      - name: status
+        type: String
+
+  # DELETE void (sin fields)
+  - name: cancelPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    http: DELETE /payments/{id}
+    # fields: omitido → retorno void
+```
+
+### Artefactos generados por `service:` único
+
+| Archivo | Descripción |
+|---------|-------------|
+| `domain/repositories/{ServiceName}.java` | Interfaz del puerto secundario |
+| `infrastructure/adapters/{service}/{ServiceName}FeignClient.java` | `@FeignClient` tipado |
+| `infrastructure/adapters/{service}/{ServiceName}FeignAdapter.java` | `@Component implements {ServiceName}` |
+| `infrastructure/adapters/{service}/{ServiceName}FeignConfig.java` | Configuración de timeouts |
+| `parameters/{env}/urls.yaml` | Propiedad `{module}.{service}.base-url` |
+
+### Artefactos generados por método
+
+| Archivo | Condición |
+|---------|-----------|
+| `application/dtos/{MethodPascal}ResponseDto.java` | Cuando `fields:` tiene elementos |
+| `application/dtos/{MethodPascal}RequestDto.java` | Cuando `body:` tiene elementos (POST/PUT/PATCH) |
+| `application/dtos/{NestedTypePascal}.java` | Por cada entrada en `nestedTypes:` |
+
+### Referencia
+
+Ver ejemplo completo en [`examples/domain-ports.yaml`](examples/domain-ports.yaml).
 
 ---
 

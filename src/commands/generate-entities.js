@@ -8,6 +8,7 @@ const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath, toCamelCase, toKebabCase, toPascalCase, getApplicationClassName } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
+const { createOrUpdateUrlsConfig, ensureUrlsImport } = require('./generate-http-exchange');
 const SharedGenerator = require('../generators/shared-generator');
 const ChecksumManager = require('../utils/checksum-manager');
 const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext, updateKafkaYml } = require('./generate-kafka-event');
@@ -174,7 +175,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
   try {
     // Parse domain.yaml
-    const { aggregates, allEnums, endpoints, listeners } = await parseDomainYaml(domainYamlPath, packageName, moduleName);
+    const { aggregates, allEnums, endpoints, listeners, ports } = await parseDomainYaml(domainYamlPath, packageName, moduleName);
     
     spinner.succeed(chalk.green(`Found ${aggregates.length} aggregate(s) and ${allEnums.length} enum(s)`));
     
@@ -671,6 +672,177 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       } else if (listeners.length > 0) {
         console.log(chalk.yellow(`⚠ listeners: section found but no broker is installed. Run 'eva add kafka-client' to generate listener classes.`));
       }
+    }
+
+    // ── Generate ports (HTTP clients for synchronous communication) ──────────
+    if (ports && ports.length > 0) {
+      spinner.start(`Generating ${ports.length} HTTP port(s)...`);
+
+      for (const portGroup of ports) {
+        const {
+          serviceName,
+          serviceNameCamelCase,
+          target,
+          baseUrl,
+          baseUrlProperty,
+          feignClientName,
+          feignClientClassName,
+          feignAdapterClassName,
+          feignConfigClassName,
+          adapterPackage,
+          methods,
+          nestedTypes,
+          domainModels
+        } = portGroup;
+
+        const adapterDir = path.join(moduleBasePath, 'infrastructure', 'adapters', adapterPackage);
+
+        const portContext = {
+          packageName,
+          moduleName,
+          serviceName,
+          serviceNameCamelCase,
+          target,
+          baseUrl,
+          baseUrlProperty,
+          feignClientName,
+          feignClientClassName,
+          feignAdapterClassName,
+          feignConfigClassName,
+          adapterPackage,
+          methods,
+          nestedTypes,
+          domainModels
+        };
+
+        // 0. Nested type records (shared across methods in the same service)
+        for (const nt of nestedTypes) {
+          const ntPath = path.join(
+            moduleBasePath, 'application', 'dtos', `${nt.name}.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'ports', 'PortNestedType.java.ejs'),
+            ntPath,
+            { packageName, moduleName, name: nt.name, fields: nt.fields },
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Port DTO',
+            name: nt.name,
+            path: `${moduleName}/application/dtos/${nt.name}.java`
+          });
+        }
+
+        // 1a. Domain models in domain/models/{adapterPackage}/ (ACL: domain-side abstraction)
+        for (const dm of (domainModels || [])) {
+          const dmPath = path.join(moduleBasePath, 'domain', 'models', adapterPackage, `${dm.name}.java`);
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'ports', 'PortDomainModel.java.ejs'),
+            dmPath,
+            { packageName, moduleName, name: dm.name, fields: dm.fields, target, serviceName, adapterPackage },
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Port Domain Model',
+            name: dm.name,
+            path: `${moduleName}/domain/models/${adapterPackage}/${dm.name}.java`
+          });
+        }
+
+        // 1b. Infra DTOs (one per method that has fields:) — live in infrastructure/adapters/{service}/
+        for (const method of methods.filter(m => m.hasResponse)) {
+          const infraDtoPath = path.join(adapterDir, `${method.infraDtoName}.java`);
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'ports', 'PortResponseDto.java.ejs'),
+            infraDtoPath,
+            { packageName, moduleName, dtoName: method.infraDtoName, fields: method.fields, adapterPackage },
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Port Infra DTO',
+            name: method.infraDtoName,
+            path: `${moduleName}/infrastructure/adapters/${adapterPackage}/${method.infraDtoName}.java`
+          });
+        }
+
+        // 2. Request DTOs (one per method that has body:)
+        for (const method of methods.filter(m => m.hasBody)) {
+          const reqPath = path.join(
+            moduleBasePath, 'application', 'dtos', `${method.requestDtoName}.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'ports', 'PortRequestDto.java.ejs'),
+            reqPath,
+            { packageName, moduleName, dtoName: method.requestDtoName, bodyFields: method.bodyFields, nestedTypes: method.nestedTypes },
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Port DTO',
+            name: method.requestDtoName,
+            path: `${moduleName}/application/dtos/${method.requestDtoName}.java`
+          });
+        }
+
+        // 3. Port interface (domain/repositories/)
+        await renderAndWrite(
+          path.join(__dirname, '..', '..', 'templates', 'ports', 'PortInterface.java.ejs'),
+          path.join(moduleBasePath, 'domain', 'repositories', `${serviceName}.java`),
+          portContext,
+          writeOptions
+        );
+        generatedFiles.push({
+          type: 'HTTP Port',
+          name: serviceName,
+          path: `${moduleName}/domain/repositories/${serviceName}.java`
+        });
+
+        // 4. Feign Client interface
+        await renderAndWrite(
+          path.join(__dirname, '..', '..', 'templates', 'ports', 'PortFeignClient.java.ejs'),
+          path.join(adapterDir, `${feignClientClassName}.java`),
+          portContext,
+          writeOptions
+        );
+        generatedFiles.push({
+          type: 'HTTP Port',
+          name: feignClientClassName,
+          path: `${moduleName}/infrastructure/adapters/${adapterPackage}/${feignClientClassName}.java`
+        });
+
+        // 5. Feign Adapter (@Component implementation)
+        await renderAndWrite(
+          path.join(__dirname, '..', '..', 'templates', 'ports', 'PortFeignAdapter.java.ejs'),
+          path.join(adapterDir, `${feignAdapterClassName}.java`),
+          portContext,
+          writeOptions
+        );
+        generatedFiles.push({
+          type: 'HTTP Port',
+          name: feignAdapterClassName,
+          path: `${moduleName}/infrastructure/adapters/${adapterPackage}/${feignAdapterClassName}.java`
+        });
+
+        // 6. Feign Config
+        await renderAndWrite(
+          path.join(__dirname, '..', '..', 'templates', 'ports', 'PortFeignConfig.java.ejs'),
+          path.join(adapterDir, `${feignConfigClassName}.java`),
+          portContext,
+          writeOptions
+        );
+        generatedFiles.push({
+          type: 'HTTP Port',
+          name: feignConfigClassName,
+          path: `${moduleName}/infrastructure/adapters/${adapterPackage}/${feignConfigClassName}.java`
+        });
+
+        // 7. Register base URL in parameters/*/urls.yaml
+        await createOrUpdateUrlsConfig(projectDir, baseUrlProperty, baseUrl);
+      }
+
+      // Ensure urls.yaml is imported in all application-*.yaml files
+      await ensureUrlsImport(projectDir);
+
+      spinner.succeed(chalk.green(`HTTP ports generated! ✨`));
     }
 
     console.log(chalk.blue('\n📦 Generated files:'));

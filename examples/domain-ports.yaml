@@ -1,0 +1,414 @@
+# EJEMPLO: PORTS — clientes HTTP hacia servicios internos o externos
+# Complemento de listeners: (consumo async), ports: es para comunicación síncrona HTTP.
+#
+# La sección ports: vive en el NIVEL RAÍZ del domain.yaml,
+# como sibling de aggregates: y listeners:.
+#
+# Formato: plano, un método = una entrada (igual que listeners:).
+# Entradas con el mismo service: se agrupan en UN solo cliente Feign.
+#
+# Generación:
+#   eva4j g entities reservations
+#
+# ─── PATRÓN ACL (Anti-Corruption Layer) ──────────────────────────────────────
+#
+# Los DTOs de infraestructura (forma exacta de la API externa) viven en:
+#   infrastructure/adapters/{service}/{MethodPascal}Dto.java
+#
+# Los modelos de dominio (abstracción interna) viven en:
+#   domain/models/{service}/{DomainType}.java
+#
+# La interfaz del puerto devuelve modelos de dominio.
+# El FeignAdapter mapea Dto → modelo de dominio de forma inline.
+# Si la API externa cambia, sólo hay que actualizar el adaptador.
+#
+# El tipo de dominio se deriva automáticamente del nombre del método
+# (ej: findScreeningById → Screening). Se puede sobrescribir con domainType:.
+#
+# ─── ARCHIVOS GENERADOS ──────────────────────────────────────────────────────
+#
+# Por cada service: único:
+#   domain/repositories/{ServiceName}.java                      ← interfaz del puerto
+#   infrastructure/adapters/{service}/{ServiceName}FeignClient.java
+#   infrastructure/adapters/{service}/{ServiceName}FeignAdapter.java
+#   infrastructure/adapters/{service}/{ServiceName}FeignConfig.java
+#   parameters/*/urls.yaml                                      ← base-url parametrizada
+#
+# Por cada modelo de dominio único derivado de los métodos con fields:
+#   domain/models/{service}/{DomainType}.java                  ← modelo de dominio (ACL)
+#
+# Por cada método con fields:
+#   infrastructure/adapters/{service}/{MethodPascal}Dto.java    ← DTO infra (forma externa)
+#
+# Por cada método con body: (POST/PUT/PATCH)
+#   application/dtos/{MethodPascal}RequestDto.java
+#
+# Por cada nestedTypes:
+#   application/dtos/{NestedTypePascal}.java
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ARCHIVOS GENERADOS EN ESTE EJEMPLO
+#
+#   ScreeningService (módulo interno: screenings)
+#   ─────────────────────────────────────────────
+#   domain/repositories/ScreeningService.java                        ← devuelve Screening, Seat, etc.
+#   domain/models/screeningService/Screening.java                    ← modelo de dominio (ACL)
+#   domain/models/screeningService/Seat.java                         ← modelo de dominio (ACL, domainType override)
+#   domain/models/screeningService/PrivateEventAvailability.java     ← modelo de dominio (ACL)
+#   infrastructure/adapters/screeningService/ScreeningServiceFeignClient.java
+#   infrastructure/adapters/screeningService/ScreeningServiceFeignAdapter.java
+#   infrastructure/adapters/screeningService/ScreeningServiceFeignConfig.java
+#   infrastructure/adapters/screeningService/FindScreeningByIdDto.java
+#   infrastructure/adapters/screeningService/FindAvailableSeatDto.java
+#   infrastructure/adapters/screeningService/CheckPrivateEventAvailabilityDto.java
+#
+#   CustomerService (módulo interno: customers)
+#   ─────────────────────────────────────────────
+#   domain/repositories/CustomerService.java
+#   domain/models/customerService/Customer.java                      ← modelo de dominio (ACL)
+#   infrastructure/adapters/customerService/CustomerServiceFeignClient.java
+#   infrastructure/adapters/customerService/CustomerServiceFeignAdapter.java
+#   infrastructure/adapters/customerService/CustomerServiceFeignConfig.java
+#   infrastructure/adapters/customerService/FindCustomerByIdDto.java ← DTO infra
+#
+#   PaymentGateway (servicio externo)
+#   ─────────────────────────────────────────────
+#   domain/repositories/PaymentGateway.java
+#   domain/models/paymentGateway/Payment.java                        ← modelo de dominio (ACL)
+#   domain/models/paymentGateway/PaymentStatus.java                  ← modelo de dominio (ACL)
+#   infrastructure/adapters/paymentGateway/PaymentGatewayFeignClient.java
+#   infrastructure/adapters/paymentGateway/PaymentGatewayFeignAdapter.java
+#   infrastructure/adapters/paymentGateway/PaymentGatewayFeignConfig.java
+#   application/dtos/PaymentMethodInput.java                         ← nestedType del body
+#   application/dtos/ProcessPaymentRequestDto.java                   ← body del POST
+#   infrastructure/adapters/paymentGateway/ProcessPaymentDto.java    ← response DTO infra
+#   infrastructure/adapters/paymentGateway/FindPaymentStatusDto.java ← response DTO infra
+#   → cancelPayment: void, sin DTO de respuesta
+#
+#   parameters/*/urls.yaml:
+#     reservations:
+#       screening-service:
+#         base-url: http://localhost:8081
+#       customer-service:
+#         base-url: http://localhost:8082
+#       payment-gateway:
+#         base-url: https://api.payments.example.com
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# CÓDIGO GENERADO — ScreeningService.java (domain/repositories/)
+# [ACL: retorna modelos de dominio, no DTOs de infraestructura]
+#
+#   public interface ScreeningService {
+#       Screening findScreeningById(String id);
+#       List<Seat> findAvailableSeats(String id);
+#       PrivateEventAvailability checkPrivateEventAvailability(String id);
+#   }
+#
+# CÓDIGO GENERADO — ScreeningServiceFeignClient.java
+# [FeignClient: devuelve DTOs de infra, no modelos de dominio]
+#
+#   @FeignClient(
+#       name = "reservations-screening-service",
+#       url = "${reservations.screening-service.base-url}",
+#       configuration = ScreeningServiceFeignConfig.class
+#   )
+#   public interface ScreeningServiceFeignClient {
+#
+#       @GetMapping("/screenings/{id}")
+#       FindScreeningByIdDto findScreeningById(@PathVariable("id") String id);
+#
+#       @GetMapping("/screenings/{id}/seats")
+#       List<FindAvailableSeatDto> findAvailableSeats(@PathVariable("id") String id);
+#
+#       @GetMapping("/screenings/{id}/private-event-availability")
+#       CheckPrivateEventAvailabilityDto checkPrivateEventAvailability(
+#               @PathVariable("id") String id);
+#   }
+#
+# CÓDIGO GENERADO — ScreeningServiceFeignAdapter.java (fragment)
+# [Adapter: actúa como ACL, convierte DTOs infra → modelos de dominio]
+#
+#   @Override
+#   public Screening findScreeningById(String id) {
+#       return toScreening(feignClient.findScreeningById(id));
+#   }
+#
+#   // ── ACL Mappers ──────────────────────────────────────────────────────────
+#   private Screening toScreening(FindScreeningByIdDto dto) {
+#       if (dto == null) return null;
+#       return new Screening(dto.id(), dto.movieId(), dto.theaterId(), ...);
+#   }
+#
+# CÓDIGO GENERADO — PaymentGatewayFeignClient.java
+#
+#   @FeignClient(
+#       name = "reservations-payment-gateway",
+#       url = "${reservations.payment-gateway.base-url}",
+#       configuration = PaymentGatewayFeignConfig.class
+#   )
+#   public interface PaymentGatewayFeignClient {
+#
+#       @PostMapping("/payments")
+#       ProcessPaymentDto processPayment(@RequestBody ProcessPaymentRequestDto body);
+#
+#       @GetMapping("/payments/{id}")
+#       FindPaymentStatusDto findPaymentStatus(@PathVariable("id") String id);
+#
+#       @DeleteMapping("/payments/{id}")
+#       void cancelPayment(@PathVariable("id") String id);
+#   }
+#
+# CÓDIGO GENERADO — ProcessPaymentRequestDto.java (application/dtos/)
+#
+#   public record ProcessPaymentRequestDto(
+#       String reservationId,
+#       String customerId,
+#       BigDecimal amount,
+#       String currency,
+#       PaymentMethodInput paymentMethod
+#   ) {}
+#
+# CÓDIGO GENERADO — PaymentMethodInput.java (application/dtos/)
+#
+#   public record PaymentMethodInput(
+#       String type,
+#       String cardToken,
+#       String cardLastFour
+#   ) {}
+#
+# ─── REGLAS ───────────────────────────────────────────────────────────────────
+#
+# domainType: (opcional)
+#   • Sobreescribe el nombre del modelo de dominio derivado automáticamente.
+#   • Auto-derivación: elimina prefijo de verbo (Find/Get/...) y sufijo By{X}.
+#     Ej: findAvailableSeats → Seat (elimina Available + Seats→Seat no, por eso se usa override)
+#   • Declarar explícitamente cuando la derivación automática no es adecuada.
+#
+# baseUrl:
+#   • Se declara en la PRIMERA entrada de cada service:.
+#   • Entradas posteriores del mismo service: la ignoran.
+#   • Si se omite en todas las entradas, se usa http://localhost:8080 + warning.
+#   • Siempre se escribe en parameters/*/urls.yaml.
+#
+# body: (POST / PUT / PATCH)
+#   • Campos de tipo objeto → declarar en nestedTypes:.
+#   • En GET o DELETE: emit warning, se ignora.
+#   • Omitido → sin @RequestBody en el FeignClient.
+#
+# returnList: true
+#   • Solo aplica cuando fields: está presente.
+#   • Genera List<{DomainType}> en la interfaz, List<{InfraDto}> en el FeignClient.
+#   • Default: false.
+#
+# fields: omitidos → retorno void en la interfaz y en el FeignClient.
+#
+# nestedTypes:
+#   • Genera un record auxiliar en application/dtos/ por cada entrada.
+#   • Se deduplican globalmente dentro del mismo service:.
+#   • Misma sintaxis que en listeners:.
+#
+# ─── CONTRASTE: async vs sync ────────────────────────────────────────────────
+#
+#   domain.yaml
+#   ├── aggregates:
+#   │   └── events:     → Domain Events que PRODUCE  (async, broker)
+#   ├── listeners:      → Integration Events que CONSUME (async, broker)
+#   └── ports:          → Servicios HTTP que LLAMA    (sync, Feign)
+
+aggregates:
+  - name: Reservation
+    entities:
+      - name: reservation
+        isRoot: true
+        tableName: reservations
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: screeningId
+            type: String
+          - name: customerId
+            type: String
+          - name: status
+            type: ReservationStatus
+            readOnly: true
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+            defaultValue: "0.00"
+
+    enums:
+      - name: ReservationStatus
+        initialValue: PENDING
+        values: [PENDING, CONFIRMED, CANCELLED, EXPIRED]
+        transitions:
+          - from: PENDING
+            to: CONFIRMED
+            method: confirm
+          - from: PENDING
+            to: CANCELLED
+            method: cancel
+          - from: PENDING
+            to: EXPIRED
+            method: expire
+
+    events:
+      - name: ReservationConfirmed
+        fields:
+          - name: reservationId
+            type: String
+          - name: confirmedAt
+            type: LocalDateTime
+
+      - name: ReservationCancelled
+        fields:
+          - name: reservationId
+            type: String
+          - name: reason
+            type: String
+
+# ─── Servicios HTTP que este módulo LLAMA ─────────────────────────────────────
+# Nivel raíz, sibling de aggregates: y listeners:
+# baseUrl: se declara en la primera entrada de cada service:.
+
+ports:
+
+  # ── ScreeningService (módulo interno: screenings) ─────────────────────────
+
+  - name: findScreeningById            # nombre del método en la interfaz (camelCase)
+    service: ScreeningService          # agrupa en un solo FeignClient (PascalCase)
+    target: screenings                 # módulo o servicio destino (referencia documental)
+    baseUrl: http://localhost:8081     # base URL → parameters/*/urls.yaml (primera entrada del service)
+    http: GET /screenings/{id}         # verbo HTTP + path
+    fields:                            # campos de respuesta → FindScreeningByIdResponseDto.java
+      - name: id
+        type: String
+      - name: movieId
+        type: String
+      - name: theaterId
+        type: String
+      - name: startTime
+        type: LocalDateTime
+      - name: endTime
+        type: LocalDateTime
+      - name: basePrice
+        type: BigDecimal
+      - name: status
+        type: String
+      - name: isPrivateEvent
+        type: Boolean
+
+  - name: findAvailableSeats
+    service: ScreeningService          # misma interfaz y FeignClient que arriba
+    target: screenings
+    # baseUrl omitida — ya declarada en la primera entrada de este service
+    http: GET /screenings/{id}/seats
+    returnList: true                   # → List<Seat> en la interfaz, List<FindAvailableSeatDto> en Feign
+    domainType: Seat                   # sobrescribe la derivación automática (findAvailableSeats → Seat)
+    fields:
+      - name: seatId
+        type: String
+      - name: seatRow
+        type: String
+      - name: seatNumber
+        type: Integer
+      - name: seatType
+        type: String
+      - name: availabilityStatus
+        type: String
+
+  - name: checkPrivateEventAvailability
+    service: ScreeningService
+    target: screenings
+    http: GET /screenings/{id}/private-event-availability
+    fields:
+      - name: screeningId
+        type: String
+      - name: isAvailable
+        type: Boolean
+      - name: totalCapacity
+        type: Integer
+      - name: unavailableSeatsCount
+        type: Integer
+
+  # ── CustomerService (módulo interno: customers) ───────────────────────────
+
+  - name: findCustomerById
+    service: CustomerService
+    target: customers
+    baseUrl: http://localhost:8082
+    http: GET /customers/{id}
+    fields:
+      - name: id
+        type: String
+      - name: firstName
+        type: String
+      - name: lastName
+        type: String
+      - name: email
+        type: String
+      - name: status
+        type: String
+
+  # ── PaymentGateway (servicio externo) ─────────────────────────────────────
+
+  - name: processPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    baseUrl: https://api.payments.example.com
+    http: POST /payments
+    body:                              # @RequestBody → ProcessPaymentRequestDto.java
+      - name: reservationId
+        type: String
+      - name: customerId
+        type: String
+      - name: amount
+        type: BigDecimal
+      - name: currency
+        type: String
+      - name: paymentMethod
+        type: PaymentMethodInput       # tipo objeto → declarar en nestedTypes:
+    nestedTypes:                       # genera PaymentMethodInput.java en application/dtos/
+      - name: paymentMethodInput       # camelCase → normalizado a PaymentMethodInput
+        fields:
+          - name: type
+            type: String
+          - name: cardToken
+            type: String
+          - name: cardLastFour
+            type: String
+    fields:                            # infra DTO → infrastructure/adapters/paymentGateway/ProcessPaymentDto.java
+      - name: paymentId
+        type: String
+      - name: status
+        type: String
+      - name: processedAt
+        type: LocalDateTime
+      - name: transactionCode
+        type: String
+
+  - name: findPaymentStatus
+    service: PaymentGateway
+    target: payment-gateway-external
+    # baseUrl omitida — ya declarada en processPayment (misma entrada de service)
+    http: GET /payments/{id}
+    domainType: PaymentStatus          # override: sin esto, deriveDomainType elimina "Status" y colisiona con Payment
+    fields:
+      - name: paymentId
+        type: String
+      - name: status
+        type: String
+      - name: processedAt
+        type: LocalDateTime
+      - name: amount
+        type: BigDecimal
+
+  - name: cancelPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    http: DELETE /payments/{id}
+    # body: omitido — sin @RequestBody
+    # fields: omitido — retorno void en la interfaz y en el FeignClient

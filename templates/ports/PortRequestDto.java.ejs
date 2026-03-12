@@ -1,0 +1,30 @@
+package <%= packageName %>.<%= moduleName %>.application.dtos;
+<% const needsBigDecimal = bodyFields && bodyFields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = bodyFields && bodyFields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
+<% const needsInstant    = bodyFields && bodyFields.some(f => f.javaType === 'Instant'); %>
+<% const needsUUID       = bodyFields && bodyFields.some(f => f.javaType === 'UUID'); %>
+<% const needsList       = bodyFields && bodyFields.some(f => f.javaType && f.javaType.startsWith('List')); %>
+<% if (needsBigDecimal) { %>
+import java.math.BigDecimal;
+<% } %><% if (needsLocalDate) { %>
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+<% } %><% if (needsInstant) { %>
+import java.time.Instant;
+<% } %><% if (needsUUID) { %>
+import java.util.UUID;
+<% } %><% if (needsList) { %>
+import java.util.List;
+<% } %>
+<% (nestedTypes || []).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
+<% }); %>
+public record <%= dtoName %>(
+<% if (bodyFields && bodyFields.length > 0) { %>
+<% bodyFields.forEach((f, i) => { %>
+    <%- f.javaType %> <%= f.name %><%= i < bodyFields.length - 1 ? ',' : '' %>
+<% }); %>
+<% } else { %>
+    // TODO: Add request body fields
+<% } %>
+) {}

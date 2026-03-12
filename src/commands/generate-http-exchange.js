@@ -307,3 +307,5 @@ async function ensureUrlsImport(projectDir) {
 }
 
 module.exports = generateHttpExchangeCommand;
+module.exports.createOrUpdateUrlsConfig = createOrUpdateUrlsConfig;
+module.exports.ensureUrlsImport = ensureUrlsImport;

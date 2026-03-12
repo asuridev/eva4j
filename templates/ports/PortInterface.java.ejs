@@ -1,0 +1,45 @@
+package <%= packageName %>.<%= moduleName %>.domain.repositories;
+<% /* ── Compute all imports needed ── */ %>
+<% const allMethods = methods || []; %>
+<% const hasAnyList = allMethods.some(m => m.returnList); %>
+<% const bodyFields = allMethods.flatMap(m => m.bodyFields || []); %>
+<% const needsBigDecimal = bodyFields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = bodyFields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
+<% const needsInstant    = bodyFields.some(f => f.javaType === 'Instant'); %>
+<% const needsUUID       = bodyFields.some(f => f.javaType === 'UUID'); %>
+<% const needsListField  = bodyFields.some(f => f.javaType && f.javaType.startsWith('List')); %>
+<% if (hasAnyList || needsListField) { %>import java.util.List;
+<% } %><% if (needsBigDecimal) { %>import java.math.BigDecimal;
+<% } %><% if (needsLocalDate) { %>import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+<% } %><% if (needsInstant) { %>import java.time.Instant;
+<% } %><% if (needsUUID) { %>import java.util.UUID;
+<% } %>
+<% /* ACL: port interface returns domain models, not infra DTOs */ %>
+<% const uniqueDomainTypes = [...new Set(allMethods.filter(m => m.domainType).map(m => m.domainType))]; %>
+<% uniqueDomainTypes.forEach(dt => { %>import <%= packageName %>.<%= moduleName %>.domain.models.<%= adapterPackage %>.<%= dt %>;
+<% }); %>
+<% /* Import request DTOs */ %>
+<% allMethods.filter(m => m.hasBody).forEach(m => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= m.requestDtoName %>;
+<% }); %>
+<% /* Import nested types */ %>
+<% (nestedTypes || []).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
+<% }); %>
+/**
+ * Secondary port — HTTP client to <%= target || serviceName %>.
+ * The domain depends on this interface; the infrastructure provides the Feign implementation.
+ * All return types are domain models (ACL pattern).
+ */
+public interface <%= serviceName %> {
+<% allMethods.forEach(m => { %>
+<%   /* Domain models are the return type — void when no response */ %>
+<%   const returnType = !m.hasResponse ? 'void'
+       : m.returnList ? `List<${m.domainType}>`
+       : m.domainType; %>
+<%   const params = []; %>
+<%   m.pathVariables.forEach(pv => { params.push(`String ${pv}`); }); %>
+<%   if (m.hasBody) { params.push(`${m.requestDtoName} body`); } %>
+    <%- returnType %> <%= m.name %>(<%= params.join(', ') %>);
+<% }); %>
+}

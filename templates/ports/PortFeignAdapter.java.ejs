@@ -1,0 +1,67 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= adapterPackage %>;
+
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= serviceName %>;
+import org.springframework.stereotype.Component;
+<% const allMethods = methods || []; %>
+<% const hasAnyList = allMethods.some(m => m.returnList); %>
+<% if (hasAnyList) { %>import java.util.List;
+import java.util.stream.Collectors;
+<% } %>
+<% /* ACL: import domain models — the types the port interface returns */ %>
+<% const uniqueDomainTypes = [...new Set(allMethods.filter(m => m.domainType).map(m => m.domainType))]; %>
+<% uniqueDomainTypes.forEach(dt => { %>import <%= packageName %>.<%= moduleName %>.domain.models.<%= adapterPackage %>.<%= dt %>;
+<% }); %>
+<% /* Request DTOs and nested types stay in application.dtos */ %>
+<% allMethods.filter(m => m.hasBody).forEach(m => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= m.requestDtoName %>;
+<% }); %>
+<% (nestedTypes || []).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
+<% }); %>
+@Component
+public class <%= feignAdapterClassName %> implements <%= serviceName %> {
+
+    private final <%= feignClientClassName %> feignClient;
+
+    public <%= feignAdapterClassName %>(<%= feignClientClassName %> feignClient) {
+        this.feignClient = feignClient;
+    }
+<% allMethods.forEach(m => { %>
+<%   /* Public override returns domain model; FeignClient returns infra DTO */ %>
+<%   const domainReturn = !m.hasResponse ? 'void'
+       : m.returnList ? `List<${m.domainType}>`
+       : m.domainType; %>
+<%   const params = []; %>
+<%   const args  = []; %>
+<%   m.pathVariables.forEach(pv => { params.push(`String ${pv}`); args.push(pv); }); %>
+<%   if (m.hasBody) { params.push(`${m.requestDtoName} body`); args.push('body'); } %>
+
+    @Override
+    public <%- domainReturn %> <%= m.name %>(<%= params.join(', ') %>) {
+<%   if (!m.hasResponse) { %>
+        feignClient.<%= m.name %>(<%= args.join(', ') %>);
+<%   } else if (m.returnList) { %>
+        List<<%= m.infraDtoName %>> dtos = feignClient.<%= m.name %>(<%= args.join(', ') %>);
+        return dtos.stream().map(dto -> to<%= m.domainType %>(dto)).collect(Collectors.toList());
+<%   } else { %>
+        return to<%= m.domainType %>(feignClient.<%= m.name %>(<%= args.join(', ') %>));
+<%   } %>
+    }
+<% }); %>
+
+    // ── ACL Mappers ─────────────────────────────────────────────────────────
+    // Maps infra DTOs (shaped by the external service) to domain models.
+    // If the external API changes, only these methods need to be updated.
+<%
+  // Build one mapper per method that has a response
+  const responseMethods = allMethods.filter(m => m.hasResponse);
+%>
+<% responseMethods.forEach(m => { %>
+    private <%- m.domainType %> to<%= m.domainType %>(<%= m.infraDtoName %> dto) {
+        if (dto == null) return null;
+        return new <%= m.domainType %>(
+<%     m.fields.forEach((f, i) => { %>
+            dto.<%= f.name %>()<%= i < m.fields.length - 1 ? ',' : '' %>
+<%     }); %>
+        );
+    }
+<% }); %>
+}

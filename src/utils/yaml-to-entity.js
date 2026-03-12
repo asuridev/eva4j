@@ -1,7 +1,7 @@
 const yaml = require('js-yaml');
 const fs = require('fs-extra');
 const pluralize = require('pluralize');
-const { toPascalCase, toCamelCase, toSnakeCase } = require('./naming');
+const { toPascalCase, toCamelCase, toSnakeCase, toKebabCase } = require('./naming');
 
 /**
  * Parse domain.yaml and extract aggregates with entities and value objects
@@ -28,7 +28,8 @@ async function parseDomainYaml(yamlPath, packageName = '', moduleName = '') {
     aggregates,
     allEnums: extractAllEnums(domainData.aggregates),
     endpoints: parseEndpoints(domainData),
-    listeners: parseListeners(domainData)
+    listeners: parseListeners(domainData),
+    ports: parsePorts(domainData, moduleName)
   };
 }
 
@@ -1035,6 +1036,168 @@ function parseListeners(domainData) {
   });
 }
 
+/**
+ * Derive a domain model type name from a method name.
+ * Strips common verb prefixes and 'ById/ByName/...' suffixes so that
+ * 'findCustomerById' → 'Customer', 'processPayment' → 'Payment'.
+ * @param {string} methodName  camelCase method name
+ * @returns {string} PascalCase domain model name
+ */
+function deriveDomainType(methodName) {
+  let name = toPascalCase(methodName);
+
+  // Strip verb prefix
+  name = name.replace(
+    /^(Find|Get|Fetch|Search|Retrieve|List|Check|Process|Create|Update|Delete|Cancel|Submit|Execute)/,
+    ''
+  );
+
+  // Strip trailing 'By{Something}' (e.g. ById, ByName, ByCode)
+  name = name.replace(/By[A-Z][a-zA-Z0-9]*$/, '');
+
+  // Strip common informational suffixes
+  name = name.replace(/(?:Status|Availability|All)$/, '');
+
+  // Fall back to full PascalCase method name if we stripped everything
+  return name || toPascalCase(methodName);
+}
+
+/**
+ * Parse the optional ports section from domain.yaml.
+ * Declares HTTP services this module CALLS synchronously (Feign clients).
+ * Entries sharing the same service: are grouped into a single FeignClient.
+ * @param {Object} domainData - Raw parsed YAML data
+ * @param {string} moduleName - Module name (used for property key naming)
+ * @returns {Array} Parsed port service groups (empty if not declared)
+ */
+function parsePorts(domainData, moduleName = '') {
+  if (!domainData.ports || !Array.isArray(domainData.ports)) return [];
+
+  const serviceMap = new Map();
+
+  for (const entry of domainData.ports) {
+    if (!entry.service || !entry.name) continue;
+
+    const serviceName = toPascalCase(entry.service);
+    const methodName  = toCamelCase(entry.name);
+    const methodPascal = toPascalCase(entry.name);
+
+    // Parse HTTP verb + path
+    const httpParts = (entry.http || 'GET /').trim().split(/\s+/);
+    const httpVerb  = (httpParts[0] || 'GET').toUpperCase();
+    const httpPath  = httpParts[1] || '/';
+
+    // Extract path variables: /screenings/{id}/seats → ['id']
+    const pathVarMatches = httpPath.match(/\{(\w+)\}/g) || [];
+    const pathVariables  = pathVarMatches.map(pv => pv.slice(1, -1));
+
+    // Response fields
+    const responseFields = (entry.fields || []).map(f => ({
+      name: toCamelCase(f.name),
+      javaType: f.type
+    }));
+
+    // Body fields (POST/PUT/PATCH only)
+    const bodyAllowed = httpVerb !== 'GET' && httpVerb !== 'DELETE';
+    const bodyFields  = bodyAllowed
+      ? (entry.body || []).map(f => ({ name: toCamelCase(f.name), javaType: f.type }))
+      : [];
+
+    // nestedTypes per method
+    const nestedTypes = (entry.nestedTypes || []).map(nt => ({
+      name: toPascalCase(nt.name),
+      fields: (nt.fields || []).map(f => ({
+        name: toCamelCase(f.name),
+        javaType: f.type
+      }))
+    }));
+
+    const returnList      = entry.returnList === true;
+    const hasResponse     = responseFields.length > 0;
+    const hasBody         = bodyFields.length > 0;
+    // ACL: infra DTO name (lives in infrastructure/adapters/{service}/)
+    const infraDtoName    = hasResponse ? `${methodPascal}Dto` : null;
+    // Domain model type (lives in domain/models/)
+    const domainType      = hasResponse
+      ? (entry.domainType ? toPascalCase(entry.domainType) : deriveDomainType(entry.name))
+      : null;
+    // Keep responseDtoName as alias to infraDtoName for backward-compat
+    const responseDtoName = infraDtoName;
+    const requestDtoName  = hasBody ? `${methodPascal}RequestDto` : null;
+
+    const method = {
+      name: methodName,
+      namePascal: methodPascal,
+      httpVerb,
+      httpPath,
+      pathVariables,
+      fields: responseFields,
+      bodyFields,
+      nestedTypes,
+      returnList,
+      hasResponse,
+      hasBody,
+      infraDtoName,
+      domainType,
+      responseDtoName,
+      requestDtoName
+    };
+
+    if (!serviceMap.has(serviceName)) {
+      serviceMap.set(serviceName, {
+        serviceName,
+        serviceNameCamelCase: toCamelCase(serviceName),
+        target: entry.target || null,
+        baseUrl: entry.baseUrl || null,
+        methods: [],
+        nestedTypes: [],
+        domainModels: []  // ACL: unique domain models per service group
+      });
+    }
+
+    const group = serviceMap.get(serviceName);
+    group.methods.push(method);
+
+    // Keep baseUrl from the first entry that declares it
+    if (entry.baseUrl && !group.baseUrl) {
+      group.baseUrl = entry.baseUrl;
+    }
+
+    // Deduplicate nestedTypes within the service group
+    for (const nt of nestedTypes) {
+      if (!group.nestedTypes.some(existing => existing.name === nt.name)) {
+        group.nestedTypes.push(nt);
+      }
+    }
+
+    // ACL: collect unique domain models (by name) across all methods in this service
+    if (method.domainType && method.hasResponse) {
+      if (!group.domainModels.some(dm => dm.name === method.domainType)) {
+        group.domainModels.push({
+          name: method.domainType,
+          fields: method.fields
+        });
+      }
+    }
+  }
+
+  const moduleKebab = toKebabCase(moduleName);
+
+  return Array.from(serviceMap.values()).map(group => {
+    const serviceKebab = toKebabCase(group.serviceName);
+    return {
+      ...group,
+      baseUrl: group.baseUrl || 'http://localhost:8080',
+      baseUrlProperty: `${moduleKebab}.${serviceKebab}.base-url`,
+      feignClientName: `${moduleKebab}-${serviceKebab}`,
+      feignClientClassName:  `${group.serviceName}FeignClient`,
+      feignAdapterClassName: `${group.serviceName}FeignAdapter`,
+      feignConfigClassName:  `${group.serviceName}FeignConfig`,
+      adapterPackage: group.serviceNameCamelCase
+    };
+  });
+}
+
 module.exports = {
   parseDomainYaml,
   parseAggregate,
@@ -1044,5 +1207,6 @@ module.exports = {
   generateEntityImports,
   generateValidationImports,
   generateAggregateMethodImports,
-  parseListeners
+  parseListeners,
+  parsePorts
 };

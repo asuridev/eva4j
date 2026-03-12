@@ -1,0 +1,45 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= adapterPackage %>;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.*;
+<% const allMethods = methods || []; %>
+<% const bodyFields = allMethods.flatMap(m => m.bodyFields || []); %>
+<% const hasAnyList = allMethods.some(m => m.returnList); %>
+<% const needsBigDecimal = bodyFields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = bodyFields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
+<% const needsInstant    = bodyFields.some(f => f.javaType === 'Instant'); %>
+<% const needsUUID       = bodyFields.some(f => f.javaType === 'UUID'); %>
+<% const needsListField  = bodyFields.some(f => f.javaType && f.javaType.startsWith('List')); %>
+<% if (hasAnyList || needsListField) { %>import java.util.List;
+<% } %><% if (needsBigDecimal) { %>import java.math.BigDecimal;
+<% } %><% if (needsLocalDate) { %>import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+<% } %><% if (needsInstant) { %>import java.time.Instant;
+<% } %><% if (needsUUID) { %>import java.util.UUID;
+<% } %>
+<% /* Request DTOs and nested types live in application.dtos */ %>
+<% allMethods.filter(m => m.hasBody).forEach(m => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= m.requestDtoName %>;
+<% }); %>
+<% (nestedTypes || []).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
+<% }); %>
+@FeignClient(
+    name = "<%= feignClientName %>",
+    url = "${<%= baseUrlProperty %>}",
+    configuration = <%= feignConfigClassName %>.class
+)
+public interface <%= feignClientClassName %> {
+<% allMethods.forEach(m => { %>
+<%   /* FeignClient returns the infra DTO (or void), not the domain model */ %>
+<%   const returnType = !m.hasResponse ? 'void'
+       : m.returnList ? `List<${m.infraDtoName}>`
+       : m.infraDtoName; %>
+<%   const httpVerbLower = m.httpVerb.charAt(0) + m.httpVerb.slice(1).toLowerCase(); %>
+<%   const mappingAnnotation = `@${httpVerbLower.charAt(0).toUpperCase()}${httpVerbLower.slice(1)}Mapping("${m.httpPath}")`; %>
+<%   const paramList = []; %>
+<%   m.pathVariables.forEach(pv => { paramList.push(`@PathVariable("${pv}") String ${pv}`); }); %>
+<%   if (m.hasBody) { paramList.push(`@RequestBody ${m.requestDtoName} body`); } %>
+    <%- mappingAnnotation %>
+    <%- returnType %> <%= m.name %>(<%- paramList.join(', ') %>);
+<% }); %>
+}
