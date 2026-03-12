@@ -76,6 +76,7 @@ async function createCommand(projectName, options) {
     console.log(chalk.gray(`    ├── src/main/java/${context.packagePath.replace(/\//g, '.')}`));
     console.log(chalk.gray(`    │   ├── ${context.applicationClassName}.java`));
     console.log(chalk.gray(`    │   └── common/`));
+    console.log(chalk.gray(`    ├── system/`));
     console.log(chalk.gray(`    ├── build.gradle`));
     console.log(chalk.gray(`    └── README.md`));
     

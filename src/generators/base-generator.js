@@ -63,6 +63,7 @@ class BaseGenerator {
     await fs.ensureDir(resources);
     await fs.ensureDir(path.join(resources, 'static'));
     await fs.ensureDir(path.join(resources, 'templates'));
+    await fs.ensureDir(path.join(this.projectDir, 'system'));
   }
 
   async generateApplication() {

@@ -19,6 +19,9 @@
 13. [Generated files](#13-generated-files)
 14. [Complete examples](#14-complete-examples)
 15. [Prerequisites and common errors](#15-prerequisites-and-common-errors)
+16. [Declarative endpoints (`endpoints:`)](#16-declarative-endpoints-endpoints---use-case-patterns)
+17. [Consuming external events (`listeners:`)](#17-consuming-external-events-listeners)
+18. [HTTP outbound clients (`ports:`)](#18-http-outbound-clients-ports)
 
 ---
 
@@ -66,6 +69,15 @@ src/main/java/<package>/<module>/domain.yaml
 ---
 
 ## 3. Base domain.yaml structure
+
+The `domain.yaml` file supports three top-level sections besides `aggregates:`:
+
+| Root section | Purpose |
+|--------------|---------|
+| `aggregates:` | Domain model: entities, value objects, enums, events |
+| `listeners:` | Integration events this module **consumes** (async, Kafka) |
+| `ports:` | HTTP services this module **calls** outbound (sync, Feign) |
+| `endpoints:` | REST endpoints this module **exposes** (declarative controller generation) |
 
 ```yaml
 aggregates:                          # List of aggregates in the module
@@ -158,6 +170,7 @@ fields:
     type: String           # Java type, required
     readOnly: false        # default false
     hidden: false          # default false
+    defaultValue: null     # only meaningful when readOnly: true
     validations: []        # JSR-303 annotations
     annotations: []        # raw JPA annotations
     reference:             # semantic reference to another aggregate
@@ -187,6 +200,50 @@ fields:
 ```
 
 > When an enum has `initialValue`, the corresponding field is automatically treated as `readOnly`.
+
+### defaultValue
+
+Assigns an initial value to a `readOnly` field in the creation constructor. The generator emits the assignment in the business constructor and `@Builder.Default` in the JPA entity. Ignored (with a warning) on non-readOnly fields.
+
+```yaml
+fields:
+  - name: totalAmount
+    type: BigDecimal
+    readOnly: true
+    defaultValue: "0.00"      # → new BigDecimal("0.00")
+
+  - name: status
+    type: OrderStatus
+    readOnly: true
+    defaultValue: PENDING      # → OrderStatus.PENDING
+
+  - name: itemCount
+    type: Integer
+    readOnly: true
+    defaultValue: 0            # → 0
+```
+
+Generated in the business constructor:
+
+```java
+public Order(String customerId) {
+    this.customerId = customerId;
+    this.totalAmount = new BigDecimal("0.00");  // ← defaultValue
+    this.status = OrderStatus.PENDING;           // ← defaultValue
+    this.itemCount = 0;                          // ← defaultValue
+}
+```
+
+Generated in the JPA entity:
+
+```java
+@Builder.Default
+private BigDecimal totalAmount = new BigDecimal("0.00");
+
+@Enumerated(EnumType.STRING)
+@Builder.Default
+private OrderStatus status = OrderStatus.PENDING;
+```
 
 ### hidden
 
@@ -507,6 +564,45 @@ Usage in a field:
   type: Money    # automatically detected as @Embedded
 ```
 
+### Value Objects with business methods
+
+Value Objects can declare methods directly in `domain.yaml`. The generator emits the method body verbatim inside the VO class.
+
+```yaml
+valueObjects:
+  - name: Money
+    fields:
+      - name: amount
+        type: BigDecimal
+      - name: currency
+        type: String
+    methods:
+      - name: add
+        returnType: Money
+        parameters:
+          - name: other
+            type: Money
+        body: "return new Money(this.amount.add(other.getAmount()), this.currency);"
+      - name: isPositive
+        returnType: boolean
+        parameters: []
+        body: "return this.amount.compareTo(BigDecimal.ZERO) > 0;"
+```
+
+Generated in the domain VO:
+
+```java
+public Money add(Money other) {
+    return new Money(this.amount.add(other.getAmount()), this.currency);
+}
+
+public boolean isPositive() {
+    return this.amount.compareTo(BigDecimal.ZERO) > 0;
+}
+```
+
+> Methods are only generated in the domain VO (`Money.java`), **not** in the JPA embeddable (`MoneyJpa.java`).
+
 ### List of Value Objects
 
 ```yaml
@@ -741,6 +837,7 @@ For each aggregate, approximately the following files are generated:
 | `{Entity}.java` | Domain | Secondary entities |
 | `{Vo}.java` | Domain | Value Objects |
 | `{Enum}.java` | Domain | Enums (with VALID_TRANSITIONS if transitions exist) |
+| `{Event}.java` | Domain | Domain events (`domain/models/events/`) |
 | `{Root}Repository.java` | Domain | Repository interface (port) |
 | `Create{Root}Command.java` | Application | Create command |
 | `Create{Root}CommandHandler.java` | Application | Command handler |
@@ -751,13 +848,42 @@ For each aggregate, approximately the following files are generated:
 | `{Root}ResponseDto.java` | Application | Response DTO |
 | `Create{Root}Dto.java` | Application | Create DTO |
 | `{Root}ApplicationMapper.java` | Application | Mapper Command/DTO ↔ Domain |
+| `{Aggregate}DomainEventHandler.java` | Application | `@TransactionalEventListener` per declared event |
+| `{Event}IntegrationEvent.java` | Application | Integration event record (when broker installed) |
+| `MessageBroker.java` | Application | Broker port interface (created/updated) |
 | `{Root}Jpa.java` | Infrastructure | JPA entity |
 | `{Entity}Jpa.java` | Infrastructure | Secondary JPA entities |
-| `{Vo}Jpa.java` | Infrastructure | JPA Value Objects (@Embeddable) |
+| `{Vo}Jpa.java` | Infrastructure | JPA Value Objects (`@Embeddable`) |
 | `{Root}Mapper.java` | Infrastructure | Mapper Domain ↔ JPA |
 | `{Root}JpaRepository.java` | Infrastructure | Spring Data repository |
 | `{Root}RepositoryImpl.java` | Infrastructure | Repository implementation |
 | `{Root}Controller.java` | Infrastructure | REST controller |
+| `{Broker}MessageBroker.java` | Infrastructure | Broker adapter (created/updated) |
+
+**Additional files when `listeners:` is declared:**
+
+| File | Layer | Description |
+|------|-------|-------------|
+| `{Event}IntegrationEvent.java` | Application | Typed record for the consumed event payload |
+| `{NestedType}.java` | Application | Auxiliary record for object-typed fields |
+| `{UseCase}Command.java` | Application | Command dispatched from the listener |
+| `{UseCase}CommandHandler.java` | Application | Handler stub — implement business logic here |
+| `{Event}KafkaListener.java` | Infrastructure | `@KafkaListener` that deserializes and dispatches |
+| `kafka.yaml` (all envs) | Infrastructure | Topic registration |
+
+**Additional files when `ports:` is declared:**
+
+| File | Layer | Description |
+|------|-------|-------------|
+| `{ServiceName}.java` | Domain | Port interface (returns domain models) |
+| `{DomainType}.java` | Domain | Domain model per unique type (`domain/models/{service}/`) |
+| `{ServiceName}FeignClient.java` | Infrastructure | Feign client (returns infra DTOs) |
+| `{ServiceName}FeignAdapter.java` | Infrastructure | ACL adapter mapping infra DTO → domain model |
+| `{ServiceName}FeignConfig.java` | Infrastructure | Feign timeouts config |
+| `{Method}Dto.java` | Infrastructure | Infra DTO per method with `fields:` |
+| `{Method}RequestDto.java` | Application | Request DTO per method with `body:` |
+| `{NestedType}.java` | Application | Auxiliary record for `nestedTypes:` |
+| `urls.yaml` (all envs) | Infrastructure | Base URL per service |
 
 ### Generated REST endpoints
 
@@ -1101,3 +1227,272 @@ This is intentional: the developer fills in the custom business logic while the 
 | Pattern `{MethodPascal}` | `toPascalCase(method)` | `confirm` → `Confirm` |
 | Pattern `{FieldPascal}` | `toPascalCase(fieldName)` | `customerId` → `CustomerId` |
 | Sub-entity target | PascalCase (must match entity `name:`) | `OrderItem` |
+
+---
+
+## 17. Consuming external events (`listeners:`)
+
+The `listeners:` section declares integration events that this module **consumes** from other modules or external systems. It lives at the **root level** of `domain.yaml`, as a sibling of `aggregates:`.
+
+> **Requires a broker installed:** `eva add kafka-client` — without it, the section is parsed but no files are generated.
+
+### Syntax
+
+```yaml
+# Root level — sibling of aggregates:
+listeners:
+  - event: PaymentApprovedEvent      # PascalCase + suffix Event
+    producer: payments               # Producing module (documentary reference)
+    topic: PAYMENT_APPROVED          # Kafka topic — SCREAMING_SNAKE_CASE, mandatory
+    useCase: ConfirmReservation      # PascalCase use case executed when the event is consumed
+    fields:                          # Payload fields received
+      - name: reservationId
+        type: String
+      - name: approvedAt
+        type: LocalDateTime
+      - name: details                # Object-typed field → declare in nestedTypes:
+        type: PaymentDetails
+    nestedTypes:                     # Auxiliary records for object-typed fields
+      - name: paymentDetails         # camelCase → normalized to PaymentDetails
+        fields:
+          - name: paymentId
+            type: String
+          - name: method
+            type: String
+          - name: amount
+            type: BigDecimal
+```
+
+### Generated files per listener entry
+
+| File | Description |
+|------|-------------|
+| `application/events/{NestedType}.java` | Auxiliary record per `nestedTypes` entry |
+| `application/events/{Event}IntegrationEvent.java` | Typed record with the declared `fields` |
+| `infrastructure/kafkaListener/{Event}KafkaListener.java` | `@KafkaListener` → deserializes and dispatches to `useCase` |
+| `parameters/*/kafka.yaml` | Topic registered under `topics:` |
+| `application/commands/{UseCase}Command.java` | Typed command for the `useCase` |
+| `application/usecases/{UseCase}CommandHandler.java` | Handler stub — implement business logic here |
+
+### Rules
+
+| Property | Convention | Notes |
+|----------|------------|-------|
+| `event:` | PascalCase + suffix `Event` | `PaymentApprovedEvent` ✅ |
+| `topic:` | SCREAMING_SNAKE_CASE | **Mandatory** for standalone modules |
+| `useCase:` | PascalCase, verb + noun | Describes the consumer's action, not the event name |
+| `fields:` | same as entity fields | Defines the typed payload record |
+| `nestedTypes:` | camelCase name, normalized internally | One record per object-typed field |
+
+- `topic:` is **mandatory** when there is no `system.yaml`. When a `system.yaml` exists, it can be inferred from `integrations.async[].topic`, but an explicit value always takes precedence.
+- `nestedTypes:` — declare one entry per object-typed field (not a scalar). The generated record is placed in `application/events/` and used by both the integration event and the command.
+- Verb hints for `useCase`: `Handle`, `Process`, `Confirm`, `Cancel`, `Accumulate`, `Release`, `Notify`, `Update`.
+
+### Example — generated Kafka listener
+
+```java
+@Component
+public class PaymentApprovedKafkaListener {
+
+    private final UseCaseMediator useCaseMediator;
+    private final ObjectMapper objectMapper;
+
+    @Value("${topics.payment-approved}")
+    private String paymentApprovedTopic;
+
+    @KafkaListener(topics = "${topics.payment-approved}")
+    public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+        String reservationId = objectMapper.convertValue(
+                event.data().get("reservationId"), String.class);
+        LocalDateTime approvedAt = objectMapper.convertValue(
+                event.data().get("approvedAt"), LocalDateTime.class);
+        PaymentDetails details = objectMapper.convertValue(
+                event.data().get("details"), PaymentDetails.class);
+        useCaseMediator.dispatch(new ConfirmReservationCommand(reservationId, approvedAt, details));
+        ack.acknowledge();
+    }
+}
+```
+
+### Example — generated command handler stub
+
+```java
+@Component
+public class ConfirmReservationCommandHandler
+        implements CommandHandler<ConfirmReservationCommand, Void> {
+
+    @Override
+    @Transactional
+    public Void handle(ConfirmReservationCommand command) {
+        // TODO: implement
+        // 1. Find the reservation by command.reservationId()
+        // 2. Confirm the reservation business rule
+        // 3. Save and return null
+        throw new UnsupportedOperationException("ConfirmReservationCommandHandler not implemented yet");
+    }
+}
+```
+
+### Contrast: produced vs. consumed events
+
+```
+aggregates:
+  └── events:      → Domain Events this module PRODUCES  (domain/models/events/)
+
+listeners:           → Integration Events this module CONSUMES (infrastructure/kafkaListener/)
+```
+
+---
+
+## 18. HTTP outbound clients (`ports:`)
+
+The `ports:` section declares synchronous HTTP services that this module **calls outbound**. It lives at the **root level** of `domain.yaml`, as a sibling of `aggregates:` and `listeners:`.
+
+Each entry is one method. Entries with the same `service:` are grouped into a single Feign client.
+
+> Uses Spring Cloud OpenFeign. Requires `spring-cloud-starter-openfeign` in the project's dependencies.
+
+### Syntax
+
+```yaml
+# Root level — sibling of aggregates: and listeners:
+ports:
+  - name: findScreeningById          # method name (camelCase) → drives all naming
+    service: ScreeningService        # groups into one FeignClient (PascalCase)
+    target: screenings               # destination module (documentary reference)
+    baseUrl: http://localhost:8081   # declared once per service; stored in urls.yaml
+    http: GET /screenings/{id}       # verb + path
+    fields:                          # response fields → domain model + infra DTO
+      - name: id
+        type: String
+      - name: startTime
+        type: LocalDateTime
+
+  - name: findAvailableSeats
+    service: ScreeningService        # same service → same FeignClient
+    target: screenings
+    http: GET /screenings/{id}/seats
+    returnList: true                 # → List<Seat> in the interface
+    domainType: Seat                 # override auto-derived domain type name
+    fields:
+      - name: seatId
+        type: String
+      - name: seatType
+        type: String
+
+  - name: processPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    baseUrl: https://api.payments.example.com
+    http: POST /payments
+    body:                            # @RequestBody → {Method}RequestDto.java
+      - name: amount
+        type: BigDecimal
+      - name: paymentMethod
+        type: PaymentMethodInput     # object type → declare in nestedTypes:
+    nestedTypes:
+      - name: paymentMethodInput
+        fields:
+          - name: type
+            type: String
+          - name: cardToken
+            type: String
+    fields:                          # response fields
+      - name: paymentId
+        type: String
+      - name: status
+        type: String
+
+  - name: cancelPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    http: DELETE /payments/{id}
+    # fields: omitted → void return
+```
+
+### Generated files per unique `service:`
+
+| File | Description |
+|------|-------------|
+| `domain/repositories/{ServiceName}.java` | Port interface (returns domain models) |
+| `infrastructure/adapters/{service}/{ServiceName}FeignClient.java` | Feign client (returns infra DTOs) |
+| `infrastructure/adapters/{service}/{ServiceName}FeignAdapter.java` | `@Component implements {ServiceName}` — ACL mapper |
+| `infrastructure/adapters/{service}/{ServiceName}FeignConfig.java` | Feign timeout configuration |
+| `parameters/*/urls.yaml` | Base URL registered |
+
+### Generated files per method
+
+| File | Condition |
+|------|-----------|
+| `domain/models/{service}/{DomainType}.java` | When `fields:` present — domain-side abstraction |
+| `infrastructure/adapters/{service}/{Method}Dto.java` | When `fields:` present — infra DTO (external shape) |
+| `application/dtos/{Method}RequestDto.java` | When `body:` present (POST/PUT/PATCH) |
+| `application/dtos/{NestedType}.java` | When `nestedTypes:` declared |
+
+### Rules
+
+| Property | Convention | Notes |
+|----------|------------|-------|
+| `service:` | PascalCase | Groups methods into one FeignClient |
+| `baseUrl:` | URL string | Declare on **first entry** of each `service:` only |
+| `http:` | `VERB /path` | Same format as `exposes:` in `system.yaml` |
+| `returnList:` | boolean | `true` → `List<{DomainType}>` return type (default: `false`) |
+| `domainType:` | PascalCase | Overrides the domain type name auto-derived from the method name |
+| `body:` | list of fields | Only for POST/PUT/PATCH; emits warning and is ignored on GET/DELETE |
+| `nestedTypes:` | list of type defs | Records in `application/dtos/` for object-typed body fields |
+| `fields:` omitted | — | Return type is `void` in both the interface and Feign client |
+
+### ACL pattern
+
+The generator follows the Anti-Corruption Layer (ACL) pattern to isolate the module from the shape of external APIs:
+
+- **Infra DTOs** (external shape) live in `infrastructure/adapters/{service}/` and match the remote API exactly.
+- **Domain models** (internal abstraction) live in `domain/models/{service}/` and reflect what this module's business logic needs.
+- The `FeignAdapter` maps each `InfraDto → DomainModel` inline using private `to{Type}()` methods.
+- If the external API changes shape, **only the adapter needs to change**; domain logic is unaffected.
+
+### Example — generated port interface and adapter
+
+```java
+// domain/repositories/ScreeningService.java
+public interface ScreeningService {
+    Screening findScreeningById(String id);
+    List<Seat> findAvailableSeats(String id);
+}
+
+// infrastructure/adapters/screeningService/ScreeningServiceFeignAdapter.java
+@Component
+public class ScreeningServiceFeignAdapter implements ScreeningService {
+
+    private final ScreeningServiceFeignClient feignClient;
+
+    @Override
+    public Screening findScreeningById(String id) {
+        FindScreeningByIdDto dto = feignClient.findScreeningById(id);
+        return toScreening(dto);
+    }
+
+    @Override
+    public List<Seat> findAvailableSeats(String id) {
+        return feignClient.findAvailableSeats(id)
+                .stream().map(this::toSeat).toList();
+    }
+
+    private Screening toScreening(FindScreeningByIdDto dto) {
+        return new Screening(dto.getId(), dto.getStartTime());
+    }
+
+    private Seat toSeat(FindAvailableSeatDto dto) {
+        return new Seat(dto.getSeatId(), dto.getSeatType());
+    }
+}
+```
+
+### Contrast: async vs. sync
+
+```
+aggregates:
+  └── events:    → Domain Events this module PRODUCES  (async, broker)
+listeners:         → Integration Events this module CONSUMES (async, broker)
+ports:             → HTTP services this module CALLS outbound (sync, Feign)
+```
