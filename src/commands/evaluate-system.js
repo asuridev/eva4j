@@ -277,10 +277,11 @@ async function evaluateSystemCommand(type, options = {}) {
   const outputPath = path.resolve(process.cwd(), options.output || './system-report.html');
 
   // ── 1. Read system.yaml ─────────────────────────────────────────────────
-  const systemYamlPath = path.join(process.cwd(), 'system.yaml');
+  const systemYamlPath = path.join(process.cwd(), 'system', 'system.yaml');
   if (!(await fs.pathExists(systemYamlPath))) {
-    console.error(chalk.red('❌ system.yaml not found in current directory'));
+    console.error(chalk.red('❌ system/system.yaml not found'));
     console.error(chalk.gray('Run this command from the root of an eva4j project'));
+    console.error(chalk.gray('Expected location: system/system.yaml'));
     process.exit(1);
   }
 
@@ -289,11 +290,11 @@ async function evaluateSystemCommand(type, options = {}) {
     const content = await fs.readFile(systemYamlPath, 'utf-8');
     systemConfig = yaml.load(content);
   } catch (err) {
-    console.error(chalk.red('❌ Failed to parse system.yaml:'), err.message);
+    console.error(chalk.red('❌ Failed to parse system/system.yaml:'), err.message);
     process.exit(1);
   }
 
-  const spinner = ora('Analyzing system.yaml...').start();
+  const spinner = ora('Analyzing system/system.yaml...').start();
 
   // ── 2. Run validation ───────────────────────────────────────────────────
   const validation = validateSystem(systemConfig);
