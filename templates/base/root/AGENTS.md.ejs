@@ -1618,7 +1618,7 @@ listeners:
             type: BigDecimal
 ```
 
-Genera por cada entrada (hasta **5 artefactos**):
+Genera por cada entrada (hasta **6 artefactos**):
 
 | Artefacto | Descripción |
 |---|---|
@@ -1627,8 +1627,7 @@ Genera por cada entrada (hasta **5 artefactos**):
 | `infrastructure/kafkaListener/PaymentApprovedKafkaListener.java` | `@KafkaListener` → deserializa y despacha al `useCase` |
 | `parameters/*/kafka.yaml` | Registro del topic en `topics:` |
 | `application/commands/ConfirmOrderCommand.java` | Command tipado para el `useCase` |
-
-> **Nota:** el `CommandHandler` del `useCase` declarado debe existir previamente (generado con `eva g usecase` o `eva g entities` con `endpoints:`). El listener lo invoca vía `UseCaseMediator`.
+| `application/usecases/ConfirmOrderCommandHandler.java` | Handler stub — implementar la lógica de negocio aquí |
 
 **Deserialization:** el listener usa `EventEnvelope<Map<String,Object>>` + `objectMapper.convertValue()` para deserializar cada campo del payload de forma robusta y tipada.
 
@@ -1647,6 +1646,116 @@ aggregates:
 
 listeners:          → Integration Events que CONSUME (infrastructure/kafkaListener/)
 ```
+
+---
+
+### Clientes HTTP Síncronos (`ports[]`)
+
+```yaml
+# Nivel raíz, sibling de aggregates: y listeners:
+# Un método = una entrada; entries del mismo service: forman un solo FeignClient.
+
+ports:
+  - name: findScreeningById            # nombre del método (camelCase)
+    service: ScreeningService          # agrupa en una interfaz/FeignClient (PascalCase)
+    target: screenings                 # módulo destino (referencia documental)
+    baseUrl: http://localhost:8081     # → parameters/*/urls.yaml (primera entrada del service)
+    http: GET /screenings/{id}         # verbo + path
+    fields:                            # campos de respuesta → domain model + infra DTO
+      - name: id
+        type: String
+      - name: startTime
+        type: LocalDateTime
+
+  - name: findAvailableSeats
+    service: ScreeningService          # mismo service → mismo FeignClient
+    target: screenings
+    http: GET /screenings/{id}/seats
+    returnList: true                   # → List<Seat> en la interfaz del puerto
+    domainType: Seat                   # sobrescribe el tipo auto-derivado
+    fields:
+      - name: seatId
+        type: String
+      - name: seatType
+        type: String
+
+  - name: processPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    baseUrl: https://api.payments.example.com
+    http: POST /payments
+    body:                              # @RequestBody → ProcessPaymentRequestDto.java
+      - name: amount
+        type: BigDecimal
+      - name: paymentMethod
+        type: PaymentMethodInput       # tipo objeto → declarar en nestedTypes:
+    nestedTypes:
+      - name: paymentMethodInput
+        fields:
+          - name: type
+            type: String
+          - name: cardToken
+            type: String
+    fields:                            # respuesta → domain model Payment + infra DTO
+      - name: paymentId
+        type: String
+      - name: status
+        type: String
+
+  - name: cancelPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    http: DELETE /payments/{id}
+    # fields: omitido → retorno void
+```
+
+### Artefactos generados por `ports[]`
+
+Por cada `service:` único:
+
+| Archivo generado | Descripción |
+|---|---|
+| `domain/repositories/{ServiceName}.java` | Interfaz del puerto secundario (devuelve modelos de dominio) |
+| `infrastructure/adapters/{service}/{ServiceName}FeignClient.java` | Cliente Feign tipado (devuelve DTOs infra) |
+| `infrastructure/adapters/{service}/{ServiceName}FeignAdapter.java` | `@Component implements {ServiceName}` — actúa como ACL |
+| `infrastructure/adapters/{service}/{ServiceName}FeignConfig.java` | Timeouts Feign |
+| `parameters/*/urls.yaml` | Base URL parametrizada |
+
+Por cada modelo de dominio único derivado de los métodos con `fields:`:
+
+| Archivo generado | Descripción |
+|---|---|
+| `domain/models/{service}/{DomainType}.java` | Modelo de dominio (ACL) — abstracción interna |
+
+Por cada método:
+
+| Archivo generado | Condición |
+|---|---|
+| `infrastructure/adapters/{service}/{MethodPascal}Dto.java` | Cuando `fields:` presente — DTO infra (forma externa) |
+| `application/dtos/{MethodPascal}RequestDto.java` | Cuando `body:` presente (POST/PUT/PATCH) |
+| `application/dtos/{NestedTypePascal}.java` | Cuando `nestedTypes:` declarado |
+
+**Patrón ACL:** Los DTOs de infraestructura (forma de la API externa) viven en `infrastructure/adapters/{service}/`. Los modelos de dominio (abstracción interna) viven en `domain/models/{service}/`. El `FeignAdapter` mapea `InfraDto → DomainModel` inline con métodos privados `to{DomainType}()`. Si la API externa cambia, solo hay que actualizar el adaptador.
+
+### Reglas de `ports[]`
+
+- **`service:`** — PascalCase, agrupa métodos en un mismo FeignClient
+- **`baseUrl:`** — declarar solo en la primera entrada de cada `service:`; si se omite en todas → warning + `http://localhost:8080`
+- **`body:`** — solo en POST/PUT/PATCH; en GET/DELETE emite warning y se ignora
+- **`domainType:`** — sobrescribe el tipo de dominio auto-derivado del nombre del método (ej: `domainType: Seat` en `findAvailableSeats`)
+- **`returnList: true`** — el tipo de retorno es `List<{DomainType}>` en la interfaz y `List<{InfraDto}>` en el FeignClient (default: `false`)
+- **`nestedTypes:`** — records auxiliares en `application/dtos/`; mismo patrón que `listeners:`
+- **`fields:` omitido** → retorno `void` en interfaz y FeignClient
+
+**Contraste async vs sync:**
+```
+aggregates:
+  └── events:     → Domain Events que PRODUCE  (async, broker)
+listeners:          → Integration Events que CONSUME (async, broker)
+ports:              → Servicios HTTP que LLAMA    (sync, Feign)
+```
+
+---
 
 ### Estrategias de Cascade
 
@@ -2055,7 +2164,8 @@ public record UserResponseDto(
 4. **SI** ocurren hechos relevantes de negocio → declarar `events[]` en el agregado
 5. **SI** el evento debe propagarse vía broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
 6. **SI** el módulo consume eventos de otros servicios → declarar `listeners:` (sibling de `aggregates:`) con `topic:` obligatorio en módulos standalone
-7. **DESPUÉS** de generar el `domain.yaml` → ejecutar `eva g entities <module>`
+7. **SI** el módulo llama servicios HTTP externos de forma síncrona → declarar `ports:` (sibling de `aggregates:`) con `baseUrl:` en la primera entrada de cada `service:`
+8. **DESPUÉS** de generar el `domain.yaml` → ejecutar `eva g entities <module>`
 
 ### Al Generar Código de Dominio
 
@@ -2151,8 +2261,14 @@ Al generar o modificar código, verificar:
 - [ ] Evento con broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
 - [ ] Distinguir Domain Event (`domain/models/events/`) e Integration Event (`application/events/`) — cambios de broker solo afectan al adaptador `MessageBroker`
 - [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
-- [ ] Cada `listener` genera hasta 5 artefactos: NestedType(s) → IntegrationEvent → KafkaListener → kafka.yaml → Command
+- [ ] Cada `listener` genera hasta 6 artefactos: NestedType(s) → IntegrationEvent → KafkaListener → kafka.yaml → Command → CommandHandler
 - [ ] Campos de tipo objeto en listeners → declarar `nestedTypes:` para generar records auxiliares en `application/events/`
+- [ ] Clientes HTTP síncronos → declarar en `ports[]` (nivel raíz); `baseUrl:` en la primera entrada de cada `service:`
+- [ ] Métodos con respuesta → incluir `fields:` en la entrada del puerto; sin `fields:` = retorno `void`
+- [ ] Respuestas en lista → agregar `returnList: true` en el método correspondiente
+- [ ] Métodos con cuerpo (POST/PUT/PATCH) → incluir `body:`; campos de tipo objeto en `nestedTypes:`
+- [ ] Tipo de dominio auto-derivado del nombre del método — usar `domainType:` para sobrescribir si hay colisión
+- [ ] Cada `service:` en `ports[]` genera: interfaz (devuelve modelos de dominio en `domain/models/{service}/`), FeignClient, FeignAdapter (ACL), FeignConfig + `urls.yaml`
 
 ---
 

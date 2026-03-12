@@ -603,7 +603,7 @@ listeners:
             type: BigDecimal
 ```
 
-Genera por cada entrada (hasta **5 artefactos**):
+Genera por cada entrada (hasta **6 artefactos**):
 
 | Archivo generado | Descripción |
 |---|---|
@@ -612,8 +612,7 @@ Genera por cada entrada (hasta **5 artefactos**):
 | `infrastructure/kafkaListener/PaymentApprovedKafkaListener.java` | `@KafkaListener` → deserializa y despacha al `useCase` |
 | `parameters/*/kafka.yaml` | Registro del topic en `topics:` |
 | `application/commands/ConfirmOrderCommand.java` | Command tipado para el `useCase` |
-
-> **Nota:** el `CommandHandler` del `useCase` declarado debe existir previamente (generado con `eva g usecase` o `eva g entities` con `endpoints:`). El listener lo invoca vía `UseCaseMediator`.
+| `application/usecases/ConfirmOrderCommandHandler.java` | Handler stub — implementar la lógica de negocio aquí |
 
 **Deserialización:** el listener usa `EventEnvelope<Map<String,Object>>` + `objectMapper.convertValue()` para deserializar cada campo del payload de forma robusta y tipada.
 
@@ -720,7 +719,7 @@ Por cada método:
 | `application/dtos/{MethodPascal}RequestDto.java` | Cuando `body:` presente (POST/PUT/PATCH) |
 | `application/dtos/{NestedTypePascal}.java` | Cuando `nestedTypes:` declarado |
 
-**Patrón ACL:** Los DTOs de infraestructura (forma de la API externa) viven en `infrastructure/adapters/{service}/`. Los modelos de dominio (abstracción interna) viven en `domain/models/`. El `FeignAdapter` mapea `InfraDto → DomainModel` inline con métodos privados `to{DomainType}()`. Si la API externa cambia, solo hay que actualizar el adaptador.
+**Patrón ACL:** Los DTOs de infraestructura (forma de la API externa) viven en `infrastructure/adapters/{service}/`. Los modelos de dominio (abstracción interna) viven en `domain/models/{service}/`. El `FeignAdapter` mapea `InfraDto → DomainModel` inline con métodos privados `to{DomainType}()`. Si la API externa cambia, solo hay que actualizar el adaptador.
 
 ### Reglas de `ports[]`
 
@@ -1395,7 +1394,7 @@ Al generar o modificar código, verificar:
 - [ ] Evento con broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
 - [ ] Distinguir entre Domain Event (`domain/models/events/X.java`) e Integration Event (`application/events/XIntegrationEvent.java`) — cambios de broker solo afectan al adaptador `MessageBroker`
 - [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
-- [ ] Cada `listener` genera hasta 5 artefactos: NestedType(s) → IntegrationEvent → KafkaListener → kafka.yaml → Command
+- [ ] Cada `listener` genera hasta 6 artefactos: NestedType(s) → IntegrationEvent → KafkaListener → kafka.yaml → Command → CommandHandler
 - [ ] Campos de tipo objeto en listeners → declarar `nestedTypes:` para generar records auxiliares en `application/events/`
 - [ ] Endpoints REST específicos → declarar `endpoints:` con versiones y operaciones; usar nombres estándar para implementación completa
 - [ ] Clientes HTTP síncronos → declarar en `ports[]` (nivel raíz); `baseUrl:` en la primera entrada de cada `service:`

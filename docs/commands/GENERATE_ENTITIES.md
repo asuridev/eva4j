@@ -21,6 +21,7 @@
 15. [Prerequisites and common errors](#15-prerequisites-and-common-errors)
 16. [Declarative endpoints — use case patterns](#16-declarative-endpoints-endpoints--use-case-patterns)
 17. [Consuming external events (listeners:)](#17-consuming-external-events-listeners)
+18. [Synchronous HTTP clients (ports:)](#18-synchronous-http-clients-ports)
 
 ---
 
@@ -1279,5 +1280,245 @@ domain.yaml
 │       └── events:      → Domain Events that this module PRODUCES (domain/models/events/)
 │
 └── listeners:           → Integration Events that this module CONSUMES (infrastructure/kafkaListener/)
+```
+
+---
+
+## 18. Synchronous HTTP clients (`ports:`)
+
+The `ports:` section declares synchronous HTTP dependencies — external services this module **calls** via Feign. It lives at the **root level** of `domain.yaml` as a sibling of `aggregates:` and `listeners:`, because it represents a secondary port of the hexagonal architecture (not domain logic).
+
+> **Requires OpenFeign.** The generated `FeignClient` and `FeignAdapter` depend on `spring-cloud-starter-openfeign`. The project must include it as a dependency.
+
+### 18.1 Syntax
+
+```yaml
+# Root level — sibling of aggregates: and listeners:
+# One entry = one method. Entries with the same service: form a single FeignClient.
+
+ports:
+  - name: findScreeningById            # method name (camelCase)
+    service: ScreeningService          # groups into one interface/FeignClient (PascalCase)
+    target: screenings                 # destination module (documentary reference only)
+    baseUrl: http://localhost:8081     # → parameters/*/urls.yaml (first entry per service only)
+    http: GET /screenings/{id}         # HTTP verb + path
+    fields:                            # response fields → domain model + infra DTO
+      - name: id
+        type: String
+      - name: startTime
+        type: LocalDateTime
+
+  - name: findAvailableSeats
+    service: ScreeningService          # same service → same FeignClient
+    target: screenings
+    http: GET /screenings/{id}/seats
+    returnList: true                   # → List<Seat> in port interface
+    domainType: Seat                   # override auto-derived type (default: FindAvailableSeat)
+    fields:
+      - name: seatId
+        type: String
+      - name: seatType
+        type: String
+
+  - name: processPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    baseUrl: https://api.payments.example.com
+    http: POST /payments
+    body:                              # @RequestBody → ProcessPaymentRequestDto.java
+      - name: amount
+        type: BigDecimal
+      - name: paymentMethod
+        type: PaymentMethodInput       # object field → declare in nestedTypes:
+    nestedTypes:
+      - name: paymentMethodInput       # camelCase → PascalCase record
+        fields:
+          - name: type
+            type: String
+          - name: cardToken
+            type: String
+    fields:                            # response fields → Payment domain model + infra DTO
+      - name: paymentId
+        type: String
+      - name: status
+        type: String
+
+  - name: cancelPayment
+    service: PaymentGateway
+    target: payment-gateway-external
+    http: DELETE /payments/{id}
+    # fields: omitted → void return
+```
+
+### 18.2 Properties
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `name` | ✅ | Method name in camelCase. Auto-derives the domain type (e.g. `findScreeningById` → `Screening`). |
+| `service` | ✅ | PascalCase service name. All entries sharing the same `service:` are grouped into one FeignClient. |
+| `target` | ✅ | Destination module or service name (documentary reference — no code generated). |
+| `baseUrl` | ❌ | Base URL for the service. Declare only on the **first entry** of each `service:`. Becomes a `urls.yaml` property. Defaults to `http://localhost:8080` with a warning if omitted. |
+| `http` | ✅ | `VERB /path` (e.g. `GET /users/{id}`, `POST /payments`). Path variables are `@PathVariable`. |
+| `fields` | ❌ | Response payload fields. Generates a domain model record and an infra DTO. Omit for `void` return. |
+| `domainType` | ❌ | Overrides the domain type name auto-derived from `name`. Use when the default derivation is ambiguous or wrong. |
+| `returnList` | ❌ | `true` → return type is `List<{DomainType}>` in the interface and `List<{InfraDto}>` in the FeignClient. Default: `false`. |
+| `body` | ❌ | Request body fields (POST/PUT/PATCH only). Generates a `{MethodPascal}RequestDto.java`. Ignored with a warning on GET/DELETE. |
+| `nestedTypes` | ❌ | Auxiliary record classes for object-typed fields in `body:`. Each entry generates a Java record in `application/dtos/`. |
+
+### 18.3 Domain type derivation
+
+The domain type is derived automatically from the method name: the leading verb is stripped and the aggregate/entity name is extracted.
+
+| Method name | Auto-derived type | Override needed? |
+|-------------|------------------|-----------------|
+| `findScreeningById` | `Screening` | No |
+| `findAvailableSeats` | `AvailableSeat` | Yes — `domainType: Seat` |
+| `processPayment` | `Payment` | No |
+| `findPaymentStatus` | `PaymentStatus` | Yes — avoids collision with `Payment` if both exist |
+
+> **Rule:** if two methods in the same `service:` derive the same domain type, `generate entities` will fail. Declare `domainType:` on one of them to resolve the collision.
+
+### 18.4 Generated files
+
+**Per unique `service:` name:**
+
+| File | Description |
+|------|-------------|
+| `domain/repositories/{ServiceName}.java` | Secondary port interface — returns domain models |
+| `infrastructure/adapters/{service}/{ServiceName}FeignClient.java` | Typed Feign interface — returns infra DTOs |
+| `infrastructure/adapters/{service}/{ServiceName}FeignAdapter.java` | `@Component implements {ServiceName}` — ACL mapper |
+| `infrastructure/adapters/{service}/{ServiceName}FeignConfig.java` | Feign timeouts configuration |
+| `parameters/*/urls.yaml` | Base URL registered under a property key |
+
+**Per unique domain model derived from methods with `fields:`:**
+
+| File | Description |
+|------|-------------|
+| `domain/models/{service}/{DomainType}.java` | Domain model record (internal abstraction — ACL) |
+
+**Per method:**
+
+| File | Condition |
+|------|-----------|
+| `infrastructure/adapters/{service}/{MethodPascal}Dto.java` | When `fields:` present — infra DTO (external shape) |
+| `application/dtos/{MethodPascal}RequestDto.java` | When `body:` present (POST/PUT/PATCH) |
+| `application/dtos/{NestedTypePascal}.java` | When `nestedTypes:` declared |
+
+### 18.5 ACL pattern
+
+The generated code follows the Anti-Corruption Layer (ACL) pattern to isolate the domain from external API shapes.
+
+```
+External API shape (infra DTO)          Domain abstraction
+────────────────────────────           ──────────────────
+infrastructure/adapters/{service}/      domain/models/{service}/
+  {MethodPascal}Dto.java           →      {DomainType}.java
+  {ServiceName}FeignClient.java    →    domain/repositories/{ServiceName}.java
+  {ServiceName}FeignAdapter.java   (maps DTO → domain model inline)
+```
+
+When the external API changes its field names or structure, **only the adapter is modified** — the domain model and the port interface stay stable.
+
+### 18.6 Generated code example
+
+**`ScreeningService.java`** — `domain/repositories/` (port interface returning domain models)
+```java
+public interface ScreeningService {
+    Screening findScreeningById(String id);
+    List<Seat> findAvailableSeats(String id);
+}
+```
+
+**`ScreeningServiceFeignClient.java`** — `infrastructure/adapters/screeningService/`
+```java
+@FeignClient(name = "screeningService", url = "${urls.screening-service}")
+public interface ScreeningServiceFeignClient {
+
+    @GetMapping("/screenings/{id}")
+    FindScreeningByIdDto findScreeningById(@PathVariable("id") String id);
+
+    @GetMapping("/screenings/{id}/seats")
+    List<FindAvailableSeatsDto> findAvailableSeats(@PathVariable("id") String id);
+}
+```
+
+**`ScreeningServiceFeignAdapter.java`** — `infrastructure/adapters/screeningService/`
+```java
+@Component
+public class ScreeningServiceFeignAdapter implements ScreeningService {
+
+    private final ScreeningServiceFeignClient feignClient;
+
+    public ScreeningServiceFeignAdapter(ScreeningServiceFeignClient feignClient) {
+        this.feignClient = feignClient;
+    }
+
+    @Override
+    public Screening findScreeningById(String id) {
+        return toScreening(feignClient.findScreeningById(id));
+    }
+
+    @Override
+    public List<Seat> findAvailableSeats(String id) {
+        return feignClient.findAvailableSeats(id)
+                .stream().map(this::toSeat).collect(Collectors.toList());
+    }
+
+    private Screening toScreening(FindScreeningByIdDto dto) {
+        return new Screening(dto.id(), dto.startTime());
+    }
+
+    private Seat toSeat(FindAvailableSeatsDto dto) {
+        return new Seat(dto.seatId(), dto.seatType());
+    }
+}
+```
+
+**`Screening.java`** — `domain/models/screeningService/` (domain-side record)
+```java
+public record Screening(String id, LocalDateTime startTime) {}
+```
+
+### 18.7 `nestedTypes:` — when to use it
+
+Use `nestedTypes:` under a port entry when one of the `body:` fields is a structured object (not a primitive). Each `nestedTypes:` entry generates a Java record in `application/dtos/` that is used by the request DTO.
+
+```yaml
+- name: processPayment
+  service: PaymentGateway
+  http: POST /payments
+  body:
+    - name: amount
+      type: BigDecimal
+    - name: paymentMethod
+      type: PaymentMethodInput   # object → declare in nestedTypes:
+  nestedTypes:
+    - name: paymentMethodInput   # → PaymentMethodInput.java in application/dtos/
+      fields:
+        - name: type
+          type: String
+        - name: cardToken
+          type: String
+```
+
+### 18.8 `baseUrl:` resolution rule
+
+| Scenario | Behaviour |
+|----------|-----------|
+| `baseUrl:` on the first entry of a `service:` | Registered in `parameters/*/urls.yaml` as `urls.{service-kebab}` |
+| `baseUrl:` omitted for all entries of a `service:` | Warning printed; defaults to `http://localhost:8080` |
+| `baseUrl:` on non-first entry of a `service:` | Ignored — only the first entry's value is used |
+
+### 18.9 Contrast: async vs sync
+
+```
+domain.yaml
+├── aggregates:
+│   └── [Aggregate]
+│       └── events:     → Domain Events that this module PRODUCES  (async / broker)
+│
+├── listeners:          → Integration Events that this module CONSUMES (async / broker)
+│
+└── ports:              → External HTTP services that this module CALLS (sync / Feign)
 ```
 
