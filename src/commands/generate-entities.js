@@ -10,7 +10,7 @@ const { renderAndWrite } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
 const SharedGenerator = require('../generators/shared-generator');
 const ChecksumManager = require('../utils/checksum-manager');
-const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext } = require('./generate-kafka-event');
+const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext, updateKafkaYml } = require('./generate-kafka-event');
 
 // Maximum depth for recursive relationship traversal
 const MAX_DEPTH = 5;
@@ -174,7 +174,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
   try {
     // Parse domain.yaml
-    const { aggregates, allEnums, endpoints } = await parseDomainYaml(domainYamlPath, packageName, moduleName);
+    const { aggregates, allEnums, endpoints, listeners } = await parseDomainYaml(domainYamlPath, packageName, moduleName);
     
     spinner.succeed(chalk.green(`Found ${aggregates.length} aggregate(s) and ${allEnums.length} enum(s)`));
     
@@ -203,7 +203,9 @@ async function generateEntitiesCommand(moduleName, options = {}) {
     }
 
     // Detect installed message broker for auto-wiring integration events
-    const broker = hasDomainEventsInModule ? await getInstalledBroker(configManager) : null;
+    const broker = (hasDomainEventsInModule || (listeners && listeners.length > 0))
+      ? await getInstalledBroker(configManager)
+      : null;
 
     // Generate audit-related shared components if needed
     if (hasAuditableEntities || hasTrackUserEntities) {
@@ -553,6 +555,123 @@ async function generateEntitiesCommand(moduleName, options = {}) {
     }
 
     spinner.succeed(chalk.green(`Generated ${generatedFiles.length} files! ✨`));
+
+    // ── Generate listeners (integration events CONSUMED from external producers) ──
+    if (listeners && listeners.length > 0) {
+      if (broker === 'kafka') {
+        spinner.start(`Generating ${listeners.length} Kafka listener(s)...`);
+        for (const listener of listeners) {
+          // Validate topic presence (mandatory for standalone modules)
+          if (!listener.topic) {
+            spinner.warn(chalk.yellow(`⚠ listener '${listener.event}': topic is required when there is no system.yaml. Skipping.`));
+            continue;
+          }
+
+          const topicKey = listener.topic.toLowerCase().replace(/_/g, '-');
+          const listenerContext = {
+            packageName,
+            moduleName,
+            ...listener,
+            topicConstant: listener.topic,
+            topicSpringProperty: `\${topics.${topicKey}}`,
+            topicVariableName: toCamelCase(listener.topic.toLowerCase())
+          };
+
+          // 0. Nested type records (auxiliary value objects for object-typed fields)
+          for (const nt of (listener.nestedTypes || [])) {
+            const ntPath = path.join(
+              moduleBasePath, 'application', 'events',
+              `${nt.name}.java`
+            );
+            await renderAndWrite(
+              path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerNestedType.java.ejs'),
+              ntPath,
+              { packageName, moduleName, name: nt.name, fields: nt.fields },
+              writeOptions
+            );
+            generatedFiles.push({
+              type: 'Listener Nested Type',
+              name: nt.name,
+              path: `${moduleName}/application/events/${nt.name}.java`
+            });
+          }
+
+          // 1. Integration Event record
+          const integrationEventPath = path.join(
+            moduleBasePath, 'application', 'events',
+            `${listener.integrationEventClassName}.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerIntegrationEvent.java.ejs'),
+            integrationEventPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Listener Integration Event',
+            name: listener.integrationEventClassName,
+            path: `${moduleName}/application/events/${listener.integrationEventClassName}.java`
+          });
+
+          // 2. Kafka listener class
+          const kafkaListenerPath = path.join(
+            moduleBasePath, 'infrastructure', 'kafkaListener',
+            `${listener.listenerClassName}.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerClass.java.ejs'),
+            kafkaListenerPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Kafka Listener',
+            name: listener.listenerClassName,
+            path: `${moduleName}/infrastructure/kafkaListener/${listener.listenerClassName}.java`
+          });
+
+          // 3. Register topic in kafka.yaml (all environments)
+          await updateKafkaYml(projectDir, topicKey, listener.topic);
+
+          // 4. Typed Command dispatched from the listener
+          const commandPath = path.join(
+            moduleBasePath, 'application', 'commands',
+            `${listener.commandClassName}.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerCommand.java.ejs'),
+            commandPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Listener Command',
+            name: listener.commandClassName,
+            path: `${moduleName}/application/commands/${listener.commandClassName}.java`
+          });
+
+          // 5. Use case handler that processes the command
+          const handlerPath = path.join(
+            moduleBasePath, 'application', 'usecases',
+            `${listener.useCase}CommandHandler.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerCommandHandler.java.ejs'),
+            handlerPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Handler',
+            name: `${listener.useCase}CommandHandler`,
+            path: `${moduleName}/application/usecases/${listener.useCase}CommandHandler.java`
+          });
+        }
+        spinner.succeed(chalk.green(`Kafka listeners generated! ✨`));
+      } else if (listeners.length > 0) {
+        console.log(chalk.yellow(`⚠ listeners: section found but no broker is installed. Run 'eva add kafka-client' to generate listener classes.`));
+      }
+    }
 
     console.log(chalk.blue('\n📦 Generated files:'));
     const groupedFiles = generatedFiles.reduce((acc, file) => {

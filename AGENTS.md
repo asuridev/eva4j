@@ -464,6 +464,8 @@ aggregates:
 
 El `domain.yaml` también soporta una sección `endpoints:` opcional (sibling de `aggregates:`) para declarar los endpoints REST. Ver sección [⚡ Características Avanzadas](#-características-avanzadas-del-domainyaml) para detalles.
 
+El `domain.yaml` también soporta una sección `listeners:` opcional (sibling de `aggregates:`) para declarar los eventos externos que **consume** este módulo. Ver sección [⚡ Características Avanzadas](#-características-avanzadas-del-domainyaml) para detalles.
+
 ---
 
 ## ⚡ Características Avanzadas del domain.yaml
@@ -572,9 +574,45 @@ public void confirm() {
 
 **Nota:** el flag `kafka: true` por evento ya no es necesario — todos los eventos se cablearán automáticamente cuando haya un broker instalado.
 
+### Consumo de Eventos Externos (`listeners[]`)
+
+```yaml
+# Nivel raíz, sibling de aggregates:
+listeners:
+  - event: PaymentApprovedEvent    # PascalCase + sufijo Event
+    producer: payments             # Módulo que lo produce (referencia documental)
+    topic: PAYMENT_APPROVED        # Topic Kafka — obligatorio en módulos standalone
+    useCase: ConfirmOrder          # Caso de uso que maneja el evento (PascalCase)
+    fields:                        # Payload del Integration Event recibido
+      - name: orderId
+        type: String
+      - name: approvedAt
+        type: LocalDateTime
+```
+
+Genera por cada entrada:
+
+| Archivo generado | Descripción |
+|---|---|
+| `application/events/PaymentApprovedIntegrationEvent.java` | Record tipado con los `fields` declarados |
+| `infrastructure/kafkaListener/PaymentApprovedKafkaListener.java` | `@KafkaListener` que despacha al `useCase` vía `UseCaseMediator` |
+
+**Regla de `topic:`:**
+- Módulo standalone (sin `system.yaml`) → `topic:` **obligatorio**
+- Proyecto con `system.yaml` → puede omitirse; el generador lo infiere de `integrations.async[].topic`
+- Declarado explícitamente → tiene **precedencia** sobre la inferencia
+
+**Contraste eventos producidos vs. consumidos:**
+```
+aggregates:
+  └── events:     → Domain Events que PRODUCE (domain/models/events/)
+
+listeners:          → Integration Events que CONSUME (infrastructure/kafkaListener/)
+```
+
 ---
 
-## �️ Soft Delete
+## 🗑️ Soft Delete
 
 Cuando una entidad tiene `hasSoftDelete: true`, eva4j genera eliminación lógica en lugar de física.
 
@@ -1230,6 +1268,8 @@ Al generar o modificar código, verificar:
 - [ ] Evento de dominio → declarar en `events[]`, publicar con `raise()` en método de negocio
 - [ ] Evento con broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
 - [ ] Distinguir entre Domain Event (`domain/models/events/X.java`) e Integration Event (`application/events/XIntegrationEvent.java`) — cambios de broker solo afectan al adaptador `MessageBroker`
+- [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
+- [ ] Cada `listener` genera: `XIntegrationEvent.java` (record) + `XKafkaListener.java` (@KafkaListener con dispatch al `useCase`)
 - [ ] Endpoints REST específicos → declarar `endpoints:` con versiones y operaciones; usar nombres estándar para implementación completa
 
 ---

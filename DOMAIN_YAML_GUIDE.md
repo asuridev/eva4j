@@ -14,6 +14,7 @@
 - [Relaciones](#relaciones)
 - [Tipos de Datos](#tipos-de-datos)
 - [Sección endpoints](#sección-endpoints)
+- [Sección listeners](#sección-listeners)
 - [Ejemplos Completos](#ejemplos-completos)
 
 ---
@@ -135,10 +136,17 @@ aggregates:
         values: []
     
     events:
-      # Eventos de dominio que emite este agregado
+      # Eventos de dominio que emite este agregado (dentro del agregado)
       - name: NombreEventoOcurrido
         fields: []
-        # kafka: true  # opcional — genera publicación a Kafka vía MessageBroker
+
+# listeners: — eventos externos que CONSUME este módulo (nivel raíz)
+listeners:
+  - event: ExternalEvent           # Nombre del evento (PascalCase + Event)
+    producer: other-module         # Módulo que lo produce
+    topic: TOPIC_NAME              # Topic Kafka (obligatorio en módulos standalone)
+    useCase: HandleExternalEvent   # Caso de uso que maneja el evento
+    fields: []                     # Payload del Integration Event recibido
 ```
 
 ### Ubicación del archivo
@@ -1662,6 +1670,95 @@ public void confirm() {
 ```
 
 > **Nota:** `raise()` es provisto por la clase base de dominio. La publicación real ocurre tras el commit de la transacción gracias a `@TransactionalEventListener(AFTER_COMMIT)`.
+
+---
+
+## Sección listeners
+
+La sección `listeners:` declara los eventos externos que **consume** este módulo. Es el complemento de `events:` (producción): mientras que `events:` vive _dentro_ del agregado porque pertenece al modelo de dominio, `listeners:` vive en el **nivel raíz** del `domain.yaml` porque es una responsabilidad de integración/infraestructura.
+
+> **Requiere broker instalado.** El generador solo produce archivos de listener cuando `eva add kafka-client` ha sido ejecutado en el proyecto. Sin broker, la sección es ignorada.
+
+### Sintaxis
+
+```yaml
+# Nivel raíz — sibling de aggregates:
+listeners:
+  - event: PaymentApprovedEvent    # PascalCase + sufijo Event
+    producer: payments             # Módulo que produce el evento (referencia documental)
+    topic: PAYMENT_APPROVED        # Topic Kafka — obligatorio en módulos standalone
+    useCase: ConfirmOrder          # Caso de uso invocado al consumir (PascalCase)
+    fields:                        # Payload del Integration Event recibido
+      - name: orderId
+        type: String
+      - name: approvedAt
+        type: LocalDateTime
+```
+
+### Propiedades
+
+| Propiedad | Requerido | Descripción |
+|-----------|-----------|-------------|
+| `event` | ✅ | Nombre del evento en PascalCase, con sufijo `Event` |
+| `producer` | ✅ | Módulo que produce el evento (solo referencia documental, no genera código) |
+| `topic` | ✅ | Topic Kafka. Si existe `system.yaml`, el generador puede inferirlo de `integrations.async[].topic`; en módulos **standalone** es obligatorio declararlo explícitamente. |
+| `useCase` | ✅ | Nombre del caso de uso que maneja el evento (PascalCase) |
+| `fields` | ✅ | Campos del payload recibido; genera el record `IntegrationEvent` y tipifica el listener |
+
+### Archivos generados
+
+Para cada entrada en `listeners:`, eva4j genera dos archivos:
+
+**1. `PaymentApprovedIntegrationEvent.java`** — en `application/events/`
+```java
+public record PaymentApprovedIntegrationEvent(
+    String orderId,
+    LocalDateTime approvedAt
+) {}
+```
+
+**2. `PaymentApprovedKafkaListener.java`** — en `infrastructure/kafkaListener/`
+```java
+@Component
+public class PaymentApprovedKafkaListener {
+
+    private final UseCaseMediator useCaseMediator;
+
+    @Value("${kafka.topics.PAYMENT_APPROVED}")
+    private String paymentApprovedTopic;
+
+    public PaymentApprovedKafkaListener(UseCaseMediator useCaseMediator) {
+        this.useCaseMediator = useCaseMediator;
+    }
+
+    @KafkaListener(topics = "${kafka.topics.PAYMENT_APPROVED}")
+    public void handle(EventEnvelope<PaymentApprovedIntegrationEvent> envelope,
+                       Acknowledgment ack) {
+        PaymentApprovedIntegrationEvent event = envelope.data();
+        useCaseMediator.dispatch(new ConfirmOrderCommand(event.orderId()));
+        ack.acknowledge();
+    }
+}
+```
+
+### Regla de resolución de `topic:`
+
+| Escenario | Comportamiento |
+|-----------|---------------|
+| Módulo standalone (solo `domain.yaml`) | `topic:` **obligatorio** — no hay otra fuente de verdad |
+| Proyecto con `system.yaml` | `topic:` puede omitirse; el generador lo infiere de `integrations.async[].topic` |
+| `topic:` declarado explícitamente con `system.yaml` | El valor declarado tiene **precedencia** sobre la inferencia |
+
+### Contraste: producción vs. consumo
+
+```
+domain.yaml
+├── aggregates:
+│   └── [Aggregate]
+│       └── events:      → Domain Events que PRODUCE (domain/models/events/)
+│
+└── listeners:           → Integration Events que CONSUME (infrastructure/kafkaListener/)
+```
 
 ---
 

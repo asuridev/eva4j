@@ -1,0 +1,211 @@
+# EJEMPLO: LISTENERS — eventos externos que CONSUME un módulo
+# Complemento de domain-events.yaml (producción).
+#
+# La sección listeners: vive en el NIVEL RAÍZ del domain.yaml,
+# como sibling de aggregates:, porque es una responsabilidad de
+# integración/infraestructura, no de dominio.
+#
+# Generación:
+#   eva4j g entities reservations
+#
+# Requiere broker instalado:
+#   eva add kafka-client
+#
+# ─── ARCHIVOS GENERADOS ───────────────────────────────────────────────────────
+#
+# Por cada entrada en listeners: se generan CINCO archivos:
+#
+#   application/events/{Name}IntegrationEvent.java   ← record contrato (documentación)
+#   application/commands/{UseCase}Command.java        ← comando tipado despachado
+#   application/usecases/{UseCase}CommandHandler.java ← handler stub (implementar)
+#   infrastructure/kafkaListener/{Name}KafkaListener.java
+#   kafka.yaml (todas las envs)                       ← topic registrado
+#
+# Si se declaran nestedTypes:, se genera también:
+#   application/events/{NestedName}.java              ← record auxiliar por tipo objeto
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# EJEMPLO con nestedTypes: — campo 'details' de tipo PaymentDetails
+#
+# 0. reservations/application/events/PaymentDetails.java  (nested type)
+#
+#    public record PaymentDetails(
+#        String paymentId,
+#        String method,
+#        String currency,
+#        BigDecimal amount
+#    ) {}
+#
+# 1. reservations/application/events/PaymentApprovedIntegrationEvent.java
+#
+#    public record PaymentApprovedIntegrationEvent(
+#        String reservationId,
+#        LocalDateTime approvedAt,
+#        PaymentDetails details
+#    ) {}
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 2. reservations/infrastructure/kafkaListener/PaymentApprovedKafkaListener.java
+#
+#    @Component
+#    public class PaymentApprovedKafkaListener {
+#
+#        private final UseCaseMediator useCaseMediator;
+#        private final ObjectMapper objectMapper;
+#
+#        @Value("${topics.payment-approved}")
+#        private String paymentApprovedTopic;
+#
+#        public PaymentApprovedKafkaListener(UseCaseMediator useCaseMediator,
+#                                            ObjectMapper objectMapper) {
+#            this.useCaseMediator = useCaseMediator;
+#            this.objectMapper = objectMapper;
+#        }
+#
+#        @KafkaListener(topics = "${topics.payment-approved}")
+#        public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+#            String reservationId = objectMapper.convertValue(
+#                    event.data().get("reservationId"), String.class);
+#            LocalDateTime approvedAt = objectMapper.convertValue(
+#                    event.data().get("approvedAt"), LocalDateTime.class);
+#            PaymentDetails details = objectMapper.convertValue(
+#                    event.data().get("details"), PaymentDetails.class);
+#            useCaseMediator.dispatch(new ConfirmReservationCommand(
+#                    reservationId, approvedAt, details));
+#            ack.acknowledge();
+#        }
+#    }
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# REGLA DE topic:
+#
+#   • Módulo standalone (sin system.yaml) → topic: OBLIGATORIO
+#     No hay ninguna otra fuente de verdad para el nombre del topic.
+#
+#   • Proyecto con system.yaml → topic: puede omitirse.
+#     El generador lo infiere de integrations.async[].topic donde coincidan
+#     event y producer.
+#
+#   • topic: declarado explícitamente + system.yaml → el valor declarado
+#     tiene PRECEDENCIA sobre la inferencia del system.yaml.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# CONTRASTE: producción vs. consumo
+#
+#   domain.yaml
+#   ├── aggregates:
+#   │   └── [Aggregate]
+#   │       └── events:      → Domain Events que PRODUCE  (domain/models/events/)
+#   │
+#   └── listeners:           → Integration Events que CONSUME (infrastructure/kafkaListener/)
+
+aggregates:
+  - name: Reservation
+    entities:
+      - name: reservation
+        isRoot: true
+        tableName: reservations
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: screeningId
+            type: String
+          - name: customerId
+            type: String
+          - name: status
+            type: ReservationStatus
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+
+    enums:
+      - name: ReservationStatus
+        initialValue: PENDING
+        values:
+          - PENDING
+          - CONFIRMED
+          - CANCELLED
+          - EXPIRED
+        transitions:
+          - from: PENDING
+            to: CONFIRMED
+            method: confirm
+          - from: PENDING
+            to: CANCELLED
+            method: cancel
+          - from: PENDING
+            to: EXPIRED
+            method: expire
+
+    events:
+      - name: ReservationConfirmed
+        fields:
+          - name: reservationId
+            type: String
+          - name: customerId
+            type: String
+          - name: confirmedAt
+            type: LocalDateTime
+
+      - name: ReservationCancelled
+        fields:
+          - name: reservationId
+            type: String
+          - name: reason
+            type: String
+
+# ─── Eventos externos que este módulo CONSUME ────────────────────────────────
+# Nivel raíz, sibling de aggregates:
+# topic: es obligatorio en módulos standalone (sin system.yaml).
+
+listeners:
+  - event: PaymentApprovedEvent
+    producer: payments             # módulo origen (solo referencia documental)
+    topic: PAYMENT_APPROVED        # obligatorio: no hay system.yaml en este ejemplo
+    useCase: ConfirmReservation    # command handler invocado al recibir el evento
+    fields:                        # payload del Integration Event recibido
+      - name: reservationId
+        type: String
+      - name: approvedAt
+        type: LocalDateTime
+      - name: details
+        type: PaymentDetails       # objeto estructurado → declarado en nestedTypes
+    nestedTypes:                   # genera PaymentDetails.java en application/events/
+      - name: paymentDetails       # camelCase → PascalCase en el record generado
+        fields:
+          - name: paymentId
+            type: String
+          - name: method
+            type: String
+          - name: currency
+            type: String
+          - name: amount
+            type: BigDecimal
+
+  - event: PaymentRejectedEvent
+    producer: payments
+    topic: PAYMENT_REJECTED
+    useCase: ExpireReservation
+    fields:
+      - name: reservationId
+        type: String
+      - name: rejectedAt
+        type: LocalDateTime
+      - name: reason
+        type: String
+
+  - event: ScreeningCancelledEvent
+    producer: screenings
+    topic: SCREENING_CANCELLED
+    useCase: CancelReservationsByScreening
+    fields:
+      - name: screeningId
+        type: String
+      - name: cancelledAt
+        type: LocalDateTime

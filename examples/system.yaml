@@ -206,7 +206,9 @@ integrations:
       topic: RESERVATION_CREATED
       consumers:
         - module: payments
+          useCase: HandleReservationCreated
         - module: notifications
+          useCase: NotifyReservationCreated
 
     # Pago aprobado → reserva debe confirmarse; cliente recibe confirmación
     - event: PaymentApprovedEvent
@@ -214,7 +216,9 @@ integrations:
       topic: PAYMENT_APPROVED
       consumers:
         - module: reservations
+          useCase: ConfirmReservation
         - module: notifications
+          useCase: NotifyPaymentApproved
 
     # Pago rechazado → reserva debe expirar y liberar asientos; cliente recibe aviso
     - event: PaymentRejectedEvent
@@ -222,7 +226,9 @@ integrations:
       topic: PAYMENT_REJECTED
       consumers:
         - module: reservations
+          useCase: ExpireReservation
         - module: notifications
+          useCase: NotifyPaymentRejected
 
     # Reserva confirmada → se emiten los tickets QR y se envían al cliente; cliente acumula puntos de fidelidad
     - event: ReservationConfirmedEvent
@@ -230,7 +236,9 @@ integrations:
       topic: RESERVATION_CONFIRMED
       consumers:
         - module: notifications
+          useCase: NotifyReservationConfirmed
         - module: customers     # acumula loyalty points al confirmar reserva
+          useCase: AccumulateLoyaltyPoints
 
     # Reserva cancelada → pagos evalúa reembolso; screenings libera asientos; cliente recibe notificación
     - event: ReservationCancelledEvent
@@ -238,8 +246,11 @@ integrations:
       topic: RESERVATION_CANCELLED
       consumers:
         - module: payments        # evalúa si aplica reembolso
+          useCase: ProcessRefund
         - module: screenings      # libera ScreeningSeats → AVAILABLE (también cubre unlock de sala privada)
+          useCase: ReleaseScreeningSeats
         - module: notifications
+          useCase: NotifyReservationCancelled
 
     # Reserva expirada por timeout (sin pago) → screenings libera asientos; cliente recibe aviso (sin reembolso)
     - event: ReservationExpiredEvent
@@ -247,7 +258,9 @@ integrations:
       topic: RESERVATION_EXPIRED
       consumers:
         - module: screenings      # libera ScreeningSeats → AVAILABLE
+          useCase: ReleaseScreeningSeats
         - module: notifications   # avisa al cliente que su tiempo de bloqueo expiró
+          useCase: NotifyReservationExpired
 
     # Función cancelada → reservas libera asientos y expira reservas activas; clientes notificados
     - event: ScreeningCancelledEvent
@@ -255,7 +268,9 @@ integrations:
       topic: SCREENING_CANCELLED
       consumers:
         - module: reservations
+          useCase: CancelReservationsByScreening
         - module: notifications
+          useCase: NotifyScreeningCancelled
 
     # ★ NUEVO — Reserva de evento privado creada → screenings bloquea la sala; payments inicia cobro total; notifications avisa
     - event: PrivateEventReservationCreatedEvent
@@ -263,8 +278,11 @@ integrations:
       topic: PRIVATE_EVENT_RESERVATION_CREATED
       consumers:
         - module: screenings
+          useCase: LockScreeningForPrivateEvent
         - module: payments
+          useCase: InitiatePrivateEventPayment
         - module: notifications
+          useCase: NotifyPrivateEventReservationCreated
 
     # ★ NUEVO — Sala bloqueada exitosamente → notifications confirma al organizador del evento
     - event: TheaterLockedForPrivateEventEvent
@@ -272,6 +290,7 @@ integrations:
       topic: THEATER_LOCKED_FOR_PRIVATE_EVENT
       consumers:
         - module: notifications
+          useCase: NotifyTheaterLockedForPrivateEvent
 
   sync:
     # Al programar una función se valida que la película esté activa y se obtiene su duración

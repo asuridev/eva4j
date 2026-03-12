@@ -1,0 +1,37 @@
+package <%= packageName %>.<%= moduleName %>.application.events;
+<% const needsBigDecimal = fields && fields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = fields && fields.some(f => f.javaType === 'LocalDate' || f.javaType === 'LocalDateTime' || f.javaType === 'LocalTime'); %>
+<% const needsUUID       = fields && fields.some(f => f.javaType === 'UUID'); %>
+<% const needsList       = fields && fields.some(f => f.javaType && f.javaType.startsWith('List')); %>
+<% if (needsBigDecimal) { %>
+import java.math.BigDecimal;
+<% } %>
+<% if (needsLocalDate) { %>
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+<% } %>
+<% if (needsUUID) { %>
+import java.util.UUID;
+<% } %>
+<% if (needsList) { %>
+import java.util.List;
+<% } %>
+
+/**
+ * Integration Event consumed from topic <%= topicConstant %>.
+ * Produced by: <%= producer %>.
+ * <p>
+ * This record is the typed payload received from the message broker.
+ * It is intentionally decoupled from the producer's domain model so that
+ * changes in the producer never force changes here beyond the agreed contract.
+ */
+public record <%= integrationEventClassName %>(
+<% if (fields && fields.length > 0) { %>
+<% fields.forEach((field, idx) => { %>
+    <%- field.javaType %> <%= field.name %><%= idx < fields.length - 1 ? ',' : '' %>
+<% }); %>
+<% } else { %>
+    // TODO: Add payload fields matching the producer's Integration Event
+<% } %>
+) {}

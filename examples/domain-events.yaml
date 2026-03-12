@@ -123,6 +123,65 @@
 # Para conectar un broker externo después de generar:
 #   eva4j g kafka-event orders OrderPlaced
 #   (el selector muestra los eventos declarados en este domain.yaml como opciones)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# SECCIÓN listeners: — eventos externos que CONSUME este módulo
+#
+# Complemento de events: (producción). A diferencia de events:, que vive
+# DENTRO del agregado porque pertenece al modelo de dominio, listeners: vive
+# en el NIVEL RAÍZ del domain.yaml porque es una preocupación de integración.
+#
+# Estructura generada por cada listener:
+#
+#   ┌─ application/events/
+#   │    PaymentApprovedIntegrationEvent.java   ← record tipado con los fields
+#   │
+#   └─ infrastructure/kafkaListener/
+#        PaymentApprovedKafkaListener.java      ← @KafkaListener que despacha
+#                                                  al useCase via UseCaseMediator
+#
+# Código generado de ejemplo:
+#
+#   // application/events/PaymentApprovedIntegrationEvent.java
+#   public record PaymentApprovedIntegrationEvent(
+#       String orderId,
+#       String paymentId,
+#       LocalDateTime approvedAt
+#   ) {}
+#
+#   // infrastructure/kafkaListener/PaymentApprovedKafkaListener.java
+#   @Component
+#   public class PaymentApprovedKafkaListener {
+#
+#       private final UseCaseMediator useCaseMediator;
+#
+#       @Value("${kafka.topics.PAYMENT_APPROVED}")
+#       private String paymentApprovedTopic;
+#
+#       @KafkaListener(topics = "${kafka.topics.PAYMENT_APPROVED}")
+#       public void handle(EventEnvelope<PaymentApprovedIntegrationEvent> envelope,
+#                          Acknowledgment ack) {
+#           PaymentApprovedIntegrationEvent event = envelope.data();
+#           useCaseMediator.dispatch(new ConfirmOrderCommand(event.orderId()));
+#           ack.acknowledge();
+#       }
+#   }
+#
+# Propiedades:
+#   event       (requerido) — Nombre del evento consumido (PascalCase + sufijo Event)
+#   producer    (requerido) — Módulo que produce el evento (referencia documental)
+#   topic       (requerido) — Topic Kafka. Si el proyecto tiene system.yaml el generador
+#                             puede inferirlo; en módulos standalone es obligatorio
+#                             declararlo explícitamente (no hay otra fuente de verdad).
+#   useCase     (requerido) — Caso de uso que maneja el evento (PascalCase)
+#   fields      (requerido) — Payload recibido; genera el record IntegrationEvent
+#                             y tipifica el Command despachado desde el listener.
+#   nestedTypes (opcional)  — Tipos auxiliares para campos objeto en fields.
+#                             Genera {Name}.java en application/events/ por cada entrada.
+#                             Usar cuando un field no es un tipo Java primitivo sino
+#                             un objeto estructurado del dominio del productor.
+#                             El name se declara camelCase y se genera en PascalCase.
 
 aggregates:
   - name: Order
@@ -199,3 +258,44 @@ aggregates:
             type: String
           - name: estimatedDeliveryDate
             type: LocalDate
+
+# ─── Eventos externos que este módulo CONSUME ────────────────────────────────
+# Nivel raíz, sibling de aggregates:
+# Requiere broker instalado (eva add kafka-client) para generación.
+# topic: es obligatorio en módulos standalone (sin system.yaml).
+
+listeners:
+  - event: PaymentApprovedEvent
+    producer: payments             # módulo origen (solo documental)
+    topic: PAYMENT_APPROVED        # obligatorio si no hay system.yaml
+    useCase: ConfirmOrder          # Command handler que se ejecuta
+    fields:                        # payload del Integration Event recibido
+      - name: orderId
+        type: String
+      - name: approvedAt
+        type: LocalDateTime
+      - name: details
+        type: PaymentDetails       # objeto estructurado → declarado en nestedTypes
+    nestedTypes:                   # genera PaymentDetails.java en application/events/
+      - name: paymentDetails
+        fields:
+          - name: paymentId
+            type: String
+          - name: method
+            type: String
+          - name: currency
+            type: String
+          - name: amount
+            type: BigDecimal
+
+  - event: PaymentRejectedEvent
+    producer: payments
+    topic: PAYMENT_REJECTED
+    useCase: CancelOrder
+    fields:
+      - name: orderId
+        type: String
+      - name: rejectedAt
+        type: LocalDateTime
+      - name: reason
+        type: String

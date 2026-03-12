@@ -1,0 +1,23 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+
+import <%= packageName %>.<%= moduleName %>.application.commands.<%= commandClassName %>;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.interfaces.CommandHandler;
+
+/**
+ * Handles <%= commandClassName %> dispatched when <%= event %> is received.
+ * Produced by: <%= producer %>.
+ */
+@ApplicationComponent
+public class <%= useCase %>CommandHandler implements CommandHandler<<%= commandClassName %>> {
+
+  public <%= useCase %>CommandHandler() {
+
+  }
+
+  @Override
+  public void handle(<%= commandClassName %> command) {
+    // TODO: implement <%= useCase %> logic
+  }
+
+}

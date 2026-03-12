@@ -27,7 +27,8 @@ async function parseDomainYaml(yamlPath, packageName = '', moduleName = '') {
   return {
     aggregates,
     allEnums: extractAllEnums(domainData.aggregates),
-    endpoints: parseEndpoints(domainData)
+    endpoints: parseEndpoints(domainData),
+    listeners: parseListeners(domainData)
   };
 }
 
@@ -990,6 +991,50 @@ function parseEndpoints(domainData) {
   };
 }
 
+/**
+ * Parse the optional listeners section from domain.yaml.
+ * Declares integration events this module CONSUMES from external producers.
+ * @param {Object} domainData - Raw parsed YAML data
+ * @returns {Array} Parsed listeners array (empty if not declared)
+ */
+function parseListeners(domainData) {
+  if (!domainData.listeners || !Array.isArray(domainData.listeners)) return [];
+  return domainData.listeners.map(listener => {
+    const eventName = toPascalCase(listener.event);
+    // Normalise: strip trailing 'Event' suffix for class naming, re-add it consistently
+    const baseName = eventName.endsWith('Event') ? eventName.slice(0, -5) : eventName;
+    const integrationEventClassName = `${baseName}IntegrationEvent`;
+    // e.g. PaymentApprovedKafkaListener
+    const listenerClassName = `${baseName}KafkaListener`;
+    const useCaseName = toPascalCase(listener.useCase);
+    const commandClassName = `${useCaseName}Command`;
+    const topic = listener.topic || null;
+    const fields = (listener.fields || []).map(f => ({
+      name: toCamelCase(f.name),
+      javaType: f.type
+    }));
+    const nestedTypes = (listener.nestedTypes || []).map(nt => ({
+      name: toPascalCase(nt.name),
+      fields: (nt.fields || []).map(f => ({
+        name: toCamelCase(f.name),
+        javaType: f.type
+      }))
+    }));
+    return {
+      event: eventName,
+      baseName,
+      producer: listener.producer || null,
+      topic,
+      useCase: useCaseName,
+      commandClassName,
+      integrationEventClassName,
+      listenerClassName,
+      fields,
+      nestedTypes
+    };
+  });
+}
+
 module.exports = {
   parseDomainYaml,
   parseAggregate,
@@ -998,5 +1043,6 @@ module.exports = {
   generateAggregateMethods,
   generateEntityImports,
   generateValidationImports,
-  generateAggregateMethodImports
+  generateAggregateMethodImports,
+  parseListeners
 };

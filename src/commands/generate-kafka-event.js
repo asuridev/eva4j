@@ -694,3 +694,4 @@ module.exports = generateKafkaEventCommand;
 module.exports.generateSingleKafkaEvent = generateSingleKafkaEvent;
 module.exports.buildKafkaEventContext = buildKafkaEventContext;
 module.exports.getInstalledBroker = getInstalledBroker;
+module.exports.updateKafkaYml = updateKafkaYml;
