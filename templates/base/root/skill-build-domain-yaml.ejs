@@ -168,12 +168,20 @@ aggregates:
         values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
 
     events:
-      - name: OrderConfirmedEvent       # PascalCase, tiempo pasado, sufijo Event
+      - name: OrderPlacedEvent          # PascalCase, tiempo pasado, sufijo Event
+        triggers:
+          - place                       # nombre del método de transición que dispara este evento
         fields:
-          - name: orderId
+          # {entityName}Id NO se declara — disponible como event.getAggregateId()
+          - name: customerId
             type: String
-          - name: confirmedAt
+          - name: confirmedAt           # termina en 'At' + LocalDateTime → resuelve a LocalDateTime.now()
             type: LocalDateTime
+      - name: OrderCancelledEvent
+        triggers:
+          - cancel
+        fields:
+          - name: reason                # no resuelto → null /* TODO: provide reason */
 
 endpoints:                              # Opcional — solo si system/system.yaml ya declara exposes: para este módulo
   basePath: /orders
@@ -452,6 +460,8 @@ Antes de proponer el `domain.yaml`, verifica:
 - [ ] Value Objects sin campo `id`
 - [ ] Relaciones cross-aggregate usando `reference:` en el campo ID, no `relationships:`
 - [ ] `events[].name` consistente con `system/system.yaml → integrations.async[].event` (producer = este módulo)
+- [ ] `events[].triggers[]` referencia métodos que existen en `enums[].transitions[].method` (C2-004)
+- [ ] `{entityName}Id` NO declarado en `events[].fields` — el id del agregado ya está en `DomainEvent.getAggregateId()`
 - [ ] `endpoints[].useCase` consistente con `system/system.yaml → exposes[].useCase`
 - [ ] `endpoints[].path` son **relativos** al basePath (ej: `/{id}`, no `/orders/{id}`)
 - [ ] `listeners[]` presentes para todos los eventos donde este módulo aparece en `consumers[]`

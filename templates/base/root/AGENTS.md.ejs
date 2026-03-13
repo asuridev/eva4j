@@ -1533,6 +1533,8 @@ public boolean canConfirm()  { return this.status.canTransitionTo(OrderStatus.CO
 
 ### Domain Events (`events[]`)
 
+Los eventos se declaran bajo el agregado (al mismo nivel que `entities:`, `enums:`, `valueObjects:`). Opcionalmente, se conectan con transiciones de estado mediante la propiedad `triggers`.
+
 ```yaml
 aggregates:
   - name: Order
@@ -1540,52 +1542,101 @@ aggregates:
       - name: order
         isRoot: true
         # ...
+    enums:
+      - name: OrderStatus
+        initialValue: DRAFT
+        transitions:
+          - from: DRAFT
+            to: PLACED
+            method: place
+          - from: PLACED
+            to: CANCELLED
+            method: cancel
+        values: [DRAFT, PLACED, CANCELLED]
     events:
-      - name: OrderConfirmed
+      - name: OrderPlaced
+        triggers:
+          - place             # ← nombre del método de transición
         fields:
-          - name: orderId
+          # orderId NO se declara — disponible como event.getAggregateId()
+          - name: customerId
             type: String
-          - name: confirmedAt
+          - name: totalAmount
+            type: BigDecimal
+          - name: placedAt
             type: LocalDateTime
-      - name: OrderShipped
+      - name: OrderCancelled
+        triggers:
+          - cancel
         fields:
-          - name: orderId
-            type: String
-          - name: trackingNumber
+          - name: reason      # no resuelto → null /* TODO: provide reason */
             type: String
 ```
 
-Genera `OrderConfirmed.java` (en `domain/models/events/`) que extiende `DomainEvent`, y `OrderDomainEventHandler.java` (en `application/usecases/`) con `@TransactionalEventListener(AFTER_COMMIT)`.
+#### Propiedad `triggers`
+
+Lista de nombres de métodos de transición que publican este evento. El generador emite automáticamente `raise(new XEvent(...))` dentro de cada método listado.
+
+**Reglas de resolución de argumentos (en orden):**
+
+| Condición del campo del evento | Argumento generado |
+|---|---|
+| Siempre (primer arg, `aggregateId` del `DomainEvent` base) | `this.getId()` |
+| Nombre = `{entityName}Id` (ej: `orderId` en `Order`) | **Ignorado** — ya cubierto por `aggregateId` |
+| Nombre coincide con un campo de la entidad | `this.get{Field}()` |
+| Nombre termina en `At` + tipo `LocalDateTime` | `LocalDateTime.now()` |
+| No resuelto | `null /* TODO: provide {fieldName} */` |
+
+> **Convención:** No declarar `{entityName}Id` en `events[].fields`. El id del agregado ya está disponible para el consumidor mediante `event.getAggregateId()` (heredado de `DomainEvent`).
+
+**Código generado:**
+
+```java
+public void place() {
+    this.status = this.status.transitionTo(OrderStatus.PLACED);
+    raise(new OrderPlaced(this.getId(), this.getCustomerId(), this.getTotalAmount(), LocalDateTime.now()));
+    //                    ^—aggregateId  ^—customerId         ^—totalAmount         ^—placedAt
+}
+
+public void cancel() {
+    this.status = this.status.transitionTo(OrderStatus.CANCELLED);
+    raise(new OrderCancelled(this.getId(), null /* TODO: provide reason */));
+}
+```
+
+Si un evento **no declara `triggers`**, el desarrollador debe llamar a `raise()` manualmente dentro del método de negocio.
+
+Genera `OrderPlaced.java` (en `domain/models/events/`) que extiende `DomainEvent`, y `OrderDomainEventHandler.java` (en `application/usecases/`) con `@TransactionalEventListener(AFTER_COMMIT)`.
+
+**Validaciones del generador:**
+
+| Código | Severidad | Condición |
+|---|---|---|
+| C2-001 | warning | Transición sin use-case — silenciado si tiene `triggers` |
+| C2-004 | error | `triggers` referencia un método que no existe en ninguna transición |
+| C2-005 | info | Transición sin ningún evento asociado — considera declarar `triggers` |
 
 **Auto-wiring de broker:** Si el proyecto tiene `eva add kafka-client` instalado, `eva g entities` genera automáticamente la capa de Integration Events para **todos** los eventos declarados:
 
 | Archivo generado | Descripción |
 |---|---|
-| `application/events/OrderConfirmedIntegrationEvent.java` | Record broker-facing (Integration Event) |
+| `application/events/OrderPlacedIntegrationEvent.java` | Record broker-facing (Integration Event) |
 | `application/ports/MessageBroker.java` | Puerto broker-agnóstico (creado/actualizado) |
 | `infrastructure/adapters/kafkaMessageBroker/…` | Adaptador Kafka (creado/actualizado) |
 | `shared/…/kafkaConfig/KafkaConfig.java` | Bean `NewTopic` (actualizado) |
 | `parameters/*/kafka.yaml` | Configuración de topic (actualizada) |
 
 **Domain Event vs Integration Event:**
-- **Domain Event** (`domain/models/events/OrderConfirmed.java`) — señal interna del bounded context. Nunca depende de infraestructura.
-- **Integration Event** (`application/events/OrderConfirmedIntegrationEvent.java`) — proyección para el broker. Cambiar de Kafka a RabbitMQ solo requiere cambiar el adaptador `MessageBroker`.
+- **Domain Event** (`domain/models/events/OrderPlaced.java`) — señal interna del bounded context. Nunca depende de infraestructura.
+- **Integration Event** (`application/events/OrderPlacedIntegrationEvent.java`) — proyección para el broker. Cambiar de Kafka a RabbitMQ solo requiere cambiar el adaptador `MessageBroker`.
 
 El `DomainEventHandler` mapea un Domain Event a un Integration Event:
 ```java
 @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-public void onOrderConfirmed(OrderConfirmed event) {
-    messageBroker.publishOrderConfirmedIntegrationEvent(
-        new OrderConfirmedIntegrationEvent(event.getOrderId(), event.getConfirmedAt())
+public void onOrderPlaced(OrderPlaced event) {
+    messageBroker.publishOrderPlacedIntegrationEvent(
+        new OrderPlacedIntegrationEvent(event.getCustomerId(), event.getTotalAmount(), event.getPlacedAt())
     );
-}
-```
-
-**Publicar desde la entidad raíz** usando `raise()` heredado:
-```java
-public void confirm() {
-    this.status = this.status.transitionTo(OrderStatus.CONFIRMED);
-    raise(new OrderConfirmed(this.id, LocalDateTime.now()));
 }
 ```
 

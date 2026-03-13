@@ -627,26 +627,59 @@ Java condition evaluated in the transition method. If the expression is `true`, 
 
 ## 11. Domain events
 
-Events are declared under the aggregate (at the same level as `entities:`, `enums:`, `valueObjects:`).
+Events are declared under the aggregate (at the same level as `entities:`, `enums:`, `valueObjects:`). Use the optional `triggers` property to connect an event to one or more state transition methods — the generator then emits `raise()` automatically inside each method.
 
 ```yaml
 aggregates:
   - name: Order
+    enums:
+      - name: OrderStatus
+        initialValue: DRAFT
+        transitions:
+          - from: DRAFT
+            to: PLACED
+            method: place
+          - from: PLACED
+            to: CANCELLED
+            method: cancel
+        values: [DRAFT, PLACED, CANCELLED]
     events:
       - name: OrderPlaced
+        triggers:
+          - place             # transition method name that publishes this event
         fields:
+          # orderId NOT declared — already available as event.getAggregateId()
           - name: customerId
             type: String
           - name: totalAmount
             type: BigDecimal
+          - name: placedAt
+            type: LocalDateTime
       - name: OrderCancelled
+        triggers:
+          - cancel
         fields:
-          - name: reason
+          - name: reason      # unresolvable → null /* TODO: provide reason */
             type: String
     entities:
       - name: Order
+        isRoot: true
         # ...
 ```
+
+### `triggers` — argument resolution rules (in order)
+
+| Field condition | Generated argument |
+|---|---|
+| Always (first arg — `aggregateId` from `DomainEvent` base) | `this.getId()` |
+| Name = `{entityName}Id` (e.g. `orderId` in `Order`) | **Skipped** — already covered by `aggregateId` |
+| Name matches a field of the entity | `this.get{Field}()` |
+| Name ends in `At` + type `LocalDateTime` | `LocalDateTime.now()` |
+| Not resolvable | `null /* TODO: provide {fieldName} */` |
+
+> **Convention:** Do not declare `{entityName}Id` in `events[].fields`. The aggregate id is already accessible to consumers via `event.getAggregateId()` (inherited from `DomainEvent`).
+
+If an event has **no `triggers`**, the developer must call `raise()` manually inside the business method.
 
 ### Generated files
 
@@ -661,29 +694,52 @@ aggregates:
 
 ### Generated event
 
+Fields declared as `{entityName}Id` are excluded from the record — consumers use `getAggregateId()` instead.
+
 ```java
 public final class OrderPlaced extends DomainEvent {
+    // aggregateId (= orderId) inherited from DomainEvent — not repeated here
     private final String customerId;
     private final BigDecimal totalAmount;
+    private final LocalDateTime placedAt;
 
-    public OrderPlaced(String customerId, BigDecimal totalAmount) {
+    public OrderPlaced(String aggregateId, String customerId, BigDecimal totalAmount, LocalDateTime placedAt) {
+        super(aggregateId);
         this.customerId = customerId;
         this.totalAmount = totalAmount;
+        this.placedAt = placedAt;
     }
 
     // getters
 }
 ```
 
-### How to raise an event in the entity
+### How to raise an event — auto-generated via `triggers`
+
+When `triggers` is declared, the generator emits the `raise()` call automatically inside each transition method:
+
+```java
+public void place() {
+    this.status = this.status.transitionTo(OrderStatus.PLACED);
+    raise(new OrderPlaced(this.getId(), this.getCustomerId(), this.getTotalAmount(), LocalDateTime.now()));
+    //                    ^—aggregateId  ^—customerId         ^—totalAmount         ^—placedAt
+}
+
+public void cancel() {
+    this.status = this.status.transitionTo(OrderStatus.CANCELLED);
+    raise(new OrderCancelled(this.getId(), null /* TODO: provide reason */));
+}
+```
+
+For events **without `triggers`**, call `raise()` manually:
 
 ```java
 public class Order {
     private final List<DomainEvent> domainEvents = new ArrayList<>();
 
-    public void place(String customerId, BigDecimal totalAmount) {
+    public void someBusinessAction() {
         // business logic...
-        raise(new OrderPlaced(customerId, totalAmount));
+        raise(new OrderPlaced(this.getId(), this.customerId, this.totalAmount, LocalDateTime.now()));
     }
 
     protected void raise(DomainEvent event) {
@@ -697,6 +753,14 @@ public class Order {
     }
 }
 ```
+
+### Validator checks
+
+| Code | Severity | Condition |
+|------|----------|-----------|
+| C2-001 | warning | Transition without a use-case — silenced when `triggers` is present |
+| C2-004 | error | `triggers` references a method that does not exist in any transition |
+| C2-005 | info | Transition method with no associated event — consider adding `triggers` |
 
 ---
 
@@ -840,10 +904,17 @@ aggregates:
 
     events:
       - name: OrderPlaced
+        triggers:
+          - confirm
         fields:
+          # orderId NOT declared — available as event.getAggregateId()
           - name: customerId
             type: String
+          - name: confirmedAt
+            type: LocalDateTime
       - name: OrderCancelled
+        triggers:
+          - cancel
         fields:
           - name: reason
             type: String
