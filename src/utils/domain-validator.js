@@ -454,9 +454,23 @@ function runC2(domainConfigs, systemConfig) {
         }
       }
     }
-    // Also include listener event names as traceable origins
+    // Also include listener event names and field names as traceable origins.
+    // Field names cover cases like wasLateReturn → [late, return] tracing LATE_RETURN,
+    // where the semantic connection is in a boolean field name, not the event name itself.
     for (const listener of config.listeners || []) {
       for (const w of extractWords(listener.event)) moduleEventTokens.add(w);
+      for (const f of listener.fields || []) {
+        for (const w of extractWords(f.name)) moduleEventTokens.add(w);
+      }
+    }
+    // Also include endpoint useCase names as traceable origins.
+    // Values like DAMAGE_REPORT originate from an HTTP action (e.g. RegisterIncident),
+    // not from a Kafka event — the useCase name provides the semantic trace.
+    const epSection = config.endpoints;
+    for (const ver of (epSection && epSection.versions) || []) {
+      for (const op of ver.operations || []) {
+        for (const w of extractWords(op.useCase || '')) moduleEventTokens.add(w);
+      }
     }
 
     for (const agg of config.aggregates || []) {
@@ -469,7 +483,7 @@ function runC2(domainConfigs, systemConfig) {
             checks['C2-003'].findings.push(
               finding(
                 moduleName,
-                `Valor '${val}' en ${en.name} no tiene evento Kafka trazable que lo origine`,
+                `Valor '${val}' en ${en.name} no tiene mecanismo trazable que lo origine (ni evento Kafka ni endpoint HTTP)`,
                 `Enum: ${en.name} en agregado ${agg.name}`
               )
             );
@@ -651,7 +665,7 @@ function runC3(domainConfigs, systemConfig) {
   }
 
   setDefaultSeverities(checks, {
-    'C3-001': 'warning',
+    'C3-001': 'info',    // reference.module may come from request context (JWT/header) — not always an active integration
     'C3-002': 'error',
     'C3-003': 'warning',
     'C3-004': 'warning',
@@ -692,6 +706,15 @@ function runC4(domainConfigs, systemConfig) {
       // Determine if root entity has audit
       const rootEntity = (agg.entities || []).find((e) => e.isRoot);
       const rootHasAudit = rootEntity && rootEntity.audit && rootEntity.audit.enabled;
+
+      // Collect enum names that have transitions — state-machine fields communicate their
+      // changes through event names (e.g. PaymentApprovedEvent), not as explicit fields.
+      // Excluded from C4-004 to avoid false positives on status fields.
+      const stateMachineEnumNames = new Set(
+        (agg.enums || [])
+          .filter((en) => en.transitions && en.transitions.length > 0)
+          .map((en) => en.name)
+      );
 
       for (const entity of agg.entities || []) {
         // C4-001: child entity with cascade REMOVE but no audit and no softDelete
@@ -740,8 +763,15 @@ function runC4(domainConfigs, systemConfig) {
             );
           }
 
-          // C4-004: readOnly field in critical module not appearing in any event
-          if (critical && field.readOnly && !AUDIT_FIELDS.has(field.name)) {
+          // C4-004: readOnly field in critical module not appearing in any event.
+          // Excludes:
+          //   - hidden fields (sensitive — not to be propagated in events)
+          //   - fields with defaultValue (system constants like currency="USD")
+          //   - state-machine fields (type is an enum with transitions — state is communicated
+          //     implicitly by the event name, e.g. PaymentApprovedEvent implies status=APPROVED)
+          const isSystemConstant = field.defaultValue !== undefined && field.defaultValue !== null;
+          const isStateMachineField = stateMachineEnumNames.has(field.type);
+          if (critical && field.readOnly && !field.hidden && !isSystemConstant && !isStateMachineField && !AUDIT_FIELDS.has(field.name)) {
             if (!moduleEventFieldNames.has(field.name)) {
               checks['C4-004'].findings.push(
                 finding(

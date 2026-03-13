@@ -496,6 +496,7 @@ Antes de escribir cualquier YAML, verifica que NO estás cometiendo ninguno de e
 8. ❌ **No inventar listeners** — deben coincidir con `integrations.async[].consumers[]` donde `module` es este módulo
 9. ❌ **No inventar ports** — deben coincidir con `integrations.sync[]` donde `caller` es este módulo
 10. ❌ **Todo el contenido del archivo debe estar en inglés** — field names, comments, descriptions, values
+11. ❌ **No dejar transiciones sin evidencia de activación** — toda transición que se ejecuta como consecuencia de una respuesta de `ports:` (éxito o falla) o de un proceso interno/scheduler **debe** tener un domain event con `triggers` — es el único mecanismo que permite al validador C2-001 reconocerlas como alcanzables
 
 ### Inferencia desde system.yaml
 
@@ -724,6 +725,219 @@ ports:
 - ✅ Referencia a entidad de **otro agregado** → usar `reference:` en el campo ID, nunca `relationships:`
 - El `mappedBy` debe coincidir con el nombre del campo en la entidad secundaria que apunta de vuelta a la raíz
 
+### Proyecciones locales (read models sincronizados por eventos)
+
+Cuando un módulo consume eventos de otro módulo para mantener una **copia local desnormalizada** (proyección / read model), ese agregado tiene características distintas al dominio principal.
+
+**Señales de que un agregado es una proyección local:**
+- Sus campos coinciden con los `fields[]` de uno o más listeners
+- Su useCase principal es `Register*InLocalCatalog`, `Sync*` o `Update*FromEvent`
+- No tiene endpoints HTTP de escritura — solo se actualiza por listeners Kafka
+- Existe para evitar llamadas síncronas al módulo origen en tiempo real
+
+**Reglas de auditoría para proyecciones:**
+
+| Tipo de entidad | `audit.enabled` | `audit.trackUser` | Justificación |
+|---|---|---|---|
+| Entidad de dominio principal | ✅ true | según necesidad | Trazabilidad completa requerida |
+| Proyección local (read model) | ✅ true | ❌ false | `createdAt`/`updatedAt` permite depurar desincronizaciones; `trackUser: false` porque los cambios vienen de eventos, no de usuarios |
+
+> **Error común:** omitir `audit.enabled` en proyecciones porque "no son datos propios". En módulos críticos (reservations, payments, orders) las proyecciones afectan directamente al negocio — saber cuándo cambió `isAvailable` o `accountStatus` es esencial para depurar problemas de sincronización en producción.
+
+**Patrón canónico de proyección local:**
+
+```yaml
+  - name: BikeCatalog                   # nombre del agregado proyección
+    entities:
+      - name: bikeCatalogEntry
+        isRoot: true
+        tableName: bike_catalog_entries
+        audit:
+          enabled: true                 # ✅ siempre true en módulos críticos
+          trackUser: false              # ✅ cambios vienen de eventos, no de usuarios
+        fields:
+          - name: id
+            type: String
+          - name: isAvailable
+            type: Boolean
+            readOnly: true
+            defaultValue: true          # estado inicial al registrarse
+
+# Los listeners que mantienen esta proyección:
+listeners:
+  - event: BikeCreatedEvent
+    producer: fleet
+    topic: BIKE_CREATED
+    useCase: RegisterBikeInLocalCatalog  # crea la entrada en la proyección
+    fields:
+      - name: code
+        type: String
+      - name: stationId
+        type: String
+
+  - event: BikeMaintenanceStartedEvent
+    producer: fleet
+    topic: BIKE_MAINTENANCE_STARTED
+    useCase: MarkBikeUnavailable         # actualiza isAvailable=false
+    fields:
+      - name: stationId
+        type: String
+```
+
+### Clasificación de campos `readOnly` por origen
+
+Antes de declarar los `events:`, clasifica cada campo `readOnly` de la entidad raíz según **cuándo y cómo se asigna su valor**. Esta clasificación determina en qué evento debe aparecer:
+
+| Categoría | Cuándo se asigna | Debe aparecer en... |
+|---|---|---|
+| **Constante del sistema** | Constructor con `defaultValue` | Ningún evento — es configuración |
+| **Estado de máquina** | Cada transición (enum con `transitions`) | Ningún campo explícito — el nombre del evento comunica el estado |
+| **Timestamp de transición** | Una transición específica (`pickup()`, `complete()`…) | El evento de **esa** transición via `triggers` |
+| **Dato calculado de transición** | Se calcula al ejecutar una transición | El evento de esa transición via `triggers` |
+| **Acumulador** | Se actualiza en múltiples operaciones | En el evento de cada operación que lo modifica |
+
+**Patrón más propenso a omisiones — timestamp de transición:**
+
+Campos como `actualPickupAt`, `completedAt`, `processedAt`, `sentAt` se asignan en el momento exacto de una transición. Son la **evidencia temporal del hecho ocurrido** y deben incluirse en el evento de esa transición:
+
+```yaml
+# ❌ MAL — actualPickupAt se asigna en pickup() pero no hay evento para esa transición
+fields:
+  - name: actualPickupAt
+    type: LocalDateTime
+    readOnly: true
+enums:
+  - name: ReservationStatus
+    transitions:
+      - from: CONFIRMED
+        to: IN_PROGRESS
+        method: pickup       # asigna actualPickupAt pero no tiene evento asociado
+# events: no incluye ningún evento con triggers: [pickup]
+```
+
+```yaml
+# ✅ BIEN — la transición pickup tiene su evento y el timestamp está en los fields
+fields:
+  - name: actualPickupAt
+    type: LocalDateTime
+    readOnly: true
+enums:
+  - name: ReservationStatus
+    transitions:
+      - from: CONFIRMED
+        to: IN_PROGRESS
+        method: pickup
+events:
+  - name: ReservationPickedUpEvent
+    triggers:
+      - pickup
+    fields:
+      - name: userId
+        type: String
+      - name: bikeId
+        type: String
+      - name: actualPickupAt           # timestamp asignado en esta transición
+        type: LocalDateTime
+```
+
+**Protocolo para cada campo `readOnly` sin `defaultValue` y cuyo tipo no es un enum con `transitions`:**
+
+```
+1. ¿En qué transición o caso de uso se asigna este campo?
+2. ¿Esa transición ya tiene un evento con triggers?
+   → Sí: agregar el campo al fields[] de ese evento
+   → No: crear el evento + triggers ANTES de continuar el diseño
+3. Si se asigna en múltiples transiciones: incluirlo en el evento de la transición principal
+```
+
+> **Señal de alerta:** una transición que asigna campos `readOnly` (especialmente `*At`) pero no tiene evento asociado es una **brecha de diseño**. Nunca dejes una transición sin evento cuando modifica datos que otros módulos o el propio módulo necesitan trazar.
+
+### Análisis de activación de transiciones
+
+Antes de escribir los `events:`, recorre **cada método en `transitions[]`** del módulo y clasifícalo según quién lo activa:
+
+| ¿Quién activa la transición? | Mecanismo de diseño correcto | C2-001 silenciado por... |
+|---|---|---|
+| Un endpoint HTTP (PUT/POST/PATCH) | `endpoints:` con `useCase` que hace match semántico | Overlap de palabras entre método y useCase |
+| Un listener Kafka | `listeners:` con `useCase` que hace match semántico | Overlap de palabras entre método y useCase |
+| La **respuesta exitosa** de un `ports:` call | Domain event + `triggers: [método]` | Presencia del trigger en `triggeredMethods` |
+| La **respuesta de error/timeout** de un `ports:` call | Domain event + `triggers: [método]` | Presencia del trigger en `triggeredMethods` |
+| Un scheduler / process interno / batch | Domain event + `triggers: [método]` | Presencia del trigger en `triggeredMethods` |
+
+**Patrón canonical — respuesta de port con dos ramas (éxito/falla):**
+
+Cuando el módulo llama a un servicio externo vía `ports:` y el resultado puede ser éxito o falla, las transiciones de esas dos ramas deben modelarse con eventos separados:
+
+```yaml
+    events:
+      - name: NotificationSentEvent       # rama éxito del ports: call
+        triggers:
+          - markAsSent                    # transition method activado por 2xx
+        fields:
+          - name: sentAt
+            type: LocalDateTime
+
+      - name: NotificationFailedEvent     # rama error del ports: call
+        triggers:
+          - markAsFailed                  # transition method activado por error/timeout
+        fields: []                        # puede no necesitar campos extra
+```
+
+> **Señal de alerta:** si el módulo tiene `ports:` con respuesta y el enum de estado tiene transiciones de `SUCCESS`/`FAILED` (o equivalentes), y NO hay domain events con `triggers` para ellas → el validador C2-001 las marcará como inalcanzables. La solución siempre es agregar los events, no modificar el validador.
+
+### Análisis de trazabilidad de enums `*Type`
+
+Todo enum cuyo nombre termina en `Type` (ej: `IncidentType`, `PaymentType`, `NotificationType`) representa una **clasificación** cuyos valores solo pueden nacer de un mecanismo externo o interno. El validador C2-003 verifica que **cada valor sea semánticamente trazable** a al menos uno de estos orígenes:
+
+| Origen del valor | Traza semántica | Ejemplo |
+|---|---|---|
+| Listener Kafka (nombre del evento) | Tokens del nombre del evento | `TripCompletedEvent` → `trip`, `completed` |
+| Listener Kafka (nombre de campo) | Tokens del nombre del campo | `wasLateReturn` → `late`, `return` → traza `LATE_RETURN` |
+| Endpoint HTTP (useCase) | Tokens del nombre del useCase | `RegisterIncident` → `register`, `incident` |
+| Domain event producido (nombre) | Tokens del nombre del evento | `IncidentRegisteredEvent` → `incident`, `registered` |
+
+**Protocolo obligatorio — para cada valor de un enum `*Type`:**
+
+```
+Para cada valor en {Enum}Type:
+  1. ¿Lo crea un usuario/operador vía HTTP?  → declarar endpoint con useCase que contenga
+                                               palabras del valor (RegisterIncident,
+                                               ReportDamage, CreatePaymentByCard, etc.)
+  2. ¿Lo origina un evento Kafka entrante?   → el nombre del evento o alguno de sus campos
+                                               debe contener palabras del valor
+  3. ¿Lo origina un domain event producido?  → el nombre del evento ya aporta tokens
+  4. Ninguno aplica                          → valor HUÉRFANO — falta un endpoint o listener;
+                                               revisar si falta diseño o si el valor sobra
+```
+
+**Ejemplo canónico — `IncidentType` con `[LATE_RETURN, DAMAGE_REPORT]`:**
+
+| Valor | ¿Quién lo origina? | Traza correcta |
+|---|---|---|
+| `LATE_RETURN` | Automático: `TripCompletedEvent.wasLateReturn == true` | Campo `wasLateReturn` en `listeners[].fields` → tokens `late`, `return` |
+| `DAMAGE_REPORT` | Manual: staff reporta daño vía HTTP | Endpoint `POST /{id}/incidents` con `useCase: RegisterIncident` → tokens `register`, `incident` |
+
+Si `DAMAGE_REPORT` no tiene un endpoint declarado → C2-003 lo marcará huérfano. La solución es **agregar el endpoint**, no ignorar el warning.
+
+**Patrón `subEntityAdd` para entidades secundarias con `*Type`:**
+
+Cuando el módulo tiene `OneToMany` hacia una entidad secundaria con un campo `type: FooType` que se crea por HTTP, declarar siempre el endpoint correspondiente:
+
+```yaml
+endpoints:
+  basePath: /accounts
+  versions:
+    - version: v1
+      operations:
+        - useCase: RegisterIncident       # tokens: register + incident
+          method: POST                    # subEntityAdd pattern — AddIncidentCommand generado
+          path: /{id}/incidents           # relativo al basePath
+```
+
+El nombre del useCase debe contener palabras que tracen semánticamente con **todos** los valores del `*Type` que ese endpoint puede crear. Si distintos valores tienen orígenes distintos (algunos por HTTP, otros por Kafka), trazar cada uno por su mecanismo correspondiente.
+
+> **Regla de oro:** para cada valor de `FooType`, al menos uno de los listeners, endpoints o domain events del módulo debe contener una palabra semántica equivalente. Si ninguno la contiene → falta diseño.
+
 ### Checklist del domain.yaml por módulo
 
 Antes de guardar `system/{module}.yaml`, verifica:
@@ -747,6 +961,12 @@ Antes de guardar `system/{module}.yaml`, verifica:
 - [ ] `ports[]` presentes para todas las entradas `integrations.sync[]` donde `caller = este módulo`
 - [ ] `ports[].baseUrl` solo en la primera entrada de cada `service:`
 - [ ] `listeners[].nestedTypes[]` declarado para cada campo de tipo objeto en `fields[]`
+- [ ] Cada transición activada por respuesta de `ports:` (éxito o error) tiene un domain event con `triggers` correspondiente
+- [ ] Cada transición activada por scheduler o proceso interno tiene un domain event con `triggers` correspondiente
+- [ ] Para cada enum `*Type`: cada valor tiene trazabilidad semántica en un listener (nombre de evento o campo) o en un endpoint (useCase) del módulo
+- [ ] Para entidades secundarias en `OneToMany` con campo `type: *Type` creado por HTTP: existe endpoint `RegisterX` / `AddX` con useCase que traza semánticamente con los valores del enum
+- [ ] Cada campo `readOnly` sin `defaultValue` y sin tipo de estado (enum con `transitions`): la transición que lo asigna tiene un evento con `triggers` que lo incluye en `fields[]`
+- [ ] Proyecciones locales (agregados sincronizados por listeners): `audit.enabled: true` y `trackUser: false`
 - [ ] Todo el contenido está en **inglés**
 
 ### Pasos siguientes tras generar `system/{module}.yaml`

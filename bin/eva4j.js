@@ -298,7 +298,6 @@ program
   .description('Validate and visualize project artifacts. type: system')
   .option('--port <port>', 'Port for the web server (default: 3000)')
   .option('--output <path>', 'Output path for the HTML report (default: ./system-report.html)')
-  .option('--domain', 'Evaluate domain.yaml files in system/ for Kafka contracts, behavior gaps, cross-reference integrity and auditability (C1, C4, C5, C6)')
   .action(async (type, options) => {
     try {
       await evaluateSystemCommand(type, options);

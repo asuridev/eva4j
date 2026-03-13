@@ -301,33 +301,31 @@ async function evaluateSystemCommand(type, options = {}) {
   // ── 2. Run validation ───────────────────────────────────────────────────
   const validation = validateSystem(systemConfig);
 
-  // ── 2b. Load domain YAMLs (--domain flag) ──────────────────────────────
+  // ── 2b. Load domain YAMLs ─────────────────────────────────────────────────
   let domainValidation = null;
-  if (options.domain) {
-    const systemDir = path.join(process.cwd(), 'system');
-    let allFiles;
-    try {
-      allFiles = await fs.readdir(systemDir);
-    } catch {
-      allFiles = [];
-    }
-    const domainFiles = allFiles.filter((f) => f.endsWith('.yaml') && f !== 'system.yaml');
+  const systemDir = path.join(process.cwd(), 'system');
+  let allFiles;
+  try {
+    allFiles = await fs.readdir(systemDir);
+  } catch {
+    allFiles = [];
+  }
+  const domainFiles = allFiles.filter((f) => f.endsWith('.yaml') && f !== 'system.yaml');
 
-    if (domainFiles.length === 0) {
-      console.warn(chalk.yellow('⚠  --domain: no domain YAML files found in system/ (excluding system.yaml). Domain tab will be hidden.'));
-    } else {
-      const domainConfigs = {};
-      for (const file of domainFiles) {
-        const moduleName = path.basename(file, '.yaml');
-        try {
-          const content = await fs.readFile(path.join(systemDir, file), 'utf-8');
-          domainConfigs[moduleName] = yaml.load(content) || {};
-        } catch (err) {
-          console.warn(chalk.yellow(`⚠  --domain: could not parse ${file}: ${err.message}`));
-        }
+  if (domainFiles.length === 0) {
+    console.warn(chalk.yellow('⚠  No domain YAML files found in system/ (excluding system.yaml). Domain tab will be hidden.'));
+  } else {
+    const domainConfigs = {};
+    for (const file of domainFiles) {
+      const moduleName = path.basename(file, '.yaml');
+      try {
+        const content = await fs.readFile(path.join(systemDir, file), 'utf-8');
+        domainConfigs[moduleName] = yaml.load(content) || {};
+      } catch (err) {
+        console.warn(chalk.yellow(`⚠  Could not parse ${file}: ${err.message}`));
       }
-      domainValidation = validateDomain(domainConfigs, systemConfig);
     }
+    domainValidation = validateDomain(domainConfigs, systemConfig);
   }
 
   // ── 3. Extract report data ──────────────────────────────────────────────
@@ -349,7 +347,7 @@ async function evaluateSystemCommand(type, options = {}) {
   await fs.ensureDir(path.dirname(outputPath));
   await fs.writeFile(outputPath, htmlContent, 'utf-8');
 
-  // ── 5b. Write domain assets (--domain flag) ─────────────────────────────
+  // ── 5b. Write domain assets ───────────────────────────────────────────────
   if (domainValidation) {
     await writeDomainAssets(domainValidation, process.cwd());
   }

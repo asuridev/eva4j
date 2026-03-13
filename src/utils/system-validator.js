@@ -325,16 +325,21 @@ function validateSystem(systemConfig) {
   }
 
   // S5-002: success event without matching failure event for same subject
-  const successSuffixes = ['confirmedevent', 'approvedevent', 'placedevent', 'completedevent', 'activatedevent'];
+  // Suffixes that represent external operations with side-effects → warning if no failure counterpart
+  const successSuffixesWarning = ['confirmedevent', 'approvedevent', 'placedevent', 'activatedevent'];
+  // Suffixes that represent physical/irreversible facts → info only (compensation less expected)
+  const successSuffixesInfo = ['completedevent'];
   const failureSuffixes = ['failedevent', 'rejectedevent', 'cancelledevent', 'canceledevent', 'expiredevent'];
 
   for (const ev of asyncEvents) {
     const evLower = (ev.event || '').toLowerCase();
-    const matchedSuccess = successSuffixes.find((s) => evLower.endsWith(s));
-    if (!matchedSuccess) continue;
+    const matchedWarning = successSuffixesWarning.find((s) => evLower.endsWith(s));
+    const matchedInfo = !matchedWarning && successSuffixesInfo.find((s) => evLower.endsWith(s));
+    const matched = matchedWarning || matchedInfo;
+    if (!matched) continue;
 
-    // Derive subject: strip the matched suffix and "event" is already included
-    const subjectLength = evLower.length - matchedSuccess.length;
+    // Derive subject: strip the matched suffix
+    const subjectLength = evLower.length - matched.length;
     const subject = evLower.slice(0, subjectLength);
 
     // Check if there's any failure event with the same subject prefix
@@ -344,7 +349,12 @@ function validateSystem(systemConfig) {
     });
 
     if (!hasFailure) {
-      warnings.push(`[S5-002] Evento de éxito '${ev.event}' existe pero no hay un evento de fallo correspondiente para el sujeto '${subject}' que permita compensación`);
+      const msg = `[S5-002] Evento de éxito '${ev.event}' existe pero no hay un evento de fallo correspondiente para el sujeto '${subject}' que permita compensación`;
+      if (matchedWarning) {
+        warnings.push(msg);
+      } else {
+        info.push(msg);
+      }
     }
   }
 
