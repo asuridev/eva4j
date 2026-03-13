@@ -7,16 +7,21 @@
 1. [Description and purpose](#1-description-and-purpose)
 2. [Syntax and options](#2-syntax-and-options)
 3. [system.yaml structure required](#3-systemyaml-structure-required)
-4. [Evaluation criteria](#4-evaluation-criteria)
+4. [system.yaml evaluation criteria (S1–S5)](#4-systemyaml-evaluation-criteria-s1s5)
    - [S1 — Module integrity](#s1--module-integrity)
    - [S2 — Async event graph integrity](#s2--async-event-graph-integrity)
    - [S3 — Sync call integrity](#s3--sync-call-integrity)
    - [S4 — Endpoint coherence](#s4--endpoint-coherence)
    - [S5 — Global system coherence](#s5--global-system-coherence)
-5. [Score calculation](#5-score-calculation)
-6. [Report output](#6-report-output)
-7. [Practical examples with real findings](#7-practical-examples-with-real-findings)
-8. [Common errors and how to fix them](#8-common-errors-and-how-to-fix-them)
+5. [Domain evaluation criteria (C1–C4) — `--domain`](#5-domain-evaluation-criteria-c1c4----domain)
+   - [C1 — Kafka event contracts](#c1--kafka-event-contracts)
+   - [C2 — Behavior gaps](#c2--behavior-gaps)
+   - [C3 — Cross-reference integrity](#c3--cross-reference-integrity)
+   - [C4 — Audit & traceability](#c4--audit--traceability)
+6. [Score calculation](#6-score-calculation)
+7. [Report output](#7-report-output)
+8. [Practical examples with real findings](#8-practical-examples-with-real-findings)
+9. [Common errors and how to fix them](#9-common-errors-and-how-to-fix-them)
 
 ---
 
@@ -121,7 +126,9 @@ All fields are optional except `modules[].name`. The evaluator gracefully handle
 
 ---
 
-## 4. Evaluation criteria
+## 4. system.yaml evaluation criteria (S1–S5)
+
+These rules evaluate **only** `system.yaml`. For the domain-level criteria applied when using `--domain`, see [section 5](#5-domain-evaluation-criteria-c1c4----domain).
 
 The evaluator runs **5 rule groups (S1–S5)** with a total of **20 rules** across three severity levels:
 
@@ -436,7 +443,328 @@ A module with no async events (produced or consumed) and no sync calls (as calle
 
 ---
 
-## 5. Score calculation
+## 5. Domain evaluation criteria (--domain)
+
+When `--domain` is passed, the evaluator additionally loads a `domain.yaml` file from each module subdirectory under `system/` and cross-validates them against each other and against `system.yaml`.
+
+**Requirements:**
+- Each module subdirectory under `system/` must contain a `domain.yaml` file to be included
+- Modules without a `domain.yaml` are silently skipped — their rules will not fire
+- Domain findings appear in the **Dominio** tab of the HTML report
+
+Domain rules are organized in **4 rule groups (C1–C4)** with a total of **19 rules**:
+
+| Severity | Symbol | Affects score | Description |
+|----------|--------|--------------|-------------|
+| **error** | 🔴 | Yes (counts as 1) | Must be fixed |
+| **warning** | 🟡 | Yes (counts as 0.5) | Should be reviewed |
+| **info** | 🔵 | No | Observation only |
+
+---
+
+### C1 — Kafka event contracts
+
+Verifies that the producer → consumer graph is coherent at the code level: events declared in `domain.yaml` match what `system.yaml` declares, and field-level contracts are consistent between producers and consumers.
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| C1-001 | 🟡 warning | Domain event produced by a module but has no consumers registered in `system.yaml` |
+| C1-002 | 🔴 error | `listeners[]` references an event that no domain module produces |
+| C1-003 | 🔴 error | Field in `listener.fields` does not exist in the producer event |
+| C1-004 | 🔴 error | Field exists in both producer and consumer but with incompatible types |
+| C1-005 | 🔴 error | `system.yaml` registers a module as consumer but that module has no matching `listener` |
+| C1-006 | 🔴 error | `listener.producer` references the wrong producer module |
+
+#### C1-001 — Produced event with no consumers in system.yaml
+
+```yaml
+# orders/domain.yaml
+aggregates:
+  - name: Order
+    events:
+      - name: OrderConfirmed   # ⚠️ WARNING — not registered in system.yaml
+        fields: [...]
+```
+
+**Message:** `[C1-001] El evento 'OrderConfirmed' no tiene consumidores registrados en system.yaml`
+
+**Fix:** Add the event to `integrations.async` in `system.yaml` with at least one consumer, or remove it from `domain.yaml` if unused.
+
+#### C1-002 — Listener references event no module produces
+
+```yaml
+# notifications/domain.yaml
+listeners:
+  - event: StockDepletedEvent   # ❌ ERROR — no domain.yaml in the system produces this
+    producer: inventory
+```
+
+**Message:** `[C1-002] Listener de 'StockDepletedEvent' pero ningún módulo en los domain.yaml lo produce`
+
+**Fix:** Declare `StockDepletedEvent` in the `inventory` module's `domain.yaml`, or correct the event name.
+
+#### C1-003 — Field in listener missing in producer event
+
+```yaml
+# Producer (payments/domain.yaml):
+events:
+  - name: PaymentApprovedEvent
+    fields:
+      - { name: paymentId, type: String }
+
+# Consumer (reservations/domain.yaml):
+listeners:
+  - event: PaymentApprovedEvent
+    fields:
+      - { name: approvedAt, type: LocalDateTime }  # ❌ ERROR — not in producer
+```
+
+**Message:** `[C1-003] Campo 'approvedAt' en listener de 'PaymentApprovedEvent' no existe en los campos del evento del productor (payments)`
+
+**Fix:** Remove the field from the listener, or add it to the producer event declaration.
+
+#### C1-004 — Incompatible field types between producer and consumer
+
+```yaml
+# Producer declares:  amount: BigDecimal
+# Consumer declares:  amount: String     # ❌ ERROR
+```
+
+**Message:** `[C1-004] Campo 'amount' en listener de 'PaymentApprovedEvent': tipo incompatible — Productor declara 'BigDecimal', listener declara 'String'`
+
+**Fix:** Align the field type in the listener with the type declared in the producer event.
+
+#### C1-005 — Registered consumer has no listener in domain.yaml
+
+```yaml
+# system.yaml registers notifications as consumer:
+consumers:
+  - module: notifications
+    useCase: NotifyOrderCreated
+# notifications/domain.yaml has no listeners[] for OrderCreatedEvent  ❌ ERROR
+```
+
+**Message:** `[C1-005] system.yaml registra 'notifications' como consumidor de 'OrderCreatedEvent' pero el módulo no tiene listener declarado`
+
+**Fix:** Add a `listeners[]` entry for `OrderCreatedEvent` in `notifications/domain.yaml`.
+
+#### C1-006 — listener.producer references wrong module
+
+```yaml
+listeners:
+  - event: PaymentApprovedEvent
+    producer: orders   # ❌ ERROR — this event is actually produced by 'payments'
+```
+
+**Message:** `[C1-006] Listener declara producer: 'orders' pero 'PaymentApprovedEvent' es producido por 'payments'`
+
+**Fix:** Update `producer:` to match the actual producing module.
+
+---
+
+### C2 — Behavior gaps
+
+Verifies that every transition method and every use case has a traceable activation mechanism — either an HTTP endpoint or an async listener — ensuring no business behavior is accidentally unreachable.
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| C2-001 | 🟡 warning | Transition method with no matching HTTP endpoint or listener |
+| C2-002 | 🔵 info | Listener `useCase` has no equivalent REST endpoint in a module that exposes REST |
+| C2-003 | 🟡 warning | Value in a `*Type` enum with no traceable Kafka event as origin |
+| C2-004 | 🔴 error | Event `triggers[]` references a transition method that does not exist |
+| C2-005 | 🔵 info | Transition method without any associated Domain Event (no `triggers`) |
+
+> **Note on C2-001:** Silenced automatically when the transition method already has an event `trigger` declared — the trigger itself is sufficient design evidence.
+
+#### C2-001 — Transition with no endpoint or listener
+
+```yaml
+enums:
+  - name: OrderStatus
+    transitions:
+      - from: CONFIRMED
+        to: CANCELLED
+        method: cancel   # ⚠️ WARNING — nothing calls 'cancel'
+```
+
+**Message:** `[C2-001] Transición 'cancel' de OrderStatus (CONFIRMED → CANCELLED) no tiene endpoint HTTP ni listener asociado`
+
+**Fix:** Add a `POST /orders/{id}/cancel` endpoint or connect it to a listener with `useCase: CancelOrder`.
+
+#### C2-004 — Trigger references non-existent transition method
+
+```yaml
+events:
+  - name: OrderShipped
+    triggers:
+      - ship   # ❌ ERROR — no transition method named 'ship' exists
+```
+
+**Message:** `[C2-004] Evento 'OrderShipped' tiene trigger 'ship' que no corresponde a ningún método de transición`
+
+**Fix:** Add a transition with `method: ship`, or update the trigger to reference an existing method.
+
+#### C2-005 — Transition without a Domain Event (info)
+
+**Message:** `[C2-005] Transición 'confirm' (OrderStatus: PENDING → CONFIRMED) no tiene ningún Domain Event asociado`
+
+**Recommendation:** Declare a domain event with `triggers: [confirm]` so downstream modules can react to this state change.
+
+#### C2-002 / C2-003 — Completeness checks (info / warning)
+
+- `[C2-002]` — Listener `useCase` has no REST equivalent in the same module (info; acceptable when the module is purely event-driven)
+- `[C2-003]` — Value in a `*Type` enum (e.g., `PaymentType.BANK_TRANSFER`) has no Kafka event whose name or fields overlap — suggests the value originates from an external trigger not yet documented
+
+---
+
+### C3 — Cross-reference integrity
+
+Verifies that all declared dependencies between modules are consistent: cross-aggregate field references have a corresponding port or listener, port calls target declared endpoints, and there is no hidden circular coupling.
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| C3-001 | 🟡 warning | Field with `reference.module=X` but no port or listener connecting to X |
+| C3-002 | 🔴 error | `port.target` refers to an internal module with no `domain.yaml` loaded |
+| C3-003 | 🟡 warning | Port calls an endpoint not declared in the target module |
+| C3-004 | 🟡 warning | Sync dependency on a module that emits no Kafka events |
+| C3-005 | 🔴 error | Bidirectional sync coupling between two modules (A calls B **and** B calls A) |
+| C3-006 | 🟡 warning | `system.yaml` declares a sync call but the caller module has no matching port |
+
+> **Note:** C3-002, C3-003, and C3-004 are skipped for external services — targets ending in `-external` or whose `baseUrl` points to a non-localhost host.
+
+#### C3-001 — Cross-aggregate reference without a port or listener
+
+```yaml
+# reservations/domain.yaml
+fields:
+  - name: customerId
+    type: String
+    reference:
+      aggregate: Customer
+      module: customers   # ⚠️ WARNING — no port or listener to 'customers'
+```
+
+**Message:** `[C3-001] Campo 'customerId' referencia módulo 'customers' pero no hay port ni listener que conecte con ese módulo`
+
+**Fix:** Add a `ports[]` entry targeting `customers` in `reservations/domain.yaml`.
+
+#### C3-002 — Port target missing domain.yaml
+
+```yaml
+ports:
+  - name: findScreeningById
+    service: ScreeningService
+    target: screenings   # ❌ ERROR — 'screenings' in system.yaml but no domain.yaml loaded
+```
+
+**Message:** `[C3-002] Port 'ScreeningService' apunta a 'screenings' que está en system.yaml pero no tiene domain.yaml cargado`
+
+**Fix:** Ensure `system/screenings/domain.yaml` exists and is reachable when running `--domain`.
+
+#### C3-003 — Port calls undeclared endpoint
+
+```yaml
+ports:
+  - http: GET /orders/{id}/items   # ⚠️ WARNING — not listed in orders.exposes[]
+    target: orders
+```
+
+**Message:** `[C3-003] Port 'OrderService' llama 'GET /orders/{id}/items' en 'orders' pero ese endpoint no está declarado en el módulo destino`
+
+**Fix:** Add `GET /orders/{id}/items` to `orders.exposes[]` in `system.yaml`, or correct the port path.
+
+#### C3-005 — Bidirectional sync coupling
+
+**Message:** `[C3-005] Acoplamiento síncrono bidireccional entre 'reservations' y 'payments'`
+
+**Fix:** Same as [S3-003](#s3-003--bidirectional-sync-coupling) — break the cycle with an async event or a shared read-model.
+
+#### C3-006 — system.yaml sync call without matching port
+
+```yaml
+# system.yaml: reservations calls screenings
+# reservations/domain.yaml: no ports[] for 'screenings'  ⚠️ WARNING
+```
+
+**Message:** `[C3-006] system.yaml declara que 'reservations' llama síncronamente a 'screenings' pero el módulo no tiene port declarado hacia 'screenings'`
+
+**Fix:** Add a `ports[]` section in `reservations/domain.yaml` with a method targeting `screenings`.
+
+---
+
+### C4 — Audit & traceability
+
+Verifies that critical business entities have change-tracking mechanisms and that data from external bounded contexts is stored in a structured format.
+
+> **Critical modules heuristic:** A module is considered critical when its name contains any of: `payment`, `billing`, `order`, `reservation`, `customer`, `user`, or `inventory`.
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| C4-001 | 🟡 warning | Child entity with `cascade: REMOVE` has no audit and no soft delete, while its root entity has audit enabled |
+| C4-002 | 🟡 warning | Root entity in a critical module without `audit.enabled: true` |
+| C4-003 | 🟡 warning | Field with an external-data name typed as plain `String` in a module that declares ports |
+| C4-004 | 🟡 warning | `readOnly` field in a critical module that does not appear in any event of that module |
+
+#### C4-001 — Child entity deletable without audit trail
+
+```yaml
+entities:
+  - name: Order
+    isRoot: true
+    audit:
+      enabled: true
+    relationships:
+      - type: OneToMany
+        target: OrderItem
+        cascade: [REMOVE]   # root is audited, child is not → ⚠️ WARNING
+```
+
+**Message:** `[C4-001] Entidad hija 'OrderItem' tiene cascade REMOVE pero sin audit ni soft delete`
+
+**Fix:** Add `audit.enabled: true` or `hasSoftDelete: true` to the `OrderItem` entity.
+
+#### C4-002 — Critical root entity without audit
+
+**Message:** `[C4-002] Entidad raíz 'Order' en módulo crítico 'orders' no tiene audit.enabled:true`
+
+**Fix:**
+```yaml
+entities:
+  - name: Order
+    isRoot: true
+    audit:
+      enabled: true
+      trackUser: true
+```
+
+#### C4-003 — External data stored as unstructured String
+
+```yaml
+fields:
+  - name: rawData    # ⚠️ WARNING — external payload stored as plain String
+    type: String
+```
+
+**Message:** `[C4-003] Campo 'rawData' almacena datos externos como String no estructurado`
+
+**Fix:** Replace with a `nestedType` or a structured Value Object mapping the relevant fields explicitly.
+
+#### C4-004 — readOnly field not surfaced in any event
+
+```yaml
+fields:
+  - name: totalAmount
+    type: BigDecimal
+    readOnly: true   # ⚠️ WARNING — not included in any domain event of this module
+```
+
+**Message:** `[C4-004] Campo readOnly 'totalAmount' en módulo crítico 'reservations' no aparece en ningún evento del módulo`
+
+**Fix:** Include `totalAmount` in a relevant domain event, or document why it is intentionally private.
+
+---
+
+## 6. Score calculation
 
 The score **only** counts errors, warnings, and passing validations. **Info items do not affect the score.**
 
@@ -454,7 +782,7 @@ A score of 100% means zero errors, zero warnings, and at least one passing valid
 
 ---
 
-## 6. Report output
+## 7. Report output
 
 The command produces three output artifacts:
 
@@ -503,7 +831,7 @@ A concise file containing only **errors and warnings** — suitable for committi
 
 ---
 
-## 7. Practical examples with real findings
+## 8. Practical examples with real findings
 
 ### Example: cinema booking system
 
@@ -521,7 +849,7 @@ Running `eva evaluate system` on a cinema booking `system.yaml` with 7 modules a
 
 ---
 
-## 8. Common errors and how to fix them
+## 9. Common errors and how to fix them
 
 ### Error S1-001 — Module referenced but not declared
 
