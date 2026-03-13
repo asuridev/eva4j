@@ -135,10 +135,8 @@ class BaseGenerator {
       path.join(this.projectDir, 'system.yaml'));
     await this.generateFile('root/skill-build-system-yaml.ejs', 
       path.join(this.projectDir, '.agents', 'skills', 'build-system-yaml', 'SKILL.md'));
-    await this.generateFile('root/skill-build-domain-yaml.ejs', 
-      path.join(this.projectDir, '.agents', 'skills', 'build-domain-yaml', 'SKILL.md'));
     await this.generateFile('root/skill-build-domain-yaml-references-generate-entities.md.ejs', 
-      path.join(this.projectDir, '.agents', 'skills', 'build-domain-yaml', 'references', 'GENERATE_ENTITIES.md'));
+      path.join(this.projectDir, '.agents', 'skills', 'build-system-yaml', 'references', 'GENERATE_ENTITIES.md'));
     
     if (this.context.features.includeDocker) {
       await this.generateFile('docker/docker-compose.yaml.ejs', 
