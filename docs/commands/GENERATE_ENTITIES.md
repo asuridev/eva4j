@@ -648,7 +648,9 @@ aggregates:
         triggers:
           - place             # transition method name that publishes this event
         fields:
-          # orderId NOT declared — already available as event.getAggregateId()
+          # orderId declared for cross-module Kafka consumers — generator maps it to event.getAggregateId()
+          - name: orderId
+            type: String
           - name: customerId
             type: String
           - name: totalAmount
@@ -672,12 +674,12 @@ aggregates:
 | Field condition | Generated argument |
 |---|---|
 | Always (first arg — `aggregateId` from `DomainEvent` base) | `this.getId()` |
-| Name = `{entityName}Id` (e.g. `orderId` in `Order`) | **Skipped** — already covered by `aggregateId` |
+| Name = `{entityName}Id` (e.g. `orderId` in `Order`) | **Skipped in Domain Event class** — mapped to `event.getAggregateId()` in the Integration Event handler |
 | Name matches a field of the entity | `this.get{Field}()` |
 | Name ends in `At` + type `LocalDateTime` | `LocalDateTime.now()` |
 | Not resolvable | `null /* TODO: provide {fieldName} */` |
 
-> **Convention:** Do not declare `{entityName}Id` in `events[].fields`. The aggregate id is already accessible to consumers via `event.getAggregateId()` (inherited from `DomainEvent`).
+> **Convention:** Declare `{entityName}Id` in `events[].fields` when the event **crosses module boundaries via Kafka** — it is required so the id travels in the Integration Event payload. The generator automatically maps it to `event.getAggregateId()` in the handler, preventing duplication in the internal Domain Event class. If the event is only consumed within the same bounded context (Spring event bus), `{entityName}Id` can be omitted since `getAggregateId()` is already available.
 
 If an event has **no `triggers`**, the developer must call `raise()` manually inside the business method.
 
@@ -694,7 +696,7 @@ If an event has **no `triggers`**, the developer must call `raise()` manually in
 
 ### Generated event
 
-Fields declared as `{entityName}Id` are excluded from the record — consumers use `getAggregateId()` instead.
+Fields declared as `{entityName}Id` are excluded from the **Domain Event class** (the aggregate id is already available via `getAggregateId()` inherited from `DomainEvent`), but they **are included** in the Integration Event record and the Kafka payload — the handler maps them to `event.getAggregateId()` automatically.
 
 ```java
 public final class OrderPlaced extends DomainEvent {
@@ -907,7 +909,9 @@ aggregates:
         triggers:
           - confirm
         fields:
-          # orderId NOT declared — available as event.getAggregateId()
+          # orderId declared for cross-module Kafka consumers — generator maps it to event.getAggregateId()
+          - name: orderId
+            type: String
           - name: customerId
             type: String
           - name: confirmedAt

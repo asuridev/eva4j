@@ -605,7 +605,8 @@ aggregates:
         triggers:
           - confirm                     # transition method name that fires this event
         fields:
-          # Do NOT declare {entityName}Id — available as event.getAggregateId()
+          # Declare {entityName}Id when the event crosses module boundaries via Kafka
+          # — the generator maps it to event.getAggregateId() in the handler
           - name: customerId
             type: String
           - name: confirmedAt           # ends in 'At' + LocalDateTime → resolves to LocalDateTime.now()
@@ -952,7 +953,7 @@ Antes de guardar `system/{module}.yaml`, verifica:
 - [ ] Referencias cross-aggregate usando `reference:` en el campo ID, no `relationships:`
 - [ ] `events[].name` consistente con `integrations.async[]` donde `producer` es este módulo
 - [ ] `events[].triggers[]` referencia métodos que existen en `enums[].transitions[].method`
-- [ ] `{entityName}Id` NO declarado en `events[].fields`
+- [ ] `{entityName}Id` declarado en `events[].fields` cuando el evento **cruza módulos via Kafka** (el generador lo mapea a `event.getAggregateId()` automáticamente)
 - [ ] `endpoints[].operations[].useCase` consistente con `modules[].exposes[].useCase`
 - [ ] `endpoints[].path` son **relativos** al basePath
 - [ ] `listeners[]` presentes para todos los eventos donde este módulo es consumidor

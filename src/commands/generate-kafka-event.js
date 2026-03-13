@@ -606,8 +606,10 @@ async function updateDomainEventHandler(projectDir, packagePath, context) {
   }
 
   // 4. Render the mapping call and replace the TODO block
+  // Derive aggregateName from the handler file name (e.g. BikeDomainEventHandler.java → Bike)
+  const aggregateName = handlerFile.replace('DomainEventHandler.java', '');
   const templatePath = path.join(__dirname, '..', '..', 'templates', 'kafka-event', 'DomainEventHandlerMethod.ejs');
-  const mappingLine = await renderTemplate(templatePath, { ...context, domainEventFields: context.eventFields });
+  const mappingLine = await renderTemplate(templatePath, { ...context, domainEventFields: context.eventFields, aggregateName });
 
   const todoRegex = new RegExp(
     `([ \\t]*\/\/ TODO: handle ${domainEventName}[^\\n]*\\n)(?:[ \\t]*\/\/[^\\n]*\\n)*`

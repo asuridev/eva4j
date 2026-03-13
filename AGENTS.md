@@ -566,12 +566,12 @@ Lista de nombres de métodos de transición que publican este evento. El generad
 | Condición del campo del evento | Argumento generado |
 |---|---|
 | Siempre (primer arg, aggregateId del DomainEvent base) | `this.getId()` |
-| Nombre = `{entityName}Id` (ej: `orderId` en `Order`) | **Ignorado** — ya cubierto por `aggregateId` |
+| Nombre = `{entityName}Id` (ej: `orderId` en `Order`) | **Ignorado** en el Domain Event class — mapeado a `event.getAggregateId()` en el Integration Event |
 | Nombre coincide con un campo de la entidad | `this.get{Field}()` |
 | Nombre termina en `At` + tipo `LocalDateTime` | `LocalDateTime.now()` |
 | No resuelto | `null /* TODO: provide {fieldName} */` |
 
-> **Convención:** No declarar `{entityName}Id` en `events[].fields`. El id del agregado ya está disponible para el consumidor mediante `event.getAggregateId()` (heredado de `DomainEvent`).
+> **Convención:** Sí declarar `{entityName}Id` en `events[].fields` cuando el evento **cruza módulos via Kafka** — es necesario para que el id viaje en el payload del Integration Event. El generador lo mapea automáticamente a `event.getAggregateId()` en el handler, evitando la duplicación en el Domain Event class interno.
 
 **Resultado generado:**
 

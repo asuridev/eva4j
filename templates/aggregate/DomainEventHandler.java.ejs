@@ -55,7 +55,10 @@ public class <%= aggregateName %>DomainEventHandler {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void on<%= event.name %>(<%= event.name %> event) {
     <% if (broker) { %>
-        messageBroker.publish<%= event.integrationEventClassName %>(new <%= event.integrationEventClassName %>(<% if (event.fields && event.fields.length > 0) { event.fields.forEach(function(field, idx) { %>event.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<%= idx < event.fields.length - 1 ? ', ' : '' %><% }); } %>));
+        <%
+          const _aggrIdField = aggregateName.charAt(0).toLowerCase() + aggregateName.slice(1) + 'Id';
+        %>
+        messageBroker.publish<%= event.integrationEventClassName %>(new <%= event.integrationEventClassName %>(<% if (event.fields && event.fields.length > 0) { event.fields.forEach(function(field, idx) { %><%= field.name === _aggrIdField ? 'event.getAggregateId()' : 'event.get' + field.name.charAt(0).toUpperCase() + field.name.slice(1) + '()' %><%= idx < event.fields.length - 1 ? ', ' : '' %><% }); } %>));
     <% } else { %>
         // TODO: handle <%= event.name %> — add your side-effect logic here
         //   e.g.:  notificationService.notify(event);
