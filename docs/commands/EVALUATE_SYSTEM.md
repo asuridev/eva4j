@@ -8,11 +8,11 @@
 2. [Syntax and options](#2-syntax-and-options)
 3. [system.yaml structure required](#3-systemyaml-structure-required)
 4. [Evaluation criteria](#4-evaluation-criteria)
-   - [Check 1 — Referential integrity](#check-1--referential-integrity)
-   - [Check 2 — Sync cycle detection](#check-2--sync-cycle-detection)
-   - [Check 3 — Module role analysis](#check-3--module-role-analysis)
-   - [Check 4 — Behavior gaps](#check-4--behavior-gaps)
-   - [Check 5 — Coupling patterns](#check-5--coupling-patterns)
+   - [S1 — Module integrity](#s1--module-integrity)
+   - [S2 — Async event graph integrity](#s2--async-event-graph-integrity)
+   - [S3 — Sync call integrity](#s3--sync-call-integrity)
+   - [S4 — Endpoint coherence](#s4--endpoint-coherence)
+   - [S5 — Global system coherence](#s5--global-system-coherence)
 5. [Score calculation](#5-score-calculation)
 6. [Report output](#6-report-output)
 7. [Practical examples with real findings](#7-practical-examples-with-real-findings)
@@ -29,13 +29,21 @@ The command is domain-agnostic: it works for any system described in `system.yam
 **What it produces:**
 
 - A **quality score** (0–100%) based on checks passed vs. total
-- A list of **critical errors** (broken references, hard cycles)
+- A list of **critical errors** (broken references, self-loops, duplicate routes)
 - A list of **warnings** (potential design problems that aren't necessarily wrong)
+- A list of **info notes** (observations that do not affect the score)
 - A list of **passed validations** (proof that good practices are in place)
-- An **interactive HTML report** with three tabs:
-  - **Validation** — errors, warnings, score
-  - **Flow Simulator** — step-by-step visualization of each async event flow
-  - **Architecture** — per-module dependency explorer + sync dependency map + Kafka topic map + interactive network diagram
+- An **interactive HTML report** served on a local HTTP server
+- A **`assets/system-evaluation.md`** file with only errors and warnings for quick review
+
+The HTML report contains four interactive tabs:
+
+| Tab | Contents |
+|-----|----------|
+| **Validación** | Score cards, collapsible sections for errors / warnings / info / passed |
+| **Simulador de flujos** | Step-by-step playback of each async event flow |
+| **Arquitectura** | Module dependency explorer, sync dependency cards, Kafka topic map, interactive network diagram |
+| **Dominio** | Per-module Mermaid diagrams (only with `--domain` flag) |
 
 ---
 
@@ -43,13 +51,10 @@ The command is domain-agnostic: it works for any system described in `system.yam
 
 ```bash
 eva evaluate system
-eva evaluate system --port 8080        # serve the report on a custom port (default: 3000)
+eva evaluate system --port 8080              # serve the report on a custom port (default: 3000)
 eva evaluate system --output ./report.html   # write HTML to a custom path
+eva evaluate system --domain                 # also validate domain.yaml files in system/
 ```
-
-### Parameters
-
-None. The command always reads `system.yaml` from the current working directory.
 
 ### Options
 
@@ -57,10 +62,11 @@ None. The command always reads `system.yaml` from the current working directory.
 |--------|---------|-------------|
 | `--port <n>` | `3000` | Port for the local HTTP preview server |
 | `--output <path>` | `./system-report.html` | Where to write the generated HTML file |
+| `--domain` | off | Also load and cross-validate domain YAML files from `system/` |
 
 ### Requirements
 
-- Must be run from a directory containing a `system.yaml` file
+- Must be run from a directory containing a `system/system.yaml` file
 - No eva4j project scaffold is required — `system.yaml` can be a standalone design file
 
 ---
@@ -73,345 +79,370 @@ The minimal structure the evaluator expects:
 system:
   name: my-system           # used as report title
 
+messaging:
+  enabled: true
+  broker: kafka
+  kafka:
+    topicPrefix: myapp      # used by S2-007 topic prefix check
+
 modules:
-  - name: orders            # unique module identifier (camelCase or kebab-case)
-    description: "..."      # shown in the report
+  - name: orders            # unique module identifier
+    description: "..."      # required by S1-003
     exposes:                # REST endpoints this module offers
       - method: POST
         path: /orders
         useCase: CreateOrder
-        description: "..."
+        description: "..."      # required by S4-004
       - method: GET
         path: /orders/{id}
         useCase: GetOrder
         description: "..."
 
 integrations:
-  async:                    # async event flows (Kafka, RabbitMQ, etc.)
-    - event: OrderCreatedEvent
+  async:
+    - event: OrderCreatedEvent    # must follow PascalCase + Event suffix (S2-006)
       producer: orders
       topic: ORDER_CREATED
       consumers:
         - module: payments
+          useCase: HandleOrderCreated
         - module: notifications
+          useCase: NotifyOrderCreated
 
-  sync:                     # synchronous HTTP calls between modules
+  sync:
     - caller: payments
       calls: orders
-      port: OrderService    # Java interface name that will be generated
+      port: OrderService
       using:
-        - GET /orders/{id}
+        - GET /orders/{id}        # must exist in orders.exposes[] (S3-002)
 ```
 
-All fields are optional except `modules[].name`. The evaluator gracefully handles missing sections (no async events, no sync calls, etc.).
+All fields are optional except `modules[].name`. The evaluator gracefully handles missing sections.
 
 ---
 
 ## 4. Evaluation criteria
 
-The evaluator runs **5 independent checks** against the parsed YAML. Each check produces errors, warnings, or passing validations.
+The evaluator runs **5 rule groups (S1–S5)** with a total of **20 rules** across three severity levels:
+
+| Severity | Symbol | Affects score | Description |
+|----------|--------|--------------|-------------|
+| **error** | 🔴 | Yes (counts as 1) | Must be fixed |
+| **warning** | 🟡 | Yes (counts as 0.5) | Should be reviewed |
+| **info** | 🔵 | No | Observation only |
 
 ---
 
-### Check 1 — Referential integrity
+### S1 — Module integrity
 
-**What it validates:** Every name referenced anywhere in `integrations` points to a module or endpoint actually declared in `modules[]`.
+Verifies that all modules declared in `modules[]` have defined responsibilities and all modules referenced in `integrations` are declared.
 
-#### 1a. Event producers
+| Rule | Severity | Description |
+|------|----------|-------------|
+| S1-001 | 🔴 error | Module referenced in `integrations` but not declared in `modules[]` |
+| S1-002 | 🔴 error | Module with no responsibilities — no exposes, no events produced or consumed |
+| S1-003 | 🟡 warning | Module without a `description` field |
+| S1-004 | 🟡 warning | Purely reactive module (only consumes events) not documented explicitly in its description |
 
-Every `integrations.async[].producer` must be a module declared in `modules[]`.
+#### S1-001 — Undeclared module referenced in integrations
+
+Covers producers, consumers, sync callers, and sync callees.
 
 ```yaml
-# ✅ PASSES — 'orders' is declared in modules[]
-- event: OrderCreatedEvent
-  producer: orders
-
 # ❌ ERROR — 'billing' is not declared in modules[]
 - event: InvoiceCreatedEvent
   producer: billing
 ```
 
-**Error message:**
-```
-Integridad referencial: el productor 'billing' del evento 'InvoiceCreatedEvent'
-no está declarado en modules[]
-```
+**Message:** `[S1-001] Módulo 'billing' referenciado en integrations pero no declarado en modules[]`
 
-#### 1b. Event consumers
+**Fix:** Add the missing module to `modules[]` or correct the name typo.
 
-Every module listed in `integrations.async[].consumers` must be declared in `modules[]`.
+#### S1-002 — Module with no responsibilities
 
-```yaml
-consumers:
-  - module: payments       # ✅ must exist in modules[]
-  - module: ghost-service  # ❌ ERROR if not declared
-```
+A module that doesn't expose endpoints, doesn't produce events, and doesn't consume events serves no purpose in the design.
 
-**Error message:**
-```
-Integridad referencial: el consumidor 'ghost-service' del evento 'OrderCreatedEvent'
-no está declarado en modules[]
-```
+**Message:** `[S1-002] Módulo 'reporting' no tiene ninguna responsabilidad — no expone endpoints, no produce ni consume eventos`
 
-#### 1c. Sync caller / callee existence
+**Fix:** Add endpoints to `exposes[]`, connect it to an async event, or remove the module.
 
-Both `caller` and `calls` in every `integrations.sync[]` entry must be declared modules.
+#### S1-003 — Module without description
 
-#### 1d. Sync endpoints exist in target module's `exposes[]`
+**Message:** `[S1-003] Módulo 'payments' no tiene campo description declarado`
 
-Every endpoint listed in `sync[].using` must match an endpoint declared in the target module's `exposes[]`. Matching uses path templating awareness (`/orders/{id}` matches `GET /orders/{id}`).
+**Fix:** Add a `description` field summarizing the module's responsibility.
 
-```yaml
-# payments calls orders
-sync:
-  - caller: payments
-    calls: orders
-    port: OrderService
-    using:
-      - GET /orders/{id}        # ✅ must appear in orders.exposes[]
-      - GET /orders/{id}/total  # ❌ ERROR if not declared in orders.exposes[]
-```
+#### S1-004 — Purely reactive module not documented
 
-**Error message:**
-```
-Integridad referencial: el endpoint 'GET /orders/{id}/total' usado por 'payments'
-no está declarado en el exposes[] de 'orders'
-```
+A module that only consumes events (no REST endpoints, no events produced) should say so explicitly in its description.
 
-**Why this matters:** Undeclared endpoints indicate either a missing API design or a stale reference — both are common sources of integration bugs discovered late in development.
+**Message:** `[S1-004] Módulo 'notifications' es puramente reactivo (solo consume eventos) pero su description no lo documenta explícitamente`
+
+**Fix:** Add words like "consumes", "reacts to", or "event-driven" to the description.
 
 ---
 
-### Check 2 — Sync cycle detection
+### S2 — Async event graph integrity
 
-**What it validates:** The directed graph of synchronous calls contains no cycles.
+Verifies that the producer → consumer graph declared in `integrations.async` is coherent: no orphan events, no topic collisions, no self-loops.
 
-The evaluator builds a directed graph where each node is a module and each edge `A → B` means "A calls B synchronously". It then runs DFS to detect:
+| Rule | Severity | Description |
+|------|----------|-------------|
+| S2-001 | 🔴 error | Event declared in `integrations.async` with no consumers |
+| S2-002 | 🔴 error | Same `topic` value declared for two different events |
+| S2-003 | 🔴 error | Module listed as consumer of its own event (self-loop) |
+| S2-004 | 🟡 warning | Module that produces events but consumes none |
+| S2-005 | 🟡 warning | Module that consumes events but produces none |
+| S2-006 | 🟡 warning | Event name not following PascalCase + `Event` suffix convention |
+| S2-007 | 🔵 info | Topic name does not include the prefix declared in `messaging.kafka.topicPrefix` |
 
-1. **Direct bidirectional coupling** (`A → B` and `B → A`) — immediate deadlock risk
-2. **Transitive cycles** (`A → B → C → A`) — detected via full DFS path traversal
+#### S2-001 — Event with no consumers
 
 ```yaml
-# ❌ CRITICAL — direct bidirectional sync coupling
+# ❌ ERROR — no consumers declared
+- event: OrderShippedEvent
+  producer: shipping
+  topic: ORDER_SHIPPED
+  consumers: []
+```
+
+**Message:** `[S2-001] Evento 'OrderShippedEvent' declarado en integrations.async sin consumidores`
+
+#### S2-002 — Duplicate topic value
+
+```yaml
+# ❌ ERROR — both events share the same topic
+- event: OrderCreatedEvent
+  topic: ORDER_EVENTS
+- event: OrderCancelledEvent
+  topic: ORDER_EVENTS   # ← collision
+```
+
+**Message:** `[S2-002] Topic 'ORDER_EVENTS' está declarado para dos eventos distintos: 'OrderCreatedEvent' y 'OrderCancelledEvent'`
+
+#### S2-003 — Self-loop (module consuming its own event)
+
+```yaml
+# ❌ ERROR — orders producing AND consuming its own event
+- event: OrderCreatedEvent
+  producer: orders
+  consumers:
+    - module: orders   # ← self-loop
+```
+
+**Message:** `[S2-003] Módulo 'orders' está listado como consumidor de su propio evento 'OrderCreatedEvent' (self-loop)`
+
+#### S2-004/S2-005 — Unbalanced producer/consumer roles
+
+- `[S2-004]` — Module produces events but never consumes any (may be intentional)
+- `[S2-005]` — Module consumes events but never produces any (may be intentional for sinks like notifications)
+
+#### S2-006 — Event name convention
+
+Event names must follow `PascalCase` with an `Event` suffix.
+
+**Examples of violations:** `orderCreated`, `ORDER_CREATED`, `OrderCreated` (missing `Event`), `Order_Created_Event`
+
+**Message:** `[S2-006] Nombre de evento 'orderCreated' no sigue la convención PascalCase con sufijo 'Event'`
+
+#### S2-007 — Topic without configured prefix (info)
+
+When `messaging.kafka.topicPrefix` is declared, every topic name should include it for consistency.
+
+**Message:** `[S2-007] Topic 'ORDER_CREATED' (evento 'OrderCreatedEvent') no incluye el prefijo configurado 'myapp'`
+
+---
+
+### S3 — Sync call integrity
+
+Verifies that all synchronous dependencies declared in `integrations.sync` reference existing modules and endpoints, and do not generate circular or excessive coupling.
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| S3-001 | 🔴 error | Sync call to a module that declares no `exposes[]` |
+| S3-002 | 🔴 error | Path in `sync[].using[]` does not exist in target module's `exposes[]` |
+| S3-003 | 🟡 warning | Bidirectional sync coupling — A calls B and B calls A |
+| S3-004 | 🟡 warning | Module with more than 3 distinct outgoing sync dependencies |
+| S3-005 | 🔵 info | Module consulted synchronously but emits no events when its state changes |
+
+#### S3-001 — Sync call to module without endpoints
+
+```yaml
+# ❌ ERROR — 'notifications' has no exposes[]
+sync:
+  - caller: orders
+    calls: notifications
+    using:
+      - POST /notifications
+```
+
+**Message:** `[S3-001] 'orders' llama síncronamente a 'notifications' pero este módulo no declara exposes[]`
+
+#### S3-002 — Endpoint not declared in target module
+
+```yaml
+sync:
+  - caller: payments
+    calls: orders
+    using:
+      - GET /orders/{id}/items   # ❌ not in orders.exposes[]
+```
+
+**Message:** `[S3-002] Endpoint 'GET /orders/{id}/items' usado por 'payments' no está declarado en exposes[] de 'orders'`
+
+**Fix:** Add the endpoint to `orders.exposes[]` or remove it from `using[]`.
+
+#### S3-003 — Bidirectional sync coupling
+
+```yaml
+# ❌ WARNING — A↔B mutual sync dependency
 sync:
   - caller: orders
     calls: inventory
   - caller: inventory
-    calls: orders      # ← creates orders ↔ inventory cycle
+    calls: orders
 ```
 
-**Error message:**
-```
-Acoplamiento circular síncrono: 'orders' e 'inventory' se llaman mutuamente
-de forma síncrona. Esto puede causar deadlocks.
-```
+**Message:** `[S3-003] Acoplamiento síncrono bidireccional: 'orders' llama a 'inventory' y viceversa`
 
-```yaml
-# ❌ CRITICAL — transitive cycle
-sync:
-  - caller: A
-    calls: B
-  - caller: B
-    calls: C
-  - caller: C
-    calls: A    # ← A → B → C → A
-```
+**Fix:** Replace one direction with an async event, or extract the shared data into a third read-model module.
 
-**Error message:**
-```
-Ciclo síncrono detectado: A → B → C → A
-```
+#### S3-004 — Too many outgoing sync dependencies
 
-**If no cycles are found:**
-```
-No se detectaron ciclos ni acoplamiento síncrono bidireccional ✓
-```
+A module calling more than 3 distinct modules synchronously is tightly coupled and fragile under partial failures.
 
-**Why this matters:** Synchronous circular dependencies in distributed systems can cause deadlocks under load, timeout cascades, and thread-pool exhaustion. This check catches the problem at design time.
+**Message:** `[S3-004] Módulo 'reservations' tiene 4 dependencias síncronas salientes distintas (>3): screenings, customers, payments, inventory`
+
+#### S3-005 — Module consulted synchronously but emits no events (info)
+
+When other modules depend synchronously on a module but that module never publishes events, downstream consumers have no way to react to its state changes.
+
+**Message:** `[S3-005] Módulo 'movies' es consultado síncronamente pero no emite ningún evento cuando su estado cambia`
 
 ---
 
-### Check 3 — Module role analysis
+### S4 — Endpoint coherence
 
-**What it validates:** Each module has a coherent role — it either exposes endpoints, participates in integrations, or both. Isolated modules are flagged.
+Verifies that endpoints declared in `modules[].exposes[]` are internally coherent: no route collisions, complete operation pairs, minimal documentation.
 
-#### 3a. Completely isolated modules
+| Rule | Severity | Description |
+|------|----------|-------------|
+| S4-001 | 🔴 error | Two endpoints with the same HTTP method and path in the same module |
+| S4-002 | 🟡 warning | Module with `PUT /{id}` but no `GET /{id}` for the same resource |
+| S4-003 | 🟡 warning | `DELETE` endpoint exposed without a description indicating physical vs. logical deletion |
+| S4-004 | 🔵 info | Endpoint without a `description` field |
+| S4-005 | 🔵 info | Module with a `POST` creation endpoint but no `GET /{id}` to retrieve the created resource |
 
-A module with no `exposes[]` AND no participation in `integrations` (neither as producer/consumer nor as caller/callee) in an integration is suspicious.
+#### S4-001 — Duplicate route
 
-**Warning:**
-```
-Módulo aislado: 'reporting' no tiene endpoints expuestos ni integraciones declaradas
-```
-
-#### 3b. Modules without `exposes[]`
-
-A module with integrations but no REST endpoints is noted. This is often intentional (pure consumers, background processors) but is surfaced as a warning for review.
-
-**Warning:**
-```
-'notifications' no tiene endpoints expuestos (exposes[] vacío o ausente)
-```
-
-If `notifications` only consumes events and doesn't expose REST endpoints, it's also marked as a passing note:
-```
-'notifications' es consumidor puro de eventos (correcto: no produce eventos propios) ✓
-'notifications' no expone endpoints REST directamente (módulo de integración) ✓
-```
-
-#### 3c. Autonomous modules
-
-Modules with endpoints but no integrations are flagged as autonomous — useful for spotting modules that should be integrated but aren't yet.
-
-**Passing:**
-```
-'movies' es un módulo autónomo sin dependencias de integración ✓
-```
-
----
-
-### Check 4 — Behavior gaps
-
-**What it validates:** Every state-mutating endpoint (PUT, POST, PATCH, DELETE) that uses a "scheduler-like" verb has at least one identifiable trigger — an incoming event or a sync call.
-
-#### Trigger verbs detected
-
-The evaluator looks for these verbs in the `useCase` name:
-
-| Verb | Typical pattern |
-|------|----------------|
-| `expire` | `ExpireReservation`, `ExpireSession` |
-| `clean` | `CleanExpiredTokens` |
-| `close` | `CloseBatch` |
-| `archive` | `ArchiveOldOrders` |
-| `timeout` | `TimeoutPendingPayments` |
-| `process` | `ProcessRefund`, `ProcessPendingItems` |
-| `purge` | `PurgeDeletedUsers` |
-| `flush` | `FlushQueue` |
-
-#### What constitutes a valid trigger
-
-- **Async event:** another module produces an event consumed by this module, and the event name contains the same verb
-- **Sync call:** another module calls this endpoint via `sync[].using`
-
-If neither is found, the evaluator raises a warning:
-
-**Warning:**
-```
-Gap de comportamiento: 'ExpireReservation' (PUT /reservations/{id}/expire) en 'reservations'
-no tiene ningún evento ni llamada síncrona que lo active.
-Puede necesitar un scheduler o job periódico.
-```
-
-#### How to fix a behavior gap
-
-Option A — Add an async trigger event:
 ```yaml
-integrations:
-  async:
-    - event: ReservationExpiredEvent
-      producer: reservations        # self-triggered via scheduler
-      topic: RESERVATION_EXPIRED
-      consumers:
-        - module: reservations      # acts on it
+exposes:
+  - method: GET
+    path: /orders/{id}
+    useCase: GetOrder
+  - method: GET
+    path: /orders/{id}   # ❌ duplicate
+    useCase: GetOrderDetail
 ```
 
-Option B — Document the scheduler explicitly (informational, suppresses the warning by convention):
+**Message:** `[S4-001] Módulo 'orders' tiene dos endpoints con el mismo método y path: GET /orders/{id}`
+
+#### S4-002 — PUT without GET for same resource
+
 ```yaml
 exposes:
   - method: PUT
-    path: /reservations/{id}/expire
-    useCase: ExpireReservation
-    description: "Invocado por Spring @Scheduled cada minuto. No tiene trigger externo."
+    path: /orders/{id}
+    useCase: UpdateOrder
+  # ❌ no GET /orders/{id} declared
 ```
 
-Option C — Accept the warning; it's a legitimate scheduler endpoint.
+**Message:** `[S4-002] Módulo 'orders' tiene PUT /orders/{id} sin el correspondiente GET /orders/{id}`
 
-**Why this matters:** These gaps represent operations that exist in the design but have no automated trigger. In production they either never run (dead code risk) or require manual invocation (operational risk). Surfacing them early allows deliberate decisions about scheduling strategies.
+#### S4-003 — DELETE without description
+
+```yaml
+exposes:
+  - method: DELETE
+    path: /products/{id}
+    useCase: DeleteProduct
+    # ❌ no description — is this physical or soft delete?
+```
+
+**Message:** `[S4-003] Endpoint DELETE /products/{id} en 'products' no tiene description que indique si el borrado es físico o lógico`
+
+**Fix:** Add a description: `"Eliminación lógica: marca el producto como inactivo (soft delete)"` or `"Eliminación física del registro de base de datos"`.
+
+#### S4-004 — Endpoint without description (info)
+
+**Message:** `[S4-004] Endpoint POST /orders en 'orders' no tiene campo description`
+
+#### S4-005 — POST without GET /{id} (info)
+
+**Message:** `[S4-005] Módulo 'shipments' tiene POST de creación pero no declara GET /{id} para recuperar el recurso creado`
 
 ---
 
-### Check 5 — Coupling patterns
+### S5 — Global system coherence
 
-**What it validates:** The relationship between synchronous calls and asynchronous events to detect asymmetric coupling that increases fragility.
+Verifies properties that can only be evaluated by observing the entire system: contradictions between configuration and declarations, flows without failure coverage, and disconnected modules.
 
-#### Asymmetric coupling pattern
+| Rule | Severity | Description |
+|------|----------|-------------|
+| S5-001 | 🟡 warning | `messaging.enabled: false` with async events declared in `integrations.async` |
+| S5-002 | 🟡 warning | Critical business flow with a success event but no corresponding failure event for compensation |
+| S5-003 | 🔵 info | Module handling authentication with no declared integration with any other module |
+| S5-004 | 🔵 info | Module with no connection to the system graph — neither async nor sync |
 
-This pattern occurs when:
-- Module A calls Module B **synchronously**
-- Module B also publishes events that Module A **consumes asynchronously**
-
-This creates a hybrid dependency — A depends on B both at request time (sync call) and at event time (async consumer). While not a hard error, it often indicates that the data needed in the sync call could instead travel inside the event, eliminating the coupling entirely.
-
-```yaml
-# payments calls reservations synchronously (to get amount)
-sync:
-  - caller: payments
-    calls: reservations
-    port: ReservationService
-    using:
-      - GET /reservations/{id}
-
-# reservations also sends events that payments consumes
-async:
-  - event: ReservationCreatedEvent
-    producer: reservations
-    consumers:
-      - module: payments           # ← asymmetric: payments ↔ reservations in both directions
-```
-
-**Warning:**
-```
-Acoplamiento asimétrico: 'payments' llama síncronamente a 'reservations',
-mientras 'reservations' responde vía eventos asíncronos (ReservationCreatedEvent,
-ReservationCancelledEvent). Considerar pasar los datos necesarios directamente
-en el evento para eliminar la llamada síncrona.
-```
-
-#### How to eliminate asymmetric coupling
-
-Embed the needed data in the event payload:
+#### S5-001 — Messaging disabled but events declared
 
 ```yaml
-# Before (asymmetric): payments calls GET /reservations/{id} to get the amount
-# After (decoupled): amount travels inside the event
-- event: ReservationCreatedEvent
-  producer: reservations
-  topic: RESERVATION_CREATED
-  # Event payload would include: reservationId, customerId, amount, seatCount
-  consumers:
-    - module: payments    # payments now has amount without a sync call
+messaging:
+  enabled: false    # ❌ contradicts async events below
+
+integrations:
+  async:
+    - event: OrderCreatedEvent
+      …
 ```
 
-Once `amount` travels in the event, the sync call from `payments → reservations` becomes unnecessary and can be removed.
+**Message:** `[S5-001] messaging.enabled está en false pero hay 3 eventos declarados en integrations.async`
 
-#### Dual-trigger pattern (intentional — passing)
+#### S5-002 — Success event without matching failure event
 
-When a module exposes an endpoint that can be triggered both via REST call AND by consuming an event, the evaluator recognizes this as an intentional dual-trigger design and marks it as passing:
+When a flow has a success event (`*ConfirmedEvent`, `*ApprovedEvent`, `*PlacedEvent`, `*CompletedEvent`), there should be a failure/compensation event for the same subject so consumers can react to the unhappy path.
 
+```yaml
+# ⚠️ WARNING — success exists but no failure counterpart
+- event: PaymentApprovedEvent    # ✅ success
+  producer: payments
+  …
+# If PaymentRejectedEvent or PaymentFailedEvent were missing → S5-002 fires
 ```
-'screenings' tiene endpoints accesibles tanto síncronamente como vía eventos
-(diseño dual — intencional) ✓
-```
 
-This pattern is valid when an operation needs to be invocable both manually (admin REST call) and automatically (event-driven).
+**Message:** `[S5-002] Evento de éxito 'PaymentApprovedEvent' existe pero no hay un evento de fallo correspondiente para el sujeto 'payment' que permita compensación`
+
+#### S5-003 — Auth module without integrations (info)
+
+Modules whose names match `auth`, `security`, `identity`, or `session` that have no declared integrations may be siloed or forgotten.
+
+**Message:** `[S5-003] Módulo 'auth' parece manejar autenticación/seguridad pero no tiene ninguna integración declarada con otros módulos`
+
+#### S5-004 — Isolated module (info)
+
+A module with no async events (produced or consumed) and no sync calls (as caller or callee) is completely disconnected from the system graph.
+
+**Message:** `[S5-004] Módulo 'reporting' no tiene ninguna conexión al grafo del sistema — ni async ni sync`
 
 ---
 
 ## 5. Score calculation
 
-The score is calculated as:
+The score **only** counts errors, warnings, and passing validations. **Info items do not affect the score.**
 
 ```
-score = round((passed_count / (passed_count + errors_count + warnings_count)) * 100)
+score = round(passed / (passed + errors + warnings × 0.5) × 100)
 ```
-
-Where:
-- `errors_count` — number of critical errors (each error counts as 1)
-- `warnings_count` — number of warnings (each warning counts as 1)
-- `passed_count` — number of passing validations
-
-**Score thresholds:**
 
 | Score | Color | Interpretation |
 |-------|-------|----------------|
@@ -419,13 +450,15 @@ Where:
 | 60–80% | 🟡 Yellow | Moderate issues — review warnings before coding |
 | < 60% | 🔴 Red | Significant problems — resolve errors before proceeding |
 
-A score of 100% means zero errors, zero warnings, and at least some passing validations.
+A score of 100% means zero errors, zero warnings, and at least one passing validation.
 
 ---
 
 ## 6. Report output
 
-The command writes a self-contained HTML file (no external dependencies at runtime) and starts a local HTTP server for preview.
+The command produces three output artifacts:
+
+### 1. Console summary
 
 ```
 ✔ Analysis complete!
@@ -433,22 +466,40 @@ The command writes a self-contained HTML file (no external dependencies at runti
 📊 Validation Summary
 ────────────────────────────────────────
   🔴 Errors:     0
-  🟡 Warnings:   5
-  🟢 Passed:     17
-  📈 Score:      87%
+  🟡 Warnings:   3
+  🔵 Info:       12
+  🟢 Passed:     11
+  📈 Score:      88%
+
+Report written to: ./system-report.html
+Evaluation written to: assets/system-evaluation.md
 
 🌐 Server running at: http://localhost:3000
 ```
 
-The HTML report contains three interactive tabs:
+### 2. HTML report (`system-report.html`)
 
-| Tab | Contents |
-|-----|----------|
-| **Validación** | Score cards, collapsible sections for errors / warnings / passed |
-| **Simulador de flujos** | Step-by-step playback of each async event flow, with sync sub-calls shown inline |
-| **Arquitectura** | Module dependency explorer (click any module), sync dependency cards, Kafka topic map, interactive network diagram (Vis.js) with hover highlights per event group |
+Self-contained HTML file with four interactive tabs. Can be shared without a server.
 
-The HTML is a **single self-contained file** — embeds all data as base64, uses React 18 from CDN. Can be shared as-is without a server.
+### 3. Markdown evaluation (`assets/system-evaluation.md`)
+
+A concise file containing only **errors and warnings** — suitable for committing alongside `system.yaml` as a living architecture review document.
+
+```markdown
+# Evaluación del sistema — my-system
+
+> Generado: 2026-03-13 10:45:00
+> Score de calidad: **88%** 🟢 Bueno
+> 🔴 Errores: 0 | 🟡 Advertencias: 3
+
+---
+
+## 🟡 Advertencias
+
+- [S1-004] Módulo 'notifications' es puramente reactivo …
+- [S2-005] Módulo 'customers' consume eventos pero no produce ninguno
+- [S2-005] Módulo 'notifications' consume eventos pero no produce ninguno
+```
 
 ---
 
@@ -456,87 +507,160 @@ The HTML is a **single self-contained file** — embeds all data as base64, uses
 
 ### Example: cinema booking system
 
-Running `eva evaluate system` on a cinema booking `system.yaml` with 7 modules and 8 async events produced:
+Running `eva evaluate system` on a cinema booking `system.yaml` with 7 modules and 9 async events produced:
 
-**Score: 87% (0 errors, 5 warnings, 17 passed)**
+**Score: 88% (0 errors, 3 warnings, 11 passed, 12 info)**
 
-| Finding | Type | Check | Recommendation |
-|---------|------|-------|----------------|
-| `notifications` has no `exposes[]` | ⚠️ Warning | Check 3 | Intentional — pure event consumer. Acceptable. |
-| `ExpireReservation` has no trigger | ⚠️ Warning | Check 4 | Add a Spring `@Scheduled` job or a Temporal workflow to call this endpoint every minute |
-| `ProcessRefund` has no trigger | ⚠️ Warning | Check 4 | Add a `ReservationCancelledEvent` consumer in `payments` that calls this endpoint |
-| `payments → reservations` asymmetric | ⚠️ Warning | Check 5 | Embed `amount` in `ReservationCreatedEvent` payload; remove the sync call |
-| `reservations → screenings` asymmetric | ⚠️ Warning | Check 5 | Embed screening data in `PrivateEventReservationCreatedEvent`; remove the sync GET call |
-
-None of these required code changes before the score improved — they document deliberate design decisions and explicit technical debt.
+| Rule | Severity | Finding | Recommendation |
+|------|----------|---------|----------------|
+| S1-004 | 🟡 | `notifications` is purely reactive but description doesn't say so | Add "consumes events" to its description |
+| S2-005 | 🟡 | `customers` consumes events but produces none | Intentional — accumulates loyalty points. Acceptable. |
+| S2-005 | 🟡 | `notifications` consumes events but produces none | Intentional — pure notification sink. Acceptable. |
+| S2-007 | 🔵 | 9 topics don't include the `cinema` prefix | Rename topics to `cinema.RESERVATION_CREATED`, etc. |
+| S3-005 | 🔵 | `movies`, `theaters`, `customers` consulted sync but emit no events | Acceptable for catalog/reference data modules |
 
 ---
 
 ## 8. Common errors and how to fix them
 
-### Error: event producer not declared
+### Error S1-001 — Module referenced but not declared
 
 ```
-Integridad referencial: el productor 'inventory' del evento 'StockUpdatedEvent'
-no está declarado en modules[]
+[S1-001] Módulo 'billing' referenciado en integrations pero no declarado en modules[]
 ```
 
-**Fix:** Add the missing module to `modules[]`, or correct the producer name typo.
+**Fix:** Add the module to `modules[]` or correct the name typo in `integrations`.
 
 ---
 
-### Error: sync endpoint not declared in target module
+### Error S1-002 — Module with no responsibilities
 
 ```
-Integridad referencial: el endpoint 'GET /orders/{id}/items' usado por 'shipping'
-no está declarado en el exposes[] de 'orders'
+[S1-002] Módulo 'reporting' no tiene ninguna responsabilidad — no expone endpoints,
+no produce ni consume eventos
+```
+
+**Fix:** Add `exposes[]` endpoints, connect the module to an async event, or remove it.
+
+---
+
+### Error S2-001 — Event with no consumers
+
+```
+[S2-001] Evento 'OrderShippedEvent' declarado en integrations.async sin consumidores
+```
+
+**Fix:** Add at least one consumer, or remove the event if it is not yet implemented.
+
+---
+
+### Error S2-002 — Topic collision
+
+```
+[S2-002] Topic 'ORDER_EVENTS' está declarado para dos eventos distintos:
+'OrderCreatedEvent' y 'OrderCancelledEvent'
+```
+
+**Fix:** Give each event a unique topic name: `ORDER_CREATED`, `ORDER_CANCELLED`.
+
+---
+
+### Error S2-003 — Self-loop
+
+```
+[S2-003] Módulo 'orders' está listado como consumidor de su propio evento
+'OrderCreatedEvent' (self-loop)
+```
+
+**Fix:** Remove the self-reference from `consumers`, or redesign the flow so a different module consumes the event.
+
+---
+
+### Error S3-001 — Sync call to module without endpoints
+
+```
+[S3-001] 'orders' llama síncronamente a 'notifications' pero este módulo
+no declara exposes[]
+```
+
+**Fix:** Add `exposes[]` to the target module, or replace the sync call with an async event.
+
+---
+
+### Error S3-002 — Endpoint not found in target module
+
+```
+[S3-002] Endpoint 'GET /orders/{id}/items' usado por 'shipping' no está
+declarado en exposes[] de 'orders'
 ```
 
 **Fix:** Add the missing endpoint to `orders.exposes[]`:
 
 ```yaml
-- name: orders
-  exposes:
-    - method: GET
-      path: /orders/{id}/items    # ← add this
-      useCase: GetOrderItems
+- method: GET
+  path: /orders/{id}/items
+  useCase: GetOrderItems
+  description: "..."
 ```
 
 ---
 
-### Error: synchronous bidirectional cycle
+### Error S4-001 — Duplicate route
 
 ```
-Acoplamiento circular síncrono: 'A' y 'B' se llaman mutuamente de forma síncrona.
+[S4-001] Módulo 'orders' tiene dos endpoints con el mismo método y path:
+GET /orders/{id}
+```
+
+**Fix:** Remove the duplicate or rename the path of the second endpoint.
+
+---
+
+### Warning S3-003 — Bidirectional sync coupling
+
+```
+[S3-003] Acoplamiento síncrono bidireccional: 'orders' llama a 'inventory'
+y viceversa
 ```
 
 **Fix options:**
-1. Remove one of the sync calls and replace it with an event
-2. Extract the shared data into a third module that both A and B can query
-3. Pass the needed data from A to B via the initial request payload, avoiding the reverse call
+1. Replace one direction with an async event
+2. Extract the shared data into a third read-model module that both query
+3. Pass the needed data in the initial request payload, avoiding the reverse call
 
 ---
 
-### Warning: behavior gap (scheduler verb with no trigger)
+### Warning S5-001 — Messaging disabled with events declared
 
 ```
-Gap de comportamiento: 'ArchiveOldOrders' (PUT /orders/archive) en 'orders'
-no tiene ningún evento ni llamada síncrona que lo active.
+[S5-001] messaging.enabled está en false pero hay 5 eventos declarados
+en integrations.async
 ```
 
-**Fix:** Document the scheduling strategy. Options:
-- Spring `@Scheduled(cron = "0 0 2 * * *")` in the `orders` module
-- A dedicated `scheduler` module that calls this endpoint via sync
-- A Temporal workflow (`eva add temporal-client` + `eva g temporal-flow orders`)
-- Accept the warning if the endpoint is intentionally manual-only
+**Fix:** Set `messaging.enabled: true`, or remove the async events from `integrations` if messaging is truly not used.
 
 ---
 
-### Warning: asymmetric coupling
+### Warning S5-002 — Success event without failure counterpart
 
 ```
-Acoplamiento asimétrico: 'A' llama síncronamente a 'B', mientras 'B' responde
-vía eventos asíncronos.
+[S5-002] Evento de éxito 'PaymentApprovedEvent' existe pero no hay un evento
+de fallo correspondiente para el sujeto 'payment' que permita compensación
 ```
 
-**Fix:** Audit the sync call. Ask: "Does A need this data at request time, or could it arrive via the event?" If via event — embed the field in the event payload and delete the sync call entry from `system.yaml`.
+**Fix:** Add a corresponding failure event so consumers can react to unhappy paths:
+
+```yaml
+- event: PaymentRejectedEvent
+  producer: payments
+  topic: PAYMENT_REJECTED
+  consumers:
+    - module: reservations
+      useCase: ExpireReservation
+    - module: notifications
+      useCase: NotifyPaymentRejected
+```
+
+
+---
+

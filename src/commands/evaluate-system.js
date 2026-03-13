@@ -354,6 +354,11 @@ async function evaluateSystemCommand(type, options = {}) {
     await writeDomainAssets(domainValidation, process.cwd());
   }
 
+  // ── 5c. Write system-evaluation.md ──────────────────────────────────────
+  const evalMdPath = path.resolve(process.cwd(), 'assets', 'system-evaluation.md');
+  await fs.ensureDir(path.dirname(evalMdPath));
+  await writeSystemEvaluation(validation, systemConfig, evalMdPath);
+
   spinner.succeed(chalk.green('Analysis complete!'));
 
   // ── 6. Print validation summary ─────────────────────────────────────────
@@ -365,6 +370,9 @@ async function evaluateSystemCommand(type, options = {}) {
   );
   console.log(
     `  ${chalk.yellow('🟡 Warnings:')}   ${chalk.yellow.bold(validation.warnings.length)}`
+  );
+  console.log(
+    `  ${chalk.cyan('🔵 Info:')}       ${chalk.cyan.bold((validation.info || []).length)}`
   );
   console.log(
     `  ${chalk.green('🟢 Passed:')}     ${chalk.green.bold(validation.ok.length)}`
@@ -383,6 +391,12 @@ async function evaluateSystemCommand(type, options = {}) {
   if (validation.warnings.length > 0) {
     console.log(chalk.yellow('Warnings:'));
     validation.warnings.forEach((w) => console.log(chalk.yellow(`  • ${w}`)));
+    console.log();
+  }
+
+  if ((validation.info || []).length > 0) {
+    console.log(chalk.cyan('Info:'));
+    validation.info.forEach((i) => console.log(chalk.cyan(`  • ${i}`)));
     console.log();
   }
 
@@ -406,6 +420,7 @@ async function evaluateSystemCommand(type, options = {}) {
 
   server.listen(port, () => {
     console.log(chalk.gray(`Report written to: ${outputPath}`));
+    console.log(chalk.gray(`Evaluation written to: assets/system-evaluation.md`));
     console.log();
     console.log(chalk.bold.green(`🌐 Server running at: http://localhost:${port}`));
     console.log(chalk.gray('Open the URL in your browser to view the report'));
@@ -423,6 +438,50 @@ async function evaluateSystemCommand(type, options = {}) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+async function writeSystemEvaluation(validation, systemConfig, filePath) {
+  const systemName = (systemConfig.system || {}).name || 'eva4j system';
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const scoreLabel = validation.score > 80 ? '🟢 Bueno' : validation.score > 60 ? '🟡 Aceptable' : '🔴 Crítico';
+
+  const lines = [];
+
+  lines.push(`# Evaluación del sistema — ${systemName}`);
+  lines.push('');
+  lines.push(`> Generado: ${now}  `);
+  lines.push(`> Score de calidad: **${validation.score}%** ${scoreLabel}  `);
+  lines.push(`> 🔴 Errores: ${validation.errors.length} | 🟡 Advertencias: ${validation.warnings.length}`);
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+
+  if (validation.errors.length > 0) {
+    lines.push('## 🔴 Errores críticos');
+    lines.push('');
+    for (const e of validation.errors) {
+      lines.push(`- ${e}`);
+    }
+    lines.push('');
+  }
+
+  if (validation.warnings.length > 0) {
+    lines.push('## 🟡 Advertencias');
+    lines.push('');
+    for (const w of validation.warnings) {
+      lines.push(`- ${w}`);
+    }
+    lines.push('');
+  }
+
+  if (validation.errors.length === 0 && validation.warnings.length === 0) {
+    lines.push('## ✅ Sin errores ni advertencias');
+    lines.push('');
+    lines.push('El sistema supera todas las validaciones de errores y advertencias.');
+    lines.push('');
+  }
+
+  await fs.writeFile(filePath, lines.join('\n'), 'utf-8');
+}
 
 function toPascalCase(str) {
   return str

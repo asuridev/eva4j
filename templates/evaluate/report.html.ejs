@@ -115,7 +115,7 @@
 
     // ─── ValidationTab ──────────────────────────────────────────────────────
     function ValidationTab() {
-      const [expanded, setExpanded] = useState({ errors: true, warnings: true, ok: false });
+      const [expanded, setExpanded] = useState({ errors: true, warnings: true, info: false, ok: false });
 
       const score = VALIDATION.score;
       const scoreColor = score > 80 ? C.green : score > 60 ? C.gold : C.accent;
@@ -180,6 +180,7 @@
             {[
               { label: "Errores", count: VALIDATION.errors.length, color: C.accent, icon: "🔴" },
               { label: "Advertencias", count: VALIDATION.warnings.length, color: C.gold, icon: "🟡" },
+              { label: "Info", count: (VALIDATION.info || []).length, color: C.blue, icon: "🔵" },
               { label: "Validados", count: VALIDATION.ok.length, color: C.green, icon: "🟢" },
             ].map(s => (
               <div key={s.label} style={{
@@ -196,6 +197,7 @@
 
           <Section title="Errores críticos" items={VALIDATION.errors} color={C.accent} icon="🔴" sectionKey="errors" />
           <Section title="Advertencias" items={VALIDATION.warnings} color={C.gold} icon="🟡" sectionKey="warnings" />
+          <Section title="Notas informativas" items={VALIDATION.info || []} color={C.blue} icon="🔵" sectionKey="info" />
           <Section title="Validaciones pasadas" items={VALIDATION.ok} color={C.green} icon="🟢" sectionKey="ok" />
         </div>
       );
