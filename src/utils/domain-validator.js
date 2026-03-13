@@ -311,6 +311,8 @@ function runC2(domainConfigs, systemConfig) {
     'C2-001': { label: 'Transición de estado sin endpoint HTTP ni listener asociado', severity: 'ok', findings: [] },
     'C2-002': { label: 'UseCase de listener sin endpoint REST en módulo que expone REST', severity: 'ok', findings: [] },
     'C2-003': { label: 'Valor en enum *Type sin evento Kafka trazable que lo origine', severity: 'ok', findings: [] },
+    'C2-004': { label: 'Trigger de evento referencia método de transición inexistente', severity: 'ok', findings: [] },
+    'C2-005': { label: 'Transición de estado sin Domain Event asociado (sin trigger)', severity: 'ok', findings: [] },
   };
 
   for (const [moduleName, config] of Object.entries(domainConfigs)) {
@@ -343,7 +345,18 @@ function runC2(domainConfigs, systemConfig) {
     const allKnownUseCases = new Set([...domainEndpointUseCases, ...sysUseCases]);
     const allListenerUCSet = new Set(allListenerUseCases.filter(Boolean));
 
+    // Collect transition methods covered by event triggers — used to relax C2-001 and populate C2-005
+    const triggeredMethods = new Set();
+    for (const agg of config.aggregates || []) {
+      for (const ev of agg.events || []) {
+        for (const trigger of ev.triggers || []) {
+          triggeredMethods.add(trigger);
+        }
+      }
+    }
+
     // C2-001: transition method has no matching endpoint nor listener
+    // Silenced when the method already has an event trigger (design evidence).
     for (const agg of config.aggregates || []) {
       for (const en of agg.enums || []) {
         for (const tr of en.transitions || []) {
@@ -355,12 +368,54 @@ function runC2(domainConfigs, systemConfig) {
           const allUCWords = [...allKnownUseCases, ...allListenerUCSet];
           const matched = allUCWords.some((uc) => wordsOverlap(methodWords, extractWords(uc)));
 
-          if (!matched) {
+          if (!matched && !triggeredMethods.has(methodName)) {
             checks['C2-001'].findings.push(
               finding(
                 moduleName,
                 `Transición '${methodName}' de ${en.name} (${tr.from} → ${tr.to}) no tiene endpoint HTTP ni listener asociado`,
                 `Agregado: ${agg.name}, Enum: ${en.name}`
+              )
+            );
+          }
+        }
+      }
+    }
+
+    // C2-004: event trigger references a method that does not exist in any transition
+    const allTransitionMethods = new Set();
+    for (const agg of config.aggregates || []) {
+      for (const en of agg.enums || []) {
+        for (const tr of en.transitions || []) {
+          if (tr.method) allTransitionMethods.add(tr.method);
+        }
+      }
+    }
+    for (const agg of config.aggregates || []) {
+      for (const ev of agg.events || []) {
+        for (const trigger of ev.triggers || []) {
+          if (!allTransitionMethods.has(trigger)) {
+            checks['C2-004'].findings.push(
+              finding(
+                moduleName,
+                `Evento '${ev.name}' tiene trigger '${trigger}' que no corresponde a ningún método de transición`,
+                `Métodos disponibles: ${[...allTransitionMethods].join(', ') || '(ninguno)'}`
+              )
+            );
+          }
+        }
+      }
+    }
+
+    // C2-005: transition method without any associated domain event trigger
+    for (const agg of config.aggregates || []) {
+      for (const en of agg.enums || []) {
+        for (const tr of en.transitions || []) {
+          if (tr.method && !triggeredMethods.has(tr.method)) {
+            checks['C2-005'].findings.push(
+              finding(
+                moduleName,
+                `Transición '${tr.method}' (${en.name}: ${tr.from} → ${tr.to}) no tiene ningún Domain Event asociado`,
+                `Considerar declarar un evento con triggers: [${tr.method}]`
               )
             );
           }
@@ -428,6 +483,8 @@ function runC2(domainConfigs, systemConfig) {
     'C2-001': 'warning',
     'C2-002': 'info',
     'C2-003': 'warning',
+    'C2-004': 'error',
+    'C2-005': 'info',
   });
 
   return checks;

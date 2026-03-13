@@ -45,30 +45,49 @@
 #
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# 3. orders/domain/models/entities/Order.java  (modificaciones al agregado)
+# 3. orders/domain/models/entities/Order.java  (con triggers: declarados en events[])
 #
-#    public class Order {
-#        // ... campos normales ...
+#    // El desarrollador NO escribe raise() manualmente — el generador lo emite
+#    // automáticamente basándose en triggers: declarados en domain.yaml.
 #
-#        // ─── Domain Events ───────────────────────────────────────
-#        private final List<DomainEvent> _domainEvents = new ArrayList<>();
+#    // Construcción de args (en orden):
+#    //   1º  aggregateId  → this.getId()  (primer arg del constructor DomainEvent, siempre)
+#    //   2º+ campos del evento → resolución automática:
+#    //       · {entityName}Id (ej: orderId en Order) → this.getId()
+#    //       · coincide con campo de la entidad       → this.get{Field}()
+#    //       · nombre termina en At + tipo LocalDateTime → LocalDateTime.now()
+#    //       · no resuelto                            → null /* TODO: provide X */
 #
-#        protected void raise(DomainEvent event) {
-#            _domainEvents.add(event);
-#        }
+#    public void place() {
+#        this.status = this.status.transitionTo(OrderStatus.PLACED);
+#        raise(new OrderPlaced(this.getId(), this.getCustomerId(), this.getOrderNumber(), this.getTotalAmount()));
+#        //                    ^—aggregateId  ^—customerId           ^—orderNumber          ^—totalAmount
+#        //  orderId no se pasa — disponible como event.getAggregateId() en el consumidor
+#    }
 #
-#        public List<DomainEvent> pullDomainEvents() {
+#    public void cancel() {
+#        this.status = this.status.transitionTo(OrderStatus.CANCELLED);
+#        raise(new OrderCancelled(this.getId(), null /* TODO: provide reason */));
+#        //                       ^—aggregateId  ^—reason no resuelto automáticamente
+#    }
+#
+#    public void ship() {
+#        this.status = this.status.transitionTo(OrderStatus.SHIPPED);
+#        raise(new OrderShipped(this.getId(), null /* TODO: provide shippingAddress */, null /* TODO: provide estimatedDeliveryDate */));
+#    }
+#
 #            List<DomainEvent> events =
 #                Collections.unmodifiableList(new ArrayList<>(_domainEvents));
 #            _domainEvents.clear();
 #            return events;   // retorna y limpia (operación atómica)
 #        }
 #
-#        // El desarrollador llama a raise() dentro de sus métodos de negocio:
-#        public void place(String customerId, BigDecimal total) {
-#            this.status = this.status.transitionTo(OrderStatus.PLACED);  // lanza InvalidStateTransitionException si no es válida
-#            raise(new OrderPlacedEvent(this.id, customerId, this.orderNumber, total));
-#        }
+#        // Con triggers: auto-generados NO hace falta escribir raise() a mano. Ver arriba.
+#        // Si un evento NO declara triggers, el dev puede llamar a raise() explicitamente:
+#        //     public void placeManual(String customerId, BigDecimal total) {
+#        //         this.status = OrderStatus.PLACED;
+#        //         raise(new OrderPlaced(this.id, customerId, orderNumber, total));
+#        //     }
 #    }
 #
 # ─────────────────────────────────────────────────────────────────────────────
@@ -219,44 +238,71 @@ aggregates:
         transitions:
           - from: DRAFT
             to: PLACED
+            method: place
           - from: DRAFT
             to: CANCELLED
+            method: cancel
           - from: PLACED
             to: CONFIRMED
+            method: confirm
           - from: PLACED
             to: CANCELLED
+            method: cancel
           - from: CONFIRMED
             to: SHIPPED
+            method: ship
           - from: CONFIRMED
             to: CANCELLED
+            method: cancel
           - from: SHIPPED
             to: DELIVERED
+            method: deliver
 
     # ─── Domain Events ────────────────────────────────────────────────────────
     # Siblings de entities:, enums: y valueObjects:
     # La declaración es agnóstica al broker — ningún campo de infraestructura aquí.
     # Cada entrada genera: domain/models/events/{Name}Event.java
+    #
+    # triggers: (lista de nombres de métodos de transición)
+    #   Conecta automáticamente una transición de estado con la publicación de este evento.
+    #   El generador emite raise(new XEvent(...)) dentro del método de transición.
+    #   Si no se declara triggers, el dev debe llamar a raise() manualmente.
+    #
+    # Reglas de resolución de argumentos (automática):
+    #   1. aggregateId → siempre this.getId() (primer arg del constructor de DomainEvent)
+    #   2. {entityName}Id (ej: orderId en Order) → IGNORADO — el id ya está en aggregateId
+    #      El consumidor usa event.getAggregateId(); no declarar este campo en events[].fields
+    #   3. coincide con campo de la entidad → this.get{Field}()
+    #   4. nombre termina en At + tipo LocalDateTime → LocalDateTime.now()
+    #   5. no resuelto → null /* TODO: provide {fieldName} */
 
     events:
       - name: OrderPlaced
+        triggers:
+          - place           # auto-genera raise() en el método place() de Order
         fields:
-          - name: customerId
+          # orderId NO se declara aquí — ya disponible como event.getAggregateId()
+          - name: customerId  # → this.getCustomerId()  (campo de la entidad)
             type: String
-          - name: orderNumber
+          - name: orderNumber  # → this.getOrderNumber()
             type: String
-          - name: totalAmount
+          - name: totalAmount  # → this.getTotalAmount()
             type: BigDecimal
 
       - name: OrderCancelled
+        triggers:
+          - cancel          # auto-genera raise() en cancel() de Order
         fields:
-          - name: reason
+          - name: reason    # no resuelto → null /* TODO: provide reason */
             type: String
 
       - name: OrderShipped
+        triggers:
+          - ship
         fields:
-          - name: shippingAddress
+          - name: shippingAddress       # no resuelto → null /* TODO */
             type: String
-          - name: estimatedDeliveryDate
+          - name: estimatedDeliveryDate # no resuelto → null /* TODO */
             type: LocalDate
 
 # ─── Eventos externos que este módulo CONSUME ────────────────────────────────

@@ -82,8 +82,19 @@ function parseAggregate(aggregateData) {
     return {
       name: eventName,
       fieldName: toCamelCase(eventName),
-      fields: eventFields
+      fields: eventFields,
+      triggers: event.triggers || []
     };
+  });
+
+  // Build inverse map: { methodName → [event, ...] }
+  // Used by the AggregateRoot template to emit raise() calls inside transition methods.
+  const triggeredEventsMap = {};
+  domainEvents.forEach(event => {
+    (event.triggers || []).forEach(method => {
+      if (!triggeredEventsMap[method]) triggeredEventsMap[method] = [];
+      triggeredEventsMap[method].push(event);
+    });
   });
 
   return {
@@ -95,6 +106,7 @@ function parseAggregate(aggregateData) {
     aggregateMethods,
     allEntities: parsedEntities,
     domainEvents,
+    triggeredEventsMap,
     enums: aggregateEnums
   };
 }

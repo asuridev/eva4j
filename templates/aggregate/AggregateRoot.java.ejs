@@ -18,6 +18,14 @@ import <%= packageName %>.shared.domain.DomainEvent;
 import <%= packageName %>.<%= moduleName %>.domain.models.events.<%= event.name %>;
 <% }); %>
 <% } %>
+<%
+const _needsLocalDateTimeImport = Object.values(triggeredEventsMap || {}).flat().some(function(ev) {
+  return (ev.fields || []).some(function(ef) { return ef.name.endsWith('At') && ef.javaType === 'LocalDateTime'; });
+}) && !imports.some(function(imp) { return imp.includes('LocalDateTime'); });
+%>
+<% if (_needsLocalDateTimeImport) { %>
+import java.time.LocalDateTime;
+<% } %>
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -184,8 +192,24 @@ public class <%= name %> {
         }
 <% } %>
         this.<%= field.name %> = this.<%= field.name %>.transitionTo(<%- field.javaType %>.<%= transition.to %>);
+<%
+    const _triggeredEvents = (triggeredEventsMap || {})[methodName] || [];
+    _triggeredEvents.forEach(function(evt) {
+      const _entityBase = name.charAt(0).toLowerCase() + name.slice(1);
+      const _args = ['this.getId()'];
+      (evt.fields || []).forEach(function(ef) {
+        // Skip {entityName}Id — already provided as aggregateId in the DomainEvent constructor
+        if (ef.name === _entityBase + 'Id') { return; }
+        const _matched = fields.find(function(f) { return f.name === ef.name; });
+        if (_matched) { _args.push('this.get' + ef.name.charAt(0).toUpperCase() + ef.name.slice(1) + '()'); return; }
+        if (ef.name.endsWith('At') && ef.javaType === 'LocalDateTime') { _args.push('LocalDateTime.now()'); return; }
+        _args.push('null /* TODO: provide ' + ef.name + ' */');
+      });
+%>
+        raise(new <%= evt.name %>(<%= _args.join(', ') %>));
+<%  }); %>
     }
-<%     }); %>
+<%     });%>
 
     // ─── State Query Helpers ─────────────────────────────────────────────────
 <%     meta.enumValues.forEach(value => { %>

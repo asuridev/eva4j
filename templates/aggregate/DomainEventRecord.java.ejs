@@ -1,10 +1,16 @@
 package <%= packageName %>.<%= moduleName %>.domain.models.events;
 
 import <%= packageName %>.shared.domain.DomainEvent;
-<% const needsBigDecimal = fields.some(f => f.javaType === 'BigDecimal'); %>
-<% const needsLocalDate = fields.some(f => f.javaType === 'LocalDate' || f.javaType === 'LocalDateTime' || f.javaType === 'LocalTime'); %>
-<% const needsUUID = fields.some(f => f.javaType === 'UUID'); %>
-<% const needsList = fields.some(f => f.isCollection); %>
+<%
+  // Fields named {aggregateName}Id are excluded — the aggregate id is already
+  // available via getAggregateId() inherited from DomainEvent.
+  const _aggregateBase = aggregateName.charAt(0).toLowerCase() + aggregateName.slice(1);
+  const _ownFields = fields.filter(f => f.name !== _aggregateBase + 'Id');
+%>
+<% const needsBigDecimal = _ownFields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate = _ownFields.some(f => f.javaType === 'LocalDate' || f.javaType === 'LocalDateTime' || f.javaType === 'LocalTime'); %>
+<% const needsUUID = _ownFields.some(f => f.javaType === 'UUID'); %>
+<% const needsList = _ownFields.some(f => f.isCollection); %>
 <% if (needsBigDecimal) { %>
 import java.math.BigDecimal;
 <% } %>
@@ -25,23 +31,24 @@ import java.util.List;
  * Raised when: TODO — describe the business fact this event represents.
  * Aggregate:   <%= aggregateName %>
  *
+ * The aggregate id is available via {@link #getAggregateId()} (inherited from DomainEvent).
  * This is a pure domain class. It carries no Spring or infrastructure dependencies.
  * Publish it externally via <%= aggregateName %>DomainEventHandler (application layer).
  */
 public final class <%= name %> extends DomainEvent {
 
-<% fields.forEach(field => { %>
+<% _ownFields.forEach(field => { %>
     private final <%- field.javaType %> <%= field.name %>;
 <% }); %>
 
-    public <%= name %>(String aggregateId<% fields.forEach(field => { %>, <%- field.javaType %> <%= field.name %><% }); %>) {
+    public <%= name %>(String aggregateId<% _ownFields.forEach(field => { %>, <%- field.javaType %> <%= field.name %><% }); %>) {
         super(aggregateId);
-<% fields.forEach(field => { %>
+<% _ownFields.forEach(field => { %>
         this.<%= field.name %> = <%= field.name %>;
 <% }); %>
     }
 
-<% fields.forEach(field => { %>
+<% _ownFields.forEach(field => { %>
     public <%- field.javaType %> get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() {
         return <%= field.name %>;
     }

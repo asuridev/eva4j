@@ -306,7 +306,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         valueObjects,
         aggregateMethods: aggregate.aggregateMethods,
         auditable: rootEntity.auditable,
-        domainEvents: aggregate.domainEvents || []
+        domainEvents: aggregate.domainEvents || [],
+        triggeredEventsMap: aggregate.triggeredEventsMap || {}
       };
 
       await renderAndWrite(

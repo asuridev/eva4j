@@ -145,9 +145,10 @@ aggregates:
 
     events:
       - name: ReservationConfirmed
+        triggers:
+          - confirm
         fields:
-          - name: reservationId
-            type: String
+          # reservationId NO se declara — disponible como event.getAggregateId()
           - name: customerId
             type: String
           - name: confirmedAt

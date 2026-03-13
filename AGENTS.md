@@ -530,16 +530,70 @@ Genera automáticamente **en el enum**: `VALID_TRANSITIONS`, `canTransitionTo()`
 aggregates:
   - name: Order
     entities: [...]
+    enums:
+      - name: OrderStatus
+        transitions:
+          - from: DRAFT
+            to: PLACED
+            method: place
+          - from: PLACED
+            to: CANCELLED
+            method: cancel
     events:
-      - name: OrderConfirmed
+      - name: OrderPlaced
+        triggers:
+          - place         # ← conecta la transición con este evento
         fields:
           - name: orderId
             type: String
           - name: confirmedAt
             type: LocalDateTime
+
+      - name: OrderCancelled
+        triggers:
+          - cancel
+        fields:
+          - name: reason   # campo no resuelto → null /* TODO: provide reason */
+            type: String
 ```
 
-Genera `OrderConfirmed.java` (en `domain/models/events/`) que extiende `DomainEvent`, y `OrderDomainEventHandler.java` (en `application/usecases/`) con `@TransactionalEventListener(AFTER_COMMIT)`.
+#### Propiedad `triggers`
+
+Lista de nombres de métodos de transición que publican este evento. El generador emite automáticamente `raise(new XEvent(...))` dentro de cada método listado.
+
+**Reglas de resolución de argumentos (en orden):**
+
+| Condición del campo del evento | Argumento generado |
+|---|---|
+| Siempre (primer arg, aggregateId del DomainEvent base) | `this.getId()` |
+| Nombre = `{entityName}Id` (ej: `orderId` en `Order`) | **Ignorado** — ya cubierto por `aggregateId` |
+| Nombre coincide con un campo de la entidad | `this.get{Field}()` |
+| Nombre termina en `At` + tipo `LocalDateTime` | `LocalDateTime.now()` |
+| No resuelto | `null /* TODO: provide {fieldName} */` |
+
+> **Convención:** No declarar `{entityName}Id` en `events[].fields`. El id del agregado ya está disponible para el consumidor mediante `event.getAggregateId()` (heredado de `DomainEvent`).
+
+**Resultado generado:**
+
+```java
+public void place() {
+    this.status = this.status.transitionTo(OrderStatus.PLACED);
+    raise(new OrderPlaced(this.getId(), this.getId(), LocalDateTime.now()));
+    //                    ^—aggregateId  ^—orderId     ^—confirmedAt
+}
+
+public void cancel() {
+    this.status = this.status.transitionTo(OrderStatus.CANCELLED);
+    raise(new OrderCancelled(this.getId(), null /* TODO: provide reason */));
+}
+```
+
+Si un evento **no declara `triggers`**, el desarrollador debe llamar a `raise()` manualmente dentro del método de negocio.
+
+**Validaciones generadas:**
+- **C2-004** (error): trigger referencia un método que no existe en ninguna transición del módulo
+- **C2-005** (info): transición sin ningún evento asociado — considera declarar `triggers`
+- **C2-001** se silencia automáticamente para transiciones que ya tienen `triggers`
 
 **Auto-wiring de broker:** Si el proyecto tiene un broker de mensajería instalado (`eva add kafka-client`), `eva g entities` genera automáticamente la capa de Integration Events para **todos** los eventos declarados — sin necesidad de ejecutar `eva g kafka-event` por separado:
 
@@ -1391,6 +1445,8 @@ Al generar o modificar código, verificar:
 - [ ] Enum con ciclo de vida → usar `transitions` + `initialValue`, no setters manuales
 - [ ] Value Object con comportamiento → declarar `methods` en lugar de lógica en entidad
 - [ ] Evento de dominio → declarar en `events[]`, publicar con `raise()` en método de negocio
+- [ ] Evento con `triggers: [methodName]` → el generador emite `raise()` automáticamente; args no resolubles quedan como `null /* TODO */`
+- [ ] Sin `triggers` en el evento → el dev llama a `raise()` manualmente
 - [ ] Evento con broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
 - [ ] Distinguir entre Domain Event (`domain/models/events/X.java`) e Integration Event (`application/events/XIntegrationEvent.java`) — cambios de broker solo afectan al adaptador `MessageBroker`
 - [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
