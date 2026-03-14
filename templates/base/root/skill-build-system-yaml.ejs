@@ -494,7 +494,7 @@ Antes de escribir cualquier YAML, verifica que NO estás cometiendo ninguno de e
 5. ❌ **No inventar módulos en `reference.module`** — solo los declarados en `system/system.yaml → modules:`
 6. ❌ **No duplicar en `endpoints:`** lo que ya está en `system/system.yaml → exposes:`
 12. ❌ **`endpoints:` NUNCA es una lista plana** — usar siempre la estructura `{ basePath, versions: [{ version, operations: [...] }] }`. Una lista plana hace que el generador no produzca ningún Command, Handler ni Controller.
-7. ❌ **No inventar eventos en `events:`** — deben coincidir con `integrations.async[]` donde `producer` es este módulo
+7. ❌ **No inventar eventos en `events:`** — deben coincidir con `integrations.async[]` donde `producer` es este módulo. ✅ **Declarar siempre `topic:` en cada evento** con el valor exacto de `integrations.async[].topic` — aunque el generador puede derivarlo automáticamente, la declaración explícita garantiza consistencia con los `listeners[]` de los módulos consumidores
 8. ❌ **No inventar listeners** — deben coincidir con `integrations.async[].consumers[]` donde `module` es este módulo
 9. ❌ **No inventar ports** — deben coincidir con `integrations.sync[]` donde `caller` es este módulo
 10. ❌ **Todo el contenido del archivo debe estar en inglés** — field names, comments, descriptions, values
@@ -625,6 +625,7 @@ aggregates:
 
     events:
       - name: OrderPlacedEvent          # PascalCase, past tense, Event suffix
+        topic: ORDER_PLACED             # preferred: explicit topic — must match listeners[].topic in consumers
         triggers:
           - confirm                     # transition method name that fires this event
         fields:
@@ -635,6 +636,7 @@ aggregates:
           - name: confirmedAt           # ends in 'At' + LocalDateTime → resolves to LocalDateTime.now()
             type: LocalDateTime
       - name: OrderCancelledEvent
+        topic: ORDER_CANCELLED          # preferred: explicit topic
         triggers:
           - cancel
         fields:
@@ -975,6 +977,7 @@ Antes de guardar `system/{module}.yaml`, verifica:
 - [ ] Value Objects sin campo `id`
 - [ ] Referencias cross-aggregate usando `reference:` en el campo ID, no `relationships:`
 - [ ] `events[].name` consistente con `integrations.async[]` donde `producer` es este módulo
+- [ ] `events[].topic` declarado en cada evento — debe coincidir **exactamente** con `integrations.async[].topic`; si se omite, el generador lo deriva quitando el sufijo `Event` (`OrderPlacedEvent` → `ORDER_PLACED`), pero declararlo explícitamente evita mismatch con consumidores
 - [ ] `events[].triggers[]` referencia métodos que existen en `enums[].transitions[].method`
 - [ ] `{entityName}Id` declarado en `events[].fields` cuando el evento **cruza módulos via Kafka** (el generador lo mapea a `event.getAggregateId()` automáticamente)
 - [ ] `endpoints[].operations[].useCase` consistente con `modules[].exposes[].useCase`

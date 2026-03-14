@@ -645,6 +645,8 @@ aggregates:
         values: [DRAFT, PLACED, CANCELLED]
     events:
       - name: OrderPlaced
+        topic: ORDER_PLACED     # preferred: explicit — must match listeners[].topic in consumers
+                                # default derivation: strips 'Event' suffix → OrderPlacedEvent → ORDER_PLACED
         triggers:
           - place             # transition method name that publishes this event
         fields:
@@ -658,6 +660,7 @@ aggregates:
           - name: placedAt
             type: LocalDateTime
       - name: OrderCancelled
+        topic: ORDER_CANCELLED  # preferred: explicit topic
         triggers:
           - cancel
         fields:
@@ -680,6 +683,24 @@ aggregates:
 | Not resolvable | `null /* TODO: provide {fieldName} */` |
 
 > **Convention:** Declare `{entityName}Id` in `events[].fields` when the event **crosses module boundaries via Kafka** — it is required so the id travels in the Integration Event payload. The generator automatically maps it to `event.getAggregateId()` in the handler, preventing duplication in the internal Domain Event class. If the event is only consumed within the same bounded context (Spring event bus), `{entityName}Id` can be omitted since `getAggregateId()` is already available.
+
+### `topic` — Kafka topic name for the event
+
+Optional but **recommended**. Declares the Kafka topic name for this event explicitly.
+
+```yaml
+events:
+  - name: OrderPlacedEvent
+    topic: ORDER_PLACED        # ✅ preferred: explicit, matches listeners[].topic in consumers
+    triggers: [place]
+    fields: [...]
+```
+
+**Default derivation (when `topic:` is omitted):** the generator strips the `Event` suffix from the class name before converting to SCREAMING_SNAKE_CASE:
+- `OrderPlacedEvent` → `ORDER_PLACED` ✓
+- `OrderCancelled` *(no suffix)* → `ORDER_CANCELLED` ✓
+
+**Why prefer explicit `topic:`:** when a consumer module declares `listeners[].topic: ORDER_PLACED`, the value must match the producer's topic exactly. Declaring it explicitly in both places eliminates any risk of mismatch and makes the contract visible without having to understand the derivation rule.
 
 If an event has **no `triggers`**, the developer must call `raise()` manually inside the business method.
 

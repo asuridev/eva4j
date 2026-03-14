@@ -773,6 +773,24 @@ aggregates:
 
 > **Convention:** Declare `{entityName}Id` in `events[].fields` when the event **crosses module boundaries via Kafka** — it is required so the id travels in the Integration Event payload. The generator automatically maps it to `event.getAggregateId()` in the handler, preventing duplication in the internal Domain Event class. If the event is only consumed within the same bounded context (Spring event bus), `{entityName}Id` can be omitted since `getAggregateId()` is already available.
 
+### `topic` — Kafka topic name for the event
+
+Optional but **recommended**. Declares the Kafka topic name for this event explicitly.
+
+```yaml
+events:
+  - name: OrderPlacedEvent
+    topic: ORDER_PLACED        # ✅ preferred: explicit, matches listeners[].topic in consumers
+    triggers: [place]
+    fields: [...]
+```
+
+**Default derivation (when `topic:` is omitted):** the generator strips the `Event` suffix from the class name:
+- `OrderPlacedEvent` → `ORDER_PLACED` ✓
+- `OrderCancelled` *(no suffix)* → `ORDER_CANCELLED` ✓
+
+**Why prefer explicit `topic:`:** the consumer's `listeners[].topic` must match the producer's topic exactly. Declaring it explicitly in both places eliminates any risk of mismatch.
+
 If an event has **no `triggers`**, the developer must call `raise()` manually inside the business method.
 
 ### Generated files
