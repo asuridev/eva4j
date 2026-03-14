@@ -3,6 +3,12 @@ package <%= packageName %>.<%= moduleName %>.application.events;
 <% const needsLocalDate = eventFields && eventFields.some(f => f.javaType === 'LocalDate' || f.javaType === 'LocalDateTime' || f.javaType === 'LocalTime'); %>
 <% const needsUUID = eventFields && eventFields.some(f => f.javaType === 'UUID'); %>
 <% const needsList = eventFields && eventFields.some(f => f.isCollection); %>
+<%
+  const _STANDARD_TYPES = new Set(['String','Integer','Long','Double','Float','Boolean','BigDecimal','LocalDate','LocalDateTime','LocalTime','Instant','UUID']);
+  const _customElementTypes = eventFields
+    ? [...new Set(eventFields.filter(f => f.isCollection && f.collectionElementType && !_STANDARD_TYPES.has(f.collectionElementType)).map(f => f.collectionElementType))]
+    : [];
+%>
 <% if (needsBigDecimal) { %>
 import java.math.BigDecimal;
 <% } %>
@@ -16,6 +22,9 @@ import java.util.UUID;
 <% if (needsList) { %>
 import java.util.List;
 <% } %>
+<% _customElementTypes.forEach(typeName => { %>
+import <%= packageName %>.<%= moduleName %>.application.events.<%- typeName %>;
+<% }); %>
 
 /**
  * Integration Event — broker-side projection of the corresponding domain event.

@@ -533,6 +533,10 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         // KafkaMessageBroker impl method, topic config, KafkaConfig bean) for
         // every domain event declared in this aggregate.
         if (broker === 'kafka') {
+          const STANDARD_EVENT_TYPES = new Set([
+            'String','Integer','Long','Double','Float','Boolean',
+            'BigDecimal','LocalDate','LocalDateTime','LocalTime','Instant','UUID'
+          ]);
           for (const event of aggregateDomainEvents) {
             const kafkaCtx = buildKafkaEventContext(packageName, moduleName, event);
             await generateSingleKafkaEvent(projectDir, packagePath, kafkaCtx);
@@ -541,6 +545,28 @@ async function generateEntitiesCommand(moduleName, options = {}) {
               name: kafkaCtx.eventClassName,
               path: `${moduleName}/application/events/${kafkaCtx.eventClassName}.java`
             });
+
+            // Generate stub records for custom collection element types
+            // e.g. List<OrderItemSnapshot> → generate OrderItemSnapshot.java
+            const customElementTypes = [...new Set(
+              (event.fields || [])
+                .filter(f => f.isCollection && f.collectionElementType && !STANDARD_EVENT_TYPES.has(f.collectionElementType))
+                .map(f => f.collectionElementType)
+            )];
+            for (const typeName of customElementTypes) {
+              const stubPath = path.join(moduleBasePath, 'application', 'events', `${typeName}.java`);
+              await renderAndWrite(
+                path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerNestedType.java.ejs'),
+                stubPath,
+                { packageName, moduleName, name: typeName, fields: [] },
+                { ...writeOptions, overwrite: false }
+              );
+              generatedFiles.push({
+                type: 'Event Nested Type',
+                name: typeName,
+                path: `${moduleName}/application/events/${typeName}.java`
+              });
+            }
           }
           generatedFiles.push({
             type: 'Integration Event',
