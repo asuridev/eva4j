@@ -1,0 +1,185 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# product — Domain Model (Core Domain)
+# ─────────────────────────────────────────────────────────────────────────────
+# Manages the product catalog and categories. Two aggregates with separate
+# lifecycles. Tests: multi-aggregate endpoints fix, VO-unwrap in raise(),
+# transitions + triggers, cross-aggregate reference.
+# ─────────────────────────────────────────────────────────────────────────────
+
+aggregates:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Aggregate: Product
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: Product
+    entities:
+      - name: Product
+        isRoot: true
+        tableName: products
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Product name is required"
+          - name: description
+            type: String
+          - name: price
+            type: Price
+            validations:
+              - type: NotNull
+                message: "Price is required"
+          - name: categoryId
+            type: String
+            reference:
+              aggregate: Category
+            validations:
+              - type: NotBlank
+                message: "Category ID is required"
+          - name: status
+            type: ProductStatus
+            readOnly: true
+          - name: publishedAt
+            type: LocalDateTime
+            readOnly: true
+
+    valueObjects:
+      - name: Price
+        fields:
+          - name: amount
+            type: BigDecimal
+          - name: currency
+            type: String
+        methods:
+          - name: isPositive
+            returnType: boolean
+            parameters: []
+            body: "return this.amount != null && this.amount.compareTo(java.math.BigDecimal.ZERO) > 0;"
+
+    enums:
+      - name: ProductStatus
+        initialValue: DRAFT
+        transitions:
+          - from: DRAFT
+            to: PUBLISHED
+            method: publish
+          - from: PUBLISHED
+            to: DISCONTINUED
+            method: discontinue
+          - from: DRAFT
+            to: DISCONTINUED
+            method: discontinue
+        values:
+          - DRAFT
+          - PUBLISHED
+          - DISCONTINUED
+
+    events:
+      # ProductPublishedEvent — triggered by publish transition.
+      # price: BigDecimal tests VO-unwrap: entity.price is Price, event expects BigDecimal
+      # → generator should emit: this.getPrice().getAmount()
+      - name: ProductPublishedEvent
+        topic: PRODUCT_PUBLISHED
+        triggers:
+          - publish
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: publishedAt
+            type: LocalDateTime
+
+      # ProductDiscontinuedEvent — triggered by discontinue transition
+      - name: ProductDiscontinuedEvent
+        topic: PRODUCT_DISCONTINUED
+        triggers:
+          - discontinue
+        fields:
+          - name: productId
+            type: String
+          - name: discontinuedAt
+            type: LocalDateTime
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Aggregate: Category
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: Category
+    entities:
+      - name: Category
+        isRoot: true
+        tableName: categories
+        audit:
+          enabled: true
+          trackUser: false
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Category name is required"
+          - name: description
+            type: String
+
+    events:
+      # CategoryCreatedEvent — no triggers, raise() called manually in the handler
+      - name: CategoryCreatedEvent
+        fields:
+          - name: categoryId
+            type: String
+          - name: name
+            type: String
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Declarative REST endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-aggregate: Product ops are classified to Product, Category ops to
+# Category. Validates the cross-aggregate classification fix.
+# ─────────────────────────────────────────────────────────────────────────────
+endpoints:
+  basePath: /
+  versions:
+    - version: v1
+      operations:
+        # ── Product ───────────────────────────────────────────────────────────
+        - useCase: CreateProduct
+          method: POST
+          path: /products
+        - useCase: GetProduct
+          method: GET
+          path: /products/{id}
+        - useCase: FindAllProducts
+          method: GET
+          path: /products
+        - useCase: UpdateProduct
+          method: PUT
+          path: /products/{id}
+        - useCase: PublishProduct
+          method: PUT
+          path: /products/{id}/publish
+        - useCase: DiscontinueProduct
+          method: PUT
+          path: /products/{id}/discontinue
+
+        # ── Category ──────────────────────────────────────────────────────────
+        - useCase: CreateCategory
+          method: POST
+          path: /categories
+        - useCase: GetCategory
+          method: GET
+          path: /categories/{id}
+        - useCase: FindAllCategorys
+          method: GET
+          path: /categories
+        - useCase: UpdateCategory
+          method: PUT
+          path: /categories/{id}

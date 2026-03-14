@@ -166,9 +166,9 @@ async function generateKafkaEventCommand(moduleName, eventName) {
         }
       }
 
-      const topicNameKebab = toKebabCase(name);
-      const topicNameCamel = toCamelCase(name);
-      const topicNameSnake = toSnakeCase(name).toUpperCase();
+      const topicNameKebab = toKebabCase(stripEventSuffix(name));
+      const topicNameCamel = toCamelCase(stripEventSuffix(name));
+      const topicNameSnake = toSnakeCase(stripEventSuffix(name)).toUpperCase();
       const topicSpringProperty = `\${topics.${topicNameKebab}}`;
       const selectedDomainEvent = domainEventMap[normalizedName] || null;
 
@@ -218,8 +218,8 @@ async function generateKafkaEventCommand(moduleName, eventName) {
 
     if (!isBatch && generated.length === 1) {
       const r = generated[0];
-      const topicSnake = toSnakeCase(eventNames[0]).toUpperCase();
-      const topicKebab = toKebabCase(eventNames[0]);
+      const topicSnake = toSnakeCase(stripEventSuffix(eventNames[0])).toUpperCase();
+      const topicKebab = toKebabCase(stripEventSuffix(eventNames[0]));
       console.log(chalk.blue('\n✅ Kafka event configured successfully!'));
       console.log(chalk.white(`\n   Event: ${r.name}`));
       console.log(chalk.white(`   Topic: ${topicSnake} (${topicKebab})`));
@@ -654,13 +654,25 @@ async function getInstalledBroker(configManager) {
 }
 
 /**
+ * Strip the conventional Java 'Event' suffix from an event class name
+ * before deriving the Kafka topic name.
+ * ProductPublishedEvent → ProductPublished → PRODUCT_PUBLISHED
+ *
+ * If the event has an explicit `topic:` property in domain.yaml, that takes
+ * precedence and this function is not called.
+ */
+function stripEventSuffix(name) {
+  return name.endsWith('Event') ? name.slice(0, -'Event'.length) : name;
+}
+
+/**
  * Build a Kafka event generation context for a given domain event.
  * Intended for use by `generate-entities.js` to auto-wire broker integration events
  * without requiring a separate `eva g kafka-event` invocation.
  *
  * @param {string} packageName
  * @param {string} moduleName
- * @param {{ name: string, fields: Array }} domainEvent - Domain event from parsed domain.yaml
+ * @param {{ name: string, topic?: string, fields: Array }} domainEvent - Domain event from parsed domain.yaml
  * @param {{ partitions?: number, replicas?: number }} [options]
  * @returns {Object} context ready for generateSingleKafkaEvent()
  */
@@ -669,9 +681,15 @@ function buildKafkaEventContext(packageName, moduleName, domainEvent, { partitio
   const integrationEventClassName = normalizedName.endsWith('IntegrationEvent')
     ? normalizedName
     : `${normalizedName}IntegrationEvent`;
-  const topicNameKebab = toKebabCase(domainEvent.name);
-  const topicNameCamel = toCamelCase(domainEvent.name);
-  const topicNameSnake = toSnakeCase(domainEvent.name).toUpperCase();
+  // If an explicit topic is declared in domain.yaml, use it as source of truth.
+  // Otherwise strip the 'Event' suffix before deriving snake/kebab names so that
+  // ProductPublishedEvent → PRODUCT_PUBLISHED (not PRODUCT_PUBLISHED_EVENT).
+  const topicBase = domainEvent.topic
+    ? domainEvent.topic.trim().toUpperCase().replace(/-/g, '_')
+    : toSnakeCase(stripEventSuffix(domainEvent.name)).toUpperCase();
+  const topicNameSnake = topicBase;
+  const topicNameKebab = topicBase.toLowerCase().replace(/_/g, '-');
+  const topicNameCamel = toCamelCase(topicNameKebab);
   const topicSpringProperty = `\${topics.${topicNameKebab}}`;
   return {
     packageName,

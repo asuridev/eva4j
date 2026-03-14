@@ -1613,11 +1613,16 @@ aggregates:
 
 ### Propiedades de un evento
 
-| Propiedad | Tipo | Descripción |
-|-----------|------|-------------|
-| `name` | String | Nombre de la clase del evento (PascalCase) |
-| `fields` | Array | Campos que transporta el evento |
-| `kafka` | Boolean | Si `true`, genera llamada a `messageBroker.send{EventName}()` |
+| Propiedad | Tipo | Obligatorio | Descripción |
+|-----------|------|-------------|-------------|
+| `name` | String | ✅ | Nombre de la clase del evento (PascalCase) |
+| `fields` | Array | ✅ | Campos que transporta el evento |
+| `triggers` | Array\<String\> | ➖ | Nombres de métodos de transición que publican este evento. El generador emite `raise(new XEvent(...))` automáticamente. |
+| `topic` | String | ➖ | **Override del topic Kafka.** Por defecto el generador quita el sufijo `Event` del nombre de la clase: `ProductPublishedEvent` → `PRODUCT_PUBLISHED`. Úsalo cuando el consumer en `listeners[]` de otro módulo declara un topic diferente al auto-derivado. |
+
+> **Regla de derivación de topic:** `ProductPublishedEvent` → quita `Event` → `ProductPublished` → SCREAMING_SNAKE → `PRODUCT_PUBLISHED`. Esto garantiza que el producer y el consumer coincidan cuando el consumer declara `topic: PRODUCT_PUBLISHED` en `listeners[]`.
+
+> **`kafka: true`** ya no es necesario — si el proyecto tiene `kafka-client` instalado, todos los eventos se cablearán automáticamente al ejecutar `eva g entities`.
 
 ### Archivos generados
 

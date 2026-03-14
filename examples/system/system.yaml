@@ -1,0 +1,112 @@
+system:
+  name: product-catalog
+  groupId: com.example
+  javaVersion: 21
+  springBootVersion: 3.5.5
+  database: postgresql
+
+messaging:
+  enabled: true
+  broker: kafka
+  kafka:
+    bootstrapServers: localhost:9092
+    defaultGroupId: product-catalog
+    topicPrefix: catalog
+
+modules:
+
+  # ─────────────────────────────────────────────
+  # CATÁLOGO DE PRODUCTOS
+  # ─────────────────────────────────────────────
+
+  - name: product
+    description: "Catálogo de productos y categorías. Gestiona el ciclo de vida de un producto (DRAFT → PUBLISHED → DISCONTINUED). Dos agregados: Product y Category."
+    exposes:
+      # ── Product ───────────────────────────────
+      - method: POST
+        path: /products
+        useCase: CreateProduct
+        description: "Crear nuevo producto en estado DRAFT"
+      - method: GET
+        path: /products/{id}
+        useCase: GetProduct
+        description: "Obtener detalle de un producto"
+      - method: GET
+        path: /products
+        useCase: FindAllProducts
+        description: "Listar productos con paginación"
+      - method: PUT
+        path: /products/{id}
+        useCase: UpdateProduct
+        description: "Actualizar datos de un producto en estado DRAFT"
+      - method: PUT
+        path: /products/{id}/publish
+        useCase: PublishProduct
+        description: "Publicar un producto: DRAFT → PUBLISHED. Emite ProductPublishedEvent."
+      - method: PUT
+        path: /products/{id}/discontinue
+        useCase: DiscontinueProduct
+        description: "Discontinuar un producto: PUBLISHED/DRAFT → DISCONTINUED"
+      # ── Category ──────────────────────────────
+      - method: POST
+        path: /categories
+        useCase: CreateCategory
+        description: "Crear nueva categoría de productos"
+      - method: GET
+        path: /categories/{id}
+        useCase: GetCategory
+        description: "Obtener detalle de una categoría"
+      - method: GET
+        path: /categories
+        useCase: FindAllCategorys
+        description: "Listar categorías con paginación"
+      - method: PUT
+        path: /categories/{id}
+        useCase: UpdateCategory
+        description: "Actualizar nombre/descripción de una categoría"
+
+  # ─────────────────────────────────────────────
+  # NOTIFICACIONES
+  # ─────────────────────────────────────────────
+
+  - name: notification
+    description: "Despacha notificaciones a usuarios por EMAIL, SMS o PUSH. Reacciona a eventos del dominio product para informar a usuarios interesados."
+    exposes:
+      - method: POST
+        path: /notifications
+        useCase: CreateNotification
+        description: "Crear y encolar una notificación manualmente"
+      - method: GET
+        path: /notifications/{id}
+        useCase: GetNotification
+        description: "Obtener estado de una notificación"
+      - method: GET
+        path: /notifications
+        useCase: FindAllNotifications
+        description: "Listar notificaciones con paginación"
+      - method: DELETE
+        path: /notifications/{id}
+        useCase: DeleteNotification
+        description: "Eliminar lógicamente una notificación (soft delete)"
+      - method: PUT
+        path: /notifications/{id}/read
+        useCase: MarkNotificationRead
+        description: "Marcar notificación como leída"
+
+integrations:
+  async:
+    # Producto publicado → notification envía alerta a usuarios suscritos
+    - event: ProductPublishedEvent
+      producer: product
+      topic: PRODUCT_PUBLISHED
+      consumers:
+        - module: notification
+          useCase: SendProductPublishedNotification
+
+    # Producto discontinuado → notification informa aos usuarios
+    - event: ProductDiscontinuedEvent
+      producer: product
+      topic: PRODUCT_DISCONTINUED
+      consumers:
+        - module: notification
+          useCase: SendProductDiscontinuedNotification

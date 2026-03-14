@@ -1,0 +1,147 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# notification — Domain Model (Supporting Domain)
+# ─────────────────────────────────────────────────────────────────────────────
+# Dispatches notifications to users across multiple channels (EMAIL, SMS, PUSH).
+# Tests: listeners (consuming ProductPublishedEvent + ProductDiscontinuedEvent),
+# enum transitions with triggers, soft delete, scaffold endpoint.
+# ─────────────────────────────────────────────────────────────────────────────
+
+aggregates:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Aggregate: Notification
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: Notification
+    entities:
+      - name: Notification
+        isRoot: true
+        tableName: notifications
+        hasSoftDelete: true
+        audit:
+          enabled: true
+          trackUser: false
+        fields:
+          - name: id
+            type: String
+          - name: recipientId
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Recipient ID is required"
+          - name: channel
+            type: NotificationChannel
+            validations:
+              - type: NotNull
+                message: "Channel is required"
+          - name: subject
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Subject is required"
+          - name: message
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Message is required"
+          - name: status
+            type: NotificationStatus
+            readOnly: true
+          - name: sentAt
+            type: LocalDateTime
+            readOnly: true
+          - name: readAt
+            type: LocalDateTime
+            readOnly: true
+
+    enums:
+      - name: NotificationChannel
+        values:
+          - EMAIL
+          - SMS
+          - PUSH
+
+      - name: NotificationStatus
+        initialValue: PENDING
+        transitions:
+          - from: PENDING
+            to: SENT
+            method: send
+          - from: SENT
+            to: READ
+            method: markRead
+          - from: [PENDING, SENT]
+            to: FAILED
+            method: fail
+        values:
+          - PENDING
+          - SENT
+          - READ
+          - FAILED
+
+    events:
+      # NotificationSentEvent — triggered by send transition
+      - name: NotificationSentEvent
+        triggers:
+          - send
+        fields:
+          - name: notificationId
+            type: String
+          - name: recipientId
+            type: String
+          - name: sentAt
+            type: LocalDateTime
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Declarative REST endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+endpoints:
+  basePath: /notifications
+  versions:
+    - version: v1
+      operations:
+        - useCase: CreateNotification
+          method: POST
+          path: /
+        - useCase: GetNotification
+          method: GET
+          path: /{id}
+        - useCase: FindAllNotifications
+          method: GET
+          path: /
+        - useCase: DeleteNotification
+          method: DELETE
+          path: /{id}
+        # Scaffold: MarkNotificationRead doesn't match transition pattern
+        # (transition method is markRead → MarkReadNotification, not MarkNotificationRead)
+        # → generates ScaffoldCommand stub with TODO
+        - useCase: MarkNotificationRead
+          method: PUT
+          path: /{id}/read
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Consumed events (listeners)
+# ─────────────────────────────────────────────────────────────────────────────
+listeners:
+  - event: ProductPublishedEvent
+    producer: product
+    topic: PRODUCT_PUBLISHED
+    useCase: SendProductPublishedNotification
+    fields:
+      - name: productId
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+      - name: publishedAt
+        type: LocalDateTime
+
+  - event: ProductDiscontinuedEvent
+    producer: product
+    topic: PRODUCT_DISCONTINUED
+    useCase: SendProductDiscontinuedNotification
+    fields:
+      - name: productId
+        type: String
+      - name: discontinuedAt
+        type: LocalDateTime
