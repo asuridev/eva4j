@@ -971,19 +971,6 @@ Antes de guardar `system/{module}.yaml`, verifica:
 - [ ] Proyecciones locales (agregados sincronizados por listeners): `audit.enabled: true` y `trackUser: false`
 - [ ] Todo el contenido está en **inglés**
 
-### Pasos siguientes tras generar `system/{module}.yaml`
-
-```bash
-# Copy the domain definition to the module before generating code:
-cp system/<module>.yaml src/main/java/<package>/<module>/domain.yaml
-
-# Generate all hexagonal architecture code for the module:
-eva g entities <module>
-```
-
----
-
----
 
 ## Paso 8 — Crear archivos individuales por módulo (`system/{module}.md`)
 
