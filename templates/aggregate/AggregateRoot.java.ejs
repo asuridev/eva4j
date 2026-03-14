@@ -201,7 +201,23 @@ public class <%= name %> {
         // Skip {entityName}Id — already provided as aggregateId in the DomainEvent constructor
         if (ef.name === _entityBase + 'Id') { return; }
         const _matched = fields.find(function(f) { return f.name === ef.name; });
-        if (_matched) { _args.push('this.get' + ef.name.charAt(0).toUpperCase() + ef.name.slice(1) + '()'); return; }
+        if (_matched) {
+          if (_matched.javaType === ef.javaType) {
+            _args.push('this.get' + ef.name.charAt(0).toUpperCase() + ef.name.slice(1) + '()'); return;
+          }
+          // Type mismatch: entity field may be a VO wrapping the expected primitive/type
+          var _vo = (valueObjects || []).find(function(vo) { return vo.name === _matched.javaType; });
+          if (_vo) {
+            var _voSub = _vo.fields.find(function(voF) { return voF.name === ef.name && voF.javaType === ef.javaType; });
+            if (!_voSub) { _voSub = _vo.fields.find(function(voF) { return voF.javaType === ef.javaType; }); }
+            if (_voSub) {
+              var _oCap = ef.name.charAt(0).toUpperCase() + ef.name.slice(1);
+              var _sCap = _voSub.name.charAt(0).toUpperCase() + _voSub.name.slice(1);
+              _args.push('this.get' + _oCap + '().get' + _sCap + '()'); return;
+            }
+          }
+          _args.push('null /* TODO: provide ' + ef.name + ' (entity returns ' + _matched.javaType + ', expected ' + ef.javaType + ') */'); return;
+        }
         if (ef.name.endsWith('At') && ef.javaType === 'LocalDateTime') { _args.push('LocalDateTime.now()'); return; }
         _args.push('null /* TODO: provide ' + ef.name + ' */');
       });

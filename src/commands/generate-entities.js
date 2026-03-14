@@ -902,6 +902,32 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       // ── endpoints: section declared → skip CRUD prompt, auto-generate ──
       spinner.start('Generating endpoint-driven resources...');
 
+      // Pre-classify all operations ONCE against all aggregates so that
+      // each per-aggregate pass never overwrites a classification that
+      // belongs to a different aggregate (multi-aggregate modules).
+      for (const version of endpoints.versions) {
+        for (const op of version.operations) {
+          for (const agg of aggregates) {
+            const cl = classifyUseCase(op, agg.name, agg);
+            if (cl.category !== 'scaffold') {
+              op._ownerAggregate = agg.name;
+              op._classification = cl;
+              break;
+            }
+          }
+          if (!op._ownerAggregate) {
+            // True scaffold: heuristic — find aggregate whose name appears inside the use case name
+            const matched = aggregates.find(agg =>
+              op.useCase.toLowerCase().includes(agg.name.toLowerCase())
+            );
+            const owner = matched || aggregates[0];
+            op._ownerAggregate = owner.name;
+            op._classification = { category: 'scaffold' };
+          }
+        }
+      }
+
+      const sharedGeneratedUseCases = new Set();
       for (const aggregate of aggregates) {
         await generateEndpointsResources(
           aggregate,
@@ -910,7 +936,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           moduleBasePath,
           packageName,
           generatedFiles,
-          writeOptions
+          writeOptions,
+          sharedGeneratedUseCases
         );
       }
 
@@ -1204,7 +1231,7 @@ function enrichEndpointOperation(op, aggregateName, idType) {
   if (standardType === 'getById') returnType = `${aggregateName}ResponseDto`;
   else if (standardType === 'findAll') returnType = `PagedResponse<${aggregateName}ResponseDto>`;
   else if (cl.category === 'findBy') returnType = `PagedResponse<${aggregateName}ResponseDto>`;
-  else if (cl.category === 'scaffold' && resolvedType === 'query') returnType = 'Object';
+  else if (cl.category === 'scaffold' && resolvedType === 'query') returnType = `${aggregateName}ResponseDto`;
 
   let httpStatus = 'HttpStatus.OK';
   if (standardType === 'create') httpStatus = 'HttpStatus.CREATED';
@@ -1234,7 +1261,7 @@ function enrichEndpointOperation(op, aggregateName, idType) {
  * Generate endpoint-driven resources (use cases + versioned controllers)
  * for an aggregate when domain.yaml declares an `endpoints:` section.
  */
-async function generateEndpointsResources(aggregate, endpoints, moduleName, moduleBasePath, packageName, generatedFiles, writeOptions = {}) {
+async function generateEndpointsResources(aggregate, endpoints, moduleName, moduleBasePath, packageName, generatedFiles, writeOptions = {}, sharedGeneratedUseCases = null) {
   const { name: aggregateName, rootEntity, secondaryEntities, valueObjects = [] } = aggregate;
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'crud');
 
@@ -1394,20 +1421,27 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
     ...(commandFieldsApp.some(f => f.originalVoType) ? ['import jakarta.validation.Valid;'] : [])
   ])];
 
-  // Pre-classify ALL operations (including cross-version duplicates) so that
-  // enrichEndpointOperation() can read op._classification in step 6.
+  // Defensive: classify ops not yet assigned by the outer pre-pass
+  // (single-aggregate modules or direct calls without a shared set).
   for (const version of endpoints.versions) {
     for (const op of version.operations) {
-      op._classification = classifyUseCase(op, aggregateName, aggregate);
+      if (!op._classification) {
+        op._classification = classifyUseCase(op, aggregateName, aggregate);
+        op._ownerAggregate = op._ownerAggregate || aggregateName;
+      }
     }
   }
 
-  const generatedUseCases = new Set();
+  const generatedUseCases = sharedGeneratedUseCases ?? new Set();
   const findByOps = []; // collect FindBy ops for repository re-generation
 
   for (const version of endpoints.versions) {
     for (const op of version.operations) {
-      if (generatedUseCases.has(op.useCase)) continue; // anti-duplicate
+      // Skip operations owned by a different aggregate (multi-aggregate endpoints section)
+      // MUST come before the shared-set check so foreign ops don't poison the set.
+      if (op._ownerAggregate !== aggregateName) continue;
+
+      if (generatedUseCases.has(op.useCase)) continue; // anti-duplicate (same use case across versions)
       generatedUseCases.add(op.useCase);
 
       const cl = op._classification;
@@ -1654,7 +1688,9 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
   for (const version of endpoints.versions) {
     const versionCap = version.version.charAt(0).toUpperCase() + version.version.slice(1);
     const controllerName = `${aggregateName}${versionCap}Controller`;
-    const enrichedOps = version.operations.map(op => enrichEndpointOperation(op, aggregateName, idType));
+    const enrichedOps = version.operations
+      .filter(op => op._ownerAggregate === aggregateName)
+      .map(op => enrichEndpointOperation(op, aggregateName, idType));
 
     const controllerContext = {
       ...baseContext,

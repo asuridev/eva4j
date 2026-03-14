@@ -56,7 +56,7 @@ import <%= packageName %>.<%= moduleName %>.application.commands.<%= op.useCase 
 <% findByOps.forEach(function(op) { -%>
 import <%= packageName %>.<%= moduleName %>.application.queries.<%= op.useCase %>Query;
 <% }); -%>
-<% if (hasGetById || hasFindAll || hasFindBy) { -%>
+<% if (hasGetById || hasFindAll || hasFindBy || customQueryUCs.length > 0) { -%>
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
 <% } -%>
 <% if (hasFindAll || hasFindBy) { -%>
@@ -168,8 +168,8 @@ public class <%= controllerName %> {
         useCaseMediator.dispatch(command);
     }
 <%  } else { %>
-    // TODO: Review the parameters in <%= op.useCase %>Query and replace Object with the actual return type
-    public Object <%= op.methodName %>(<% if (op.hasPathVar) { %>@PathVariable <%- op.idType %> <%= op.pathVarName %><% } %>) {
+    // TODO: Review the parameters in <%= op.useCase %>Query and adapt the return type if needed
+    public <%- op.returnType %> <%= op.methodName %>(<% if (op.hasPathVar) { %>@PathVariable <%- op.idType %> <%= op.pathVarName %><% } %>) {
         log.info("Handling <%= op.useCase %>");
         return useCaseMediator.dispatch(new <%= op.useCase %>Query(<% if (op.hasPathVar) { %><%= op.pathVarName %><% } %>));
     }

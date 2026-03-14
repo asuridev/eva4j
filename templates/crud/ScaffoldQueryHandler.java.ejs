@@ -1,5 +1,6 @@
 package <%= packageName %>.<%= moduleName %>.application.usecases;
 
+import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
 import <%= packageName %>.<%= moduleName %>.application.queries.<%= useCaseName %>Query;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
@@ -17,7 +18,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @ApplicationComponent
-public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseName %>Query, Object> {
+public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseName %>Query, <%= aggregateName %>ResponseDto> {
 
     private final <%= aggregateName %>Repository repository;
 
@@ -26,7 +27,7 @@ public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseN
     }
 
     @Override
-    public Object handle(<%= useCaseName %>Query query) {
+    public <%= aggregateName %>ResponseDto handle(<%= useCaseName %>Query query) {
         log.info("Handling <%= useCaseName %>Query: {}", query);
 
         // TODO: Implement query logic
