@@ -285,6 +285,7 @@ program
   .command('build')
   .description('Bootstrap project from system/system.yaml: create modules, install broker client, copy domain.yaml files, and generate entities')
   .option('--force', 'Overwrite files even if they were manually modified (bypasses safe mode)')
+  .option('--mock', 'Replace database config with H2 in-memory before building (restored automatically after build)')
   .action(async (options) => {
     try {
       await buildCommand(options);

@@ -151,6 +151,47 @@ class ConfigManager {
 
     return config;
   }
+
+  /**
+   * Persist mock backup data into .eva4j.json so it survives process restarts.
+   * @param {Object} backups - Map of { key: { path, content } }
+   */
+  async saveMockBackup(backups) {
+    const config = await this.loadProjectConfig();
+    if (!config) throw new Error('Project configuration not found.');
+
+    config._mockBackup = {};
+    for (const [key, { path: filePath, content }] of Object.entries(backups)) {
+      config._mockBackup[key] = { path: filePath, content };
+    }
+    config._mockActive = true;
+    config.updatedAt = new Date().toISOString();
+    await fs.writeJson(this.configFile, config, { spaces: 2 });
+  }
+
+  /**
+   * Read and clear mock backup from .eva4j.json.
+   * @returns {Object|null} backups map or null if no mock backup stored
+   */
+  async popMockBackup() {
+    const config = await this.loadProjectConfig();
+    if (!config || !config._mockBackup) return null;
+
+    const backups = config._mockBackup;
+    delete config._mockBackup;
+    delete config._mockActive;
+    config.updatedAt = new Date().toISOString();
+    await fs.writeJson(this.configFile, config, { spaces: 2 });
+    return backups;
+  }
+
+  /**
+   * Returns true if a mock backup is currently stored in .eva4j.json.
+   */
+  async hasMockBackup() {
+    const config = await this.loadProjectConfig();
+    return !!(config && config._mockActive);
+  }
 }
 
 module.exports = ConfigManager;
