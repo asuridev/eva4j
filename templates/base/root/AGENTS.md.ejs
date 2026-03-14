@@ -1555,6 +1555,7 @@ aggregates:
         values: [DRAFT, PLACED, CANCELLED]
     events:
       - name: OrderPlaced
+        topic: ORDER_PLACED       # opcional: sobreescribe el topic auto-derivado
         triggers:
           - place             # ← nombre del método de transición
         fields:
@@ -1573,6 +1574,33 @@ aggregates:
           - name: reason      # no resuelto → null /* TODO: provide reason */
             type: String
 ```
+
+#### Propiedad `topic` (opcional)
+
+Sobreescribe el nombre del topic Kafka auto-derivado para este evento.
+
+**Regla de derivación por defecto:** el generador quita el sufijo `Event` del nombre de la clase antes de convertir a SCREAMING_SNAKE_CASE:
+- `ProductPublishedEvent` → `PRODUCT_PUBLISHED` ✓ (no `PRODUCT_PUBLISHED_EVENT`)
+- `OrderCancelled` → `ORDER_CANCELLED` (sin sufijo, sin cambios)
+
+**Cuándo usar `topic:` explícito:**
+- El producer y el consumer de otro módulo deben usar exactamente el mismo nombre.
+- Si el consumer en `listeners[]` declara `topic: MY_CUSTOM_TOPIC`, declara el mismo valor aquí para que el match sea garantizado.
+
+```yaml
+events:
+  - name: ProductPublishedEvent
+    # topic auto-derivado: PRODUCT_PUBLISHED (sufijo 'Event' eliminado)
+    triggers: [publish]
+    fields: [...]
+
+  - name: OrderReadyEvent
+    topic: ORDER_READY_FOR_PICKUP   # override explícito
+    triggers: [markReady]
+    fields: [...]
+```
+
+> **Nota:** el flag `kafka: true` ya no es necesario — si el proyecto tiene `kafka-client` instalado, todos los eventos se cablearán automáticamente al ejecutar `eva g entities`.
 
 #### Propiedad `triggers`
 

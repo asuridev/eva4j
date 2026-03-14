@@ -1603,7 +1603,7 @@ aggregates:
             type: LocalDateTime
       
       - name: OrderShippedEvent
-        kafka: true                      # opcional — genera publicación a Kafka
+        topic: ORDER_SHIPPED             # opcional — override del topic auto-derivado
         fields:
           - name: orderId
             type: String
@@ -1657,7 +1657,7 @@ public class OrderDomainEventHandler {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handle(OrderShippedEvent event) {
-        messageBroker.sendOrderShippedEvent(event);  // kafka: true
+        messageBroker.sendOrderShippedEvent(event);
     }
 }
 ```
