@@ -25,6 +25,9 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 - [Tests Generados Completos](#12-tests-generados-completos)
 - [Diagrama Mermaid desde domain.yaml](#13-diagrama-mermaid-desde-domainyaml-eva-g-diagram)
 
+### 🚀 Prototyping
+- [Mock Mode — `eva build --mock`](#17-mock-mode--eva-build---mock)
+
 ### ✅ Implementado
 - [Auditoría de Tiempo y Usuario](#15-auditoría-implementada)
 - [Validaciones JSR-303](#14-validaciones-jsr-303-implementado)
@@ -1243,6 +1246,379 @@ Domain Events (ítem 1) implementados y funcionando — este ítem solo añade p
 
 ---
 
+## 🚀 PROTOTYPING
+
+---
+
+## 17. Mock Mode — `eva build --mock`
+
+### El Problema
+
+Hoy el pipeline de eva4j tiene un salto demasiado grande entre **especificación** y **ejecución**:
+
+```
+system.yaml + domain.yaml  ──────────────────→  Código Java completo
+                            (requiere JVM, DB, Kafka, config)
+```
+
+Este salto crea un **cuello de botella** que afecta a todo el equipo:
+
+1. **Frontend bloqueado** — Los desarrolladores de UI no pueden construir pantallas hasta que el backend esté implementado, testeado y desplegado. Con un sistema de 5+ módulos, esto significa semanas de espera.
+2. **Iteración lenta del diseño** — Cada cambio en el contrato API (agregar un campo, renombrar un endpoint, cambiar un flujo de estados) requiere regenerar código Java, compilar, levantar la base de datos y verificar. Un ciclo de retroalimentación de minutos cuando debería ser segundos.
+3. **Infraestructura innecesaria en fase de diseño** — Para probar si los contratos entre módulos tienen sentido, no se necesita PostgreSQL, Kafka ni Docker. Se necesita un servidor que responda con datos realistas y respete las transiciones de estado.
+4. **Desacoplamiento temporal frontend/backend** — El equipo de frontend y el equipo de backend deberían poder trabajar en paralelo desde el día uno, no secuencialmente.
+
+### La Visión
+
+Introducir un **paso intermedio de prototipado** en el pipeline de eva4j que permita levantar un servidor funcional completo **sin infraestructura real**, directamente desde las especificaciones YAML:
+
+```
+                          ┌─ eva build --mock ────────────────────────┐
+system.yaml               │  Spring Boot + H2 + Spring Events         │
+  + domain.yaml     →     │  Endpoints REST con Swagger UI            │  ← Frontend trabaja aquí
+                          │  State machines reales                    │
+                          │  Eventos fluyendo entre módulos           │
+                          │  Datos mock pre-cargados                  │
+                          └──────────────────────────────────────────┘
+                                        ↓ (cuando el diseño estabiliza)
+                          ┌─ eva build ──────────────────────────────┐
+                          │  Spring Boot + PostgreSQL + Kafka         │  ← Backend real
+                          └──────────────────────────────────────────┘
+```
+
+El mock mode genera **el mismo código de dominio** que la versión de producción — entidades, state machines, validaciones, use cases — pero reemplaza los adaptadores de infraestructura pesada (Kafka, PostgreSQL) por alternativas ligeras (Spring Events, H2). El 90% del código que corre en mock **es el mismo** que correrá en producción.
+
+### Por Qué Funciona: La Arquitectura Hexagonal Ya Lo Permite
+
+La clave de esta feature es que **eva4j ya genera código con puertos y adaptadores**. El dominio nunca depende de la infraestructura. La cadena de eventos actual:
+
+```
+entity.raise(DomainEvent)
+    ↓
+RepositoryImpl.save()  →  eventPublisher.publishEvent()    ← Spring interno (ya existe)
+    ↓
+DomainEventHandler  @TransactionalEventListener(AFTER_COMMIT)
+    ↓
+messageBroker.publish*(IntegrationEvent)                    ← Puerto abstracto (ya existe)
+    ↓
+KafkaMessageBroker  →  kafkaTemplate.send()                 ← Adaptador Kafka
+```
+
+Para mock mode solo se necesita **otro adaptador** que reimplemente el mismo puerto:
+
+```
+messageBroker.publish*(IntegrationEvent)
+    ↓
+InMemoryMessageBroker  →  applicationEventPublisher.publishEvent()   ← Bus de Spring
+```
+
+Y en el lado consumidor, en vez de `@KafkaListener`:
+
+```
+@EventListener(condition = "#event.topic == 'BIKE_RESERVED'")
+public void handle(MockEvent event) {
+    var payload = objectMapper.convertValue(event.data(), BikeReservedIntegrationEvent.class);
+    useCaseMediator.dispatch(new InitiatePaymentCommand(...));
+}
+```
+
+**Es un swap de adaptadores.** El dominio, los use cases, los mappers, los DTOs, las validaciones — todo es idéntico.
+
+### Comando Propuesto
+
+```bash
+eva build --mock                    # Genera proyecto mock desde system/
+eva build --mock --port 3000        # Puerto custom
+eva build --mock --seed 20          # 20 entidades por módulo
+eva build --mock --dir ./my-system  # Directorio de specs custom
+```
+
+### Qué Genera el Comando
+
+El comando orquesta la siguiente secuencia internamente:
+
+```
+1. Lee system/system.yaml
+2. eva create {name} --database h2          → Proyecto Spring Boot con H2
+3. Para cada módulo:
+   a. eva add module {name}
+   b. Copia system/{module}.yaml → src/.../domain.yaml
+   c. eva g entities {module} --broker inMemory   → Genera InMemoryMessageBroker en vez de Kafka
+4. Para cada listener en los domain.yaml:
+   → Genera SpringEventListener en vez de KafkaListener
+5. Genera MockDataSeeder.java                → Datos fake pre-cargados
+6. Genera application-mock.yaml              → Profile Spring con H2 + config mock
+```
+
+### Artefactos Nuevos (3 Templates + 1 Comando)
+
+El esfuerzo es bajo porque la mayoría de artefactos **ya existen**. Solo se necesitan:
+
+| Artefacto | Tipo | Propósito |
+|---|---|---|
+| `templates/mock/InMemoryMessageBroker.java.ejs` | Template | Adaptador mock que reemplaza `KafkaMessageBroker` |
+| `templates/mock/SpringEventListener.java.ejs` | Template | Listener que reemplaza `@KafkaListener` |
+| `templates/mock/MockDataSeeder.java.ejs` | Template | `CommandLineRunner` que siembra datos mock al arranque |
+| `templates/mock/application-mock.yaml.ejs` | Template | Profile Spring con H2 + configuración mock |
+| `src/commands/build-mock.js` | Comando | Orquestador del flujo completo |
+
+### Inventario: Qué Ya Existe vs Qué Falta
+
+| Pieza | ¿Existe? | Mock Mode |
+|---|---|---|
+| Proyecto Spring Boot | `eva create` | ✅ Con `database: h2` |
+| Módulos | `eva add module` | ✅ Sin cambios |
+| Entidades, dominio, state machines | `eva g entities` | ✅ Sin cambios |
+| Endpoints REST + Swagger UI | `eva g entities` con `endpoints:` | ✅ Sin cambios |
+| Validaciones JSR-303 | Ya generadas | ✅ Sin cambios |
+| `ApplicationEventPublisher` en RepositoryImpl | Ya genera `eventPublisher.publishEvent()` | ✅ Sin cambios |
+| `DomainEventHandler` (`@TransactionalEventListener`) | Ya genera mapping Domain → Integration Event | ✅ Sin cambios |
+| Puerto `MessageBroker` (interfaz) | Ya genera `application/ports/MessageBroker.java` | ✅ Sin cambios |
+| **`InMemoryMessageBroker`** (adaptador mock) | **No existe** | 🆕 1 template |
+| **`SpringEventListener`** (reemplaza `@KafkaListener`) | **No existe** | 🆕 1 template |
+| **`MockDataSeeder`** (`CommandLineRunner`) | **No existe** | 🆕 1 template |
+| **Comando orquestador** | **No existe** | 🆕 1 comando |
+
+De 12 piezas, **8 ya existen**. Solo se necesitan 4 artefactos nuevos.
+
+---
+
+### Detalle de Templates
+
+#### 1. `InMemoryMessageBroker.java.ejs`
+
+Implementa la misma interfaz `MessageBroker` que `KafkaMessageBroker`, pero re-publica al bus interno de Spring:
+
+```java
+@Component("{moduleCamelCase}InMemoryMessageBroker")
+@Profile("mock")
+public class {ModulePascal}InMemoryMessageBroker implements MessageBroker {
+
+    private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
+
+    // constructor...
+
+    @Override
+    public void publish{EventName}({EventName}IntegrationEvent event) {
+        // Envuelve en MockEvent para routing cross-módulo
+        Map<String, Object> payload = objectMapper.convertValue(event, Map.class);
+        eventPublisher.publishEvent(new MockEvent("{TOPIC_NAME}", payload));
+    }
+}
+```
+
+`MockEvent` es un record genérico en `shared`:
+
+```java
+public record MockEvent(String topic, Map<String, Object> data) {}
+```
+
+#### 2. `SpringEventListener.java.ejs`
+
+Reemplaza `@KafkaListener`. Escucha `MockEvent` del bus de Spring y filtra por topic:
+
+```java
+@Component
+@Profile("mock")
+public class {EventName}SpringListener {
+
+    private final UseCaseMediator useCaseMediator;
+    private final ObjectMapper objectMapper;
+
+    // constructor...
+
+    @EventListener(condition = "#event.topic() == '{TOPIC_NAME}'")
+    public void handle(MockEvent event) {
+        var payload = objectMapper.convertValue(
+            event.data(), {EventName}IntegrationEvent.class
+        );
+        useCaseMediator.dispatch(new {UseCase}Command(
+            // map event fields → command fields
+        ));
+    }
+}
+```
+
+Cada módulo mantiene su propio `IntegrationEvent` record (ya generado por `listeners[]`). La deserialización con `objectMapper.convertValue()` replica el mismo patrón que el `KafkaListener` real — los módulos siguen aislados.
+
+#### 3. `MockDataSeeder.java.ejs`
+
+Un `CommandLineRunner` activo solo con profile `mock` que siembra datos realistas usando los **Commands reales** del sistema:
+
+```java
+@Component
+@Profile("mock")
+public class MockDataSeeder implements CommandLineRunner {
+
+    private final UseCaseMediator mediator;
+
+    @Override
+    public void run(String... args) {
+        log.info("🌱 Mock data seeder started");
+
+        // Orden topológico derivado de references + integrations
+        seedStations(5);
+        seedBikes(15);
+        seedAccounts(10);
+        seedReservations(8);
+
+        log.info("✅ Mock data seeding complete");
+    }
+
+    private void seedAccounts(int count) {
+        for (int i = 0; i < count; i++) {
+            mediator.dispatch(new CreateAccountCommand(
+                "user" + i + "@example.com",     // email
+                "User " + i,                       // fullName
+                "+1-555-" + String.format("%04d", i) // phone
+            ));
+        }
+    }
+    // ... métodos por módulo
+}
+```
+
+**Principio clave:** Al usar `mediator.dispatch()` con los Commands reales, **toda la cadena de eventos se activa automáticamente**. Crear una reserva dispara `BikeReservedEvent` → `payments.InitiatePayment` → `PaymentApprovedEvent` → `reservations.ConfirmReservation`. El seeder no necesita orquestar nada — los eventos fluyen solos vía el `InMemoryMessageBroker`.
+
+### Generación de Datos Mock: Derivación desde domain.yaml
+
+La metadata ya presente en los domain.yaml es suficiente para generar valores fake inteligentes:
+
+| Señal en el YAML | Estrategia de generación |
+|---|---|
+| `type: String` + nombre contiene `email` | `"user{i}@example.com"` |
+| `type: String` + nombre contiene `name`/`fullName` | `"Name {i}"` |
+| `type: String` + nombre contiene `phone` | `"+1-555-{i:04d}"` |
+| `type: String` + nombre contiene `url` | `"https://example.com/{name}/{i}"` |
+| `type: String` + nombre contiene `code` + `@Column(unique)` | `"CODE-{i}"` (garantiza unicidad) |
+| `type: String` + `reference: { aggregate: X }` | **ID de una entidad X ya creada** (round-robin) |
+| `type: BigDecimal` + validación `Positive` | `new BigDecimal("{10 + i * 5}")` |
+| `type: Integer` + validación `Min(value: N)` | `N + i` |
+| `type: LocalDateTime` + nombre contiene `At`/`Time` | `LocalDateTime.now().plusHours({i})` |
+| `type: {EnumName}` (coincide con `enums[]`) | Primer valor del enum (o random pick) |
+| `type: {ValueObject}` | Generación recursiva por fields del VO |
+| `readOnly: true` | **Omitir** — el dominio lo asigna (initialValue, defaultValue) |
+| `hidden: true` | Generar valor (ej: token) — no es visible en response pero sí en create |
+
+Esta lógica reutiliza y extiende la función `generateDummyValue()` que ya existe en `templates/postman/Collection.json.ejs` para la colección Postman.
+
+### Orden de Seeding: Resolución Topológica
+
+El `system.yaml` ya define el grafo de dependencias implícitamente. El seeder calcula el orden correcto:
+
+1. **`reference:` en fields** — `reservations.userId → accounts` implica que `accounts` se siembra antes.
+2. **`integrations.async[]`** — `BikeCreatedEvent: fleet → reservations` implica que `fleet` se siembra antes.
+3. **`integrations.sync[]`** — `reservations calls accounts` confirma la dependencia.
+
+Resultado para el sistema de bicicletas:
+
+```
+1. fleet      (stations, bikes)      ← sin dependencias
+2. accounts   (accounts)             ← sin dependencias
+3. reservations (reservations)       ← depende de fleet + accounts
+4. payments   (se crea vía eventos)  ← no necesita seed directo
+```
+
+### Datos Declarativos Opcionales: `mock-data.yaml`
+
+Para equipos que necesitan datos específicos (un usuario "demo", un producto con ID conocido):
+
+```yaml
+# mock-data.yaml — opcional, overrides los datos auto-generados
+seed:
+  accounts:
+    count: 10            # 10 cuentas totales
+    data:                # las primeras se crean con datos explícitos
+      - email: "demo@example.com"
+        fullName: "Demo User"
+        phone: "+1234567890"
+      # las restantes 9 se generan automáticamente
+
+  fleet:
+    stations:
+      count: 5
+    bikes:
+      count: 15
+
+  reservations:
+    count: 8
+```
+
+### Comportamiento del Sistema en Mock Mode
+
+El frontend dev ejecuta `eva build --mock`, espera la compilación, y obtiene:
+
+```
+$ cd generated-project && ./gradlew bootRun --args='--spring.profiles.active=mock'
+
+  🚀 test-eva started on port 8080 (profile: mock)
+
+  Modules: reservations, fleet, accounts, payments, notifications
+  Database: H2 (in-memory, ddl-auto: create-drop)
+  Events: Spring ApplicationEventPublisher (in-process)
+  Swagger: http://localhost:8080/swagger-ui.html
+
+  🌱 Mock data seeded:
+      5 stations, 15 bikes, 10 accounts, 8 reservations
+      Events propagated: 8 BikeReserved → 8 PaymentApproved → 8 ReservationConfirmed
+```
+
+#### El flujo completo que ve un frontend dev
+
+```
+Frontend: POST /reservations { userId, bikeId, stationId, amount, scheduledPickupTime }
+  ↓
+Mock: crea reserva (status: PENDING_PAYMENT) → 201 Created
+  ↓ raise(BikeReservedEvent)
+  ↓ InMemoryMessageBroker → publishEvent(MockEvent("BIKE_RESERVED", payload))
+  ↓ SpringEventListener en payments → crea Payment (PENDING)
+  ↓ handler auto-aprueba → raise(PaymentApprovedEvent)
+  ↓ InMemoryMessageBroker → publishEvent(MockEvent("PAYMENT_APPROVED", payload))
+  ↓ SpringEventListener en reservations → confirm() → status: CONFIRMED
+
+Frontend: GET /reservations/{id}
+  → { status: "CONFIRMED", ... }   ← cambió automáticamente
+
+Frontend: PUT /reservations/{id}/pickup
+  → { status: "IN_PROGRESS", ... }
+  ↓ state machine valida: CONFIRMED → IN_PROGRESS ✅
+
+Frontend: PUT /reservations/{id}/return
+  → { status: "COMPLETED", ... }
+  ↓ raise(TripCompletedEvent) → accounts.HandleTripCompleted
+```
+
+El frontend dev ve **exactamente el mismo comportamiento** que tendría el sistema real, incluyendo transiciones de estado asíncronas y reacciones cross-módulo.
+
+### Transición de Mock a Producción
+
+Cambiar de mock a producción **no requiere regenerar código de dominio**. Solo:
+
+1. `system.yaml` → `database: postgresql` (en vez de `h2`)
+2. `eva add kafka-client` → instala adaptadores Kafka reales
+3. `eva g entities {module}` → regenera adaptadores (ya usa `--broker kafka` por defecto)
+4. Configurar `application-production.yaml` con URLs reales
+
+El dominio, los use cases, los mappers, los DTOs, las validaciones — **todo permanece idéntico**.
+
+### Dependencias Adicionales
+
+Solo una librería nueva (opcional, para datos más realistas):
+
+```gradle
+// build.gradle — solo en profile mock
+runtimeOnly 'net.datafaker:datafaker:2.4.2'   // Sucesor de JavaFaker, mantenido activamente
+```
+
+Sin DataFaker, el seeder genera datos con patrones simples (`"User 0"`, `"user0@example.com"`). Con DataFaker, genera nombres, emails, teléfonos y direcciones realistas en cualquier locale.
+
+### Estado
+
+⏳ Pendiente de implementación
+
+---
+
 ## Resumen de Prioridades
 
 | # | Característica | Prioridad | Complejidad | Estado |
@@ -1263,9 +1639,10 @@ Domain Events (ítem 1) implementados y funcionando — este ítem solo añade p
 | 14 | Validaciones JSR-303 | Impl. | -- | ✅ Implementado |
 | 15 | Transactional Outbox Pattern | Alta | Alta | Pendiente |
 | 16 | `defaultValue` para campos `readOnly` | Impl. | -- | ✅ Implementado |
+| 17 | Mock Mode (`eva build --mock`) | Alta | Media | Pendiente |
 
 ---
 
-**Ultima actualizacion:** 2026-03-04
+**Ultima actualizacion:** 2026-03-13
 **Version de eva4j:** 1.x
 **Estado:** Documento de planificacion y referencia

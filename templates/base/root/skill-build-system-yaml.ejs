@@ -1065,6 +1065,109 @@ flowchart TD
 > - Omitir subgraph `ASYNC_IN` si el módulo no consume eventos
 > - Omitir subgraph `EVENTS_OUT` si el módulo no emite eventos
 
+## Diagrama de secuencia
+[Muestra las interacciones cronológicas entre actores y componentes para los flujos principales. Generar un diagrama por cada caso de uso complejo o flujo con bifurcaciones significativas (happy path + rama de error/compensación).]
+
+> **Rol de experto en diagramas de sistemas:** modela cada actor involucrado — usuarios externos, sistemas externos, módulos del dominio, broker de mensajes, base de datos — y sus interacciones en orden temporal. Priorizar claridad: mostrar qué mensaje se envía, quién responde y en qué orden. Las respuestas asíncronas (eventos Kafka) deben modelarse con líneas punteadas.
+
+```mermaid
+sequenceDiagram
+    actor Client as Client
+    participant API as REST API
+    participant Handler as CommandHandler
+    participant Domain as Domain Entity
+    participant Repo as Repository
+    participant Broker as Message Broker
+    participant ExtSvc as External Service
+
+    Client->>API: POST /resource {payload}
+    API->>Handler: CreateResourceCommand
+    Handler->>Repo: findById(id)
+    Repo-->>Handler: entity (or 404)
+    Handler->>Domain: businessMethod()
+    Domain-->>Handler: updated entity
+    Handler->>Repo: save(entity)
+    Handler->>Broker: publish(ResourceCreatedEvent)
+    Broker-->>Handler: ack
+    Handler-->>API: resourceId
+    API-->>Client: 201 Created {resourceId}
+```
+
+> **Convención de actores en el diagrama de secuencia:**
+> - `actor Client` → usuarios humanos o sistemas externos que inician el flujo
+> - `participant API` → controlador REST del módulo
+> - `participant Handler` → CommandHandler / QueryHandler de la capa de aplicación
+> - `participant Domain` → entidad de dominio (incluir cuando la lógica de negocio es relevante para entender el flujo)
+> - `participant Repo` → repositorio (abstracción de persistencia)
+> - `participant Broker` → broker de mensajes — omitir si el módulo no emite eventos
+> - `participant ExtSvc` → servicio externo via `ports:` — omitir si no aplica; usar el nombre real del port (ej: `PaymentGateway`)
+> - Respuestas síncronas: `-->>` (línea punteada con flecha)
+> - Mensajes async / eventos publicados: `--)` (línea punteada sin flecha de retorno inmediato)
+> - Incluir un diagrama separado por cada flujo principal; omitir flujos triviales de solo lectura si no aportan información nueva
+
+## Diagrama de actividad
+[Muestra el flujo de control y las decisiones de negocio con todos los actores del dominio como swimlanes. Complementa el diagrama de secuencia: mientras este muestra el orden temporal de mensajes, el de actividad muestra quién hace qué y bajo qué condiciones.]
+
+> **Rol de experto en diagramas de sistemas:** usa swimlanes para separar responsabilidades. Cada carril representa un actor real del dominio (no un componente técnico genérico). Modelar decisiones de negocio (`{...}`), bifurcaciones, puntos de sincronización y estados de error. Incluir todos los actores involucrados, incluyendo módulos externos que reciben eventos o son llamados síncronamente.
+
+```mermaid
+flowchart TD
+    subgraph ACTOR1["👤 Client / External System"]
+        A1([Start])
+        A2([Receives response])
+    end
+
+    subgraph ACTOR2["🌐 REST API"]
+        B1[Validate request]
+        B2[Dispatch command]
+        B3[Return response]
+    end
+
+    subgraph ACTOR3["⚙️ Application Layer"]
+        C1[Check invariants]
+        C2{Valid?}
+        C3[Execute business logic]
+        C4[Persist changes]
+    end
+
+    subgraph ACTOR4["🏛️ Domain"]
+        D1[Apply transition / business rule]
+    end
+
+    subgraph ACTOR5["🗄️ Infrastructure"]
+        E1[(Database)]
+        E2[📨 Message Broker]
+    end
+
+    subgraph ACTOR6["📦 Other Module (consumer)"]
+        F1[Handle event]
+    end
+
+    A1 --> B1
+    B1 --> B2
+    B2 --> C1
+    C1 --> C2
+    C2 -->|"No — invariant violated"| ERR[/"Error 4xx / BusinessException"/]
+    C2 -->|"Yes"| D1
+    D1 --> C3
+    C3 --> C4
+    C4 --> E1
+    C4 --> E2
+    E2 -->|"async event"| F1
+    E1 --> B3
+    B3 --> A2
+```
+
+> **Convención de swimlanes — actores canónicos:**
+> - `👤 {Actor}` → usuarios humanos o sistemas externos que inician el flujo
+> - `🌐 REST API` → capa de entrada HTTP del módulo (controladores)
+> - `⚙️ Application Layer` → handlers, orquestación de casos de uso
+> - `🏛️ Domain` → entidades y lógica de negocio (incluir como swimlane separado cuando la lógica de dominio es el núcleo del flujo)
+> - `🗄️ Infrastructure` → base de datos, broker, adaptadores — separar en subgraphs si hay múltiples infraestructuras relevantes
+> - `📦 {OtroMódulo}` → módulos del sistema que reciben eventos emitidos o son llamados síncronamente vía `ports:`
+> - Nodos: `{...}` decisiones, `[...]` actividades, `[/.../ ]` outputs / errores, `([...])` inicio/fin
+> - Incluir todos los actores del dominio que participan en los flujos — no omitir por simplicidad; el objetivo es la trazabilidad completa
+
 ## Casos de uso
 [Un apartado `###` por cada useCase declarado en `exposes:` y en `consumers[].useCase` donde este módulo es consumidor]
 
@@ -1110,7 +1213,9 @@ flowchart TD
 
 - **Todo el contenido en inglés**: títulos, secciones, descripciones, invariantes, casos de uso — siempre en inglés.
 - **Las INVARIANTES son obligatorias**: todo módulo debe tener al menos 2–3 invariantes. Si no se te ocurren, analiza las reglas implícitas del negocio (unicidad, estados válidos, rangos, precondiciones de transición).
-- **El diagrama Mermaid es obligatorio**: debe incluir todos los endpoints y eventos entrantes del módulo. Si el módulo no tiene entradas HTTP ni eventos, usar un nodo `[[módulo pasivo]]`.
+- **El diagrama de interacciones (flowchart) es obligatorio**: debe incluir todos los endpoints y eventos entrantes del módulo. Si el módulo no tiene entradas HTTP ni eventos, usar un nodo `[[módulo pasivo]]`.
+- **El diagrama de secuencia es obligatorio**: generar al menos un diagrama `sequenceDiagram` cubriendo el flujo principal (happy path) del módulo. Agregar diagramas adicionales para flujos con bifurcaciones significativas (error, compensación, async). Actuar como experto en diagramas de sistemas: modelar todos los actores reales (usuarios, API, handlers, dominio, repositorio, broker, servicios externos).
+- **El diagrama de actividad es obligatorio**: generar un `flowchart TD` con swimlanes que representen a todos los actores del dominio. Actuar como experto en diagramas de sistemas: separar responsabilidades por actor, modelar decisiones de negocio y flujos de error, e incluir módulos externos que reciben eventos o son llamados síncronamente.
 - **La máquina de estados es condicional**: incluirla solo si el módulo gestiona entidades con ciclo de vida (estados). Las restricciones de transición son invariantes implícitas y deben listarse también en la tabla de invariantes.
 - **Cada caso de uso debe referenciar las invariantes**: usar los IDs de la tabla (INV-01, INV-02…) en el campo `Invariants verified`.
 - **No duplicar**: el contenido de `system.md` es un resumen; el archivo de módulo es la especificación completa. No copiar exactamente el mismo texto.
@@ -1190,6 +1295,115 @@ flowchart TD
     UC1 --> EO2
     UC3 --> EO3
     UC2 -->|"solo lectura"| FIN([fin])
+```
+
+## Diagrama de secuencia
+
+```mermaid
+sequenceDiagram
+    actor Client as Client
+    participant API as REST API (PaymentController)
+    participant Handler as CreatePaymentHandler
+    participant Domain as Payment (Domain Entity)
+    participant Repo as PaymentRepository
+    participant GW as PaymentGateway (port)
+    participant Broker as Kafka
+
+    Note over Client,Broker: Flow: CreatePayment (triggered by ReservationCreatedEvent or direct HTTP)
+
+    Client->>API: POST /payments {reservationId, paymentMethod}
+    API->>Handler: CreatePaymentCommand
+    Handler->>Repo: findActiveByReservationId(reservationId)
+    Repo-->>Handler: empty (INV-01 check passed)
+    Handler->>GW: processPayment({amount, method})
+    GW-->>Handler: {paymentId, status: APPROVED}
+    Handler->>Domain: new Payment(...) + approve()
+    Domain-->>Handler: Payment [APPROVED]
+    Handler->>Repo: save(payment)
+    Handler->>Broker: publish(PaymentApprovedEvent)
+    Broker--)API: ack
+    Handler-->>API: paymentId
+    API-->>Client: 201 Created {paymentId, status}
+
+    Note over Client,Broker: Failure branch: gateway rejects the charge
+    GW-->>Handler: error / rejection
+    Handler->>Domain: new Payment(...) + fail()
+    Domain-->>Handler: Payment [FAILED]
+    Handler->>Repo: save(payment)
+    Handler->>Broker: publish(PaymentFailedEvent)
+    Handler-->>API: 422 Unprocessable Entity
+    API-->>Client: 422 {reason}
+```
+
+## Diagrama de actividad
+
+```mermaid
+flowchart TD
+    subgraph CLIENT["👤 Client / ReservationCreatedEvent"]
+        A1([Initiates payment request])
+        A2([Receives payment result])
+    end
+
+    subgraph API["🌐 REST API"]
+        B1[Validate request body]
+        B2[Dispatch CreatePaymentCommand]
+        B3[Return HTTP response]
+    end
+
+    subgraph APP["⚙️ Application Layer"]
+        C1[Check INV-01: no active payment for reservation]
+        C2{Duplicate payment?}
+        C3[Check INV-03: amount > 0]
+        C4{Amount valid?}
+        C5[Call PaymentGateway port]
+        C6{Gateway response?}
+        C7[Persist Payment entity]
+        C8[Publish domain event]
+    end
+
+    subgraph DOMAIN["🏛️ Domain — Payment"]
+        D1[Create Payment PENDING]
+        D2[approve — transition to APPROVED]
+        D3[fail — transition to FAILED]
+    end
+
+    subgraph INFRA["🗄️ Infrastructure"]
+        E1[(payments DB)]
+        E2[External PaymentGateway]
+        E3[📨 Kafka]
+    end
+
+    subgraph CONSUMERS["📦 Other Modules"]
+        F1["reservations → ConfirmReservation"]
+        F2["notifications → NotifyPaymentApproved"]
+        F3["reservations → HandlePaymentFailed"]
+    end
+
+    A1 --> B1
+    B1 --> B2
+    B2 --> C1
+    C1 --> C2
+    C2 -->|"Yes"| ERR1[/"409 Conflict — INV-01 violated"/]
+    C2 -->|"No"| C3
+    C3 --> C4
+    C4 -->|"No"| ERR2[/"400 Bad Request — INV-03 violated"/]
+    C4 -->|"Yes"| D1
+    D1 --> C5
+    C5 --> E2
+    E2 --> C6
+    C6 -->|"Approved"| D2
+    C6 -->|"Rejected / Timeout"| D3
+    D2 --> C7
+    D3 --> C7
+    C7 --> E1
+    C7 --> C8
+    C8 -->|"PaymentApprovedEvent"| E3
+    C8 -->|"PaymentFailedEvent"| E3
+    E3 -->|"PaymentApprovedEvent"| F1
+    E3 -->|"PaymentApprovedEvent"| F2
+    E3 -->|"PaymentFailedEvent"| F3
+    E1 --> B3
+    B3 --> A2
 ```
 
 ## Casos de uso
