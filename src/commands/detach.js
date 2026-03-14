@@ -191,6 +191,7 @@ async function detachCommand(moduleName, options) {
       createdDate: new Date().toISOString().split('T')[0],
       dependencyManagementVersion: defaults.dependencyManagementVersion,
       springCloudVersion: projectConfig.springCloudVersion || defaults.springCloudVersion,
+      springdocVersion: projectConfig.springdocVersion || defaults.springdocVersion,
       gradleVersion: defaults.gradleVersion,
       license: 'MIT',
       description: `Detached microservice: ${newProjectName}`,

@@ -50,14 +50,15 @@ dependencies {
 <% } %><% if (dependencies.includes('security')) { %>    implementation 'org.springframework.boot:spring-boot-starter-security'
 <% } %><% if (dependencies.includes('validation')) { %>    implementation 'org.springframework.boot:spring-boot-starter-validation'
 <% } %><% if (dependencies.includes('actuator')) { %>    implementation 'org.springframework.boot:spring-boot-starter-aop'
-<% } %><% if (features.includeDevtools) { %>    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+<% } %>    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+<% if (features.includeDevtools) { %>    developmentOnly 'org.springframework.boot:spring-boot-devtools'
 <% } %><% if (features.includeLombok) { %>    
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 <% } %><% if (dependencies.includes('data-jpa')) { %>    
     runtimeOnly '<%= databaseDriver %>'
 <% } %><% if (features.includeSwagger) { %>    
-    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:<%= springdocVersion %>'
 <% } %>    
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 <% if (dependencies.includes('security')) { %>    testImplementation 'org.springframework.security:spring-security-test'
