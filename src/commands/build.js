@@ -8,6 +8,8 @@ const yaml = require('js-yaml');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
 const { toCamelCase, toPackagePath } = require('../utils/naming');
+const SharedGenerator = require('../generators/shared-generator');
+const { renderAndWrite } = require('../utils/template-engine');
 const addModuleCommand = require('./add-module');
 const addKafkaClientCommand = require('./add-kafka-client');
 const generateEntitiesCommand = require('./generate-entities');
@@ -39,6 +41,95 @@ logging:
 
 const H2_GRADLE_LINE = `    runtimeOnly 'com.h2database:h2'`;
 const ENVS = ['local', 'develop', 'test', 'production'];
+
+/**
+ * Rebuild db context from projectConfig fields (mirrors detach.js logic).
+ */
+function buildDbContext(projectConfig) {
+  const databaseType = projectConfig.databaseType || 'postgresql';
+  const databaseName = (projectConfig.artifactId || projectConfig.projectName || 'app').replace(/-/g, '_');
+
+  const dbMap = {
+    h2: {
+      driver: 'com.h2.database:h2',
+      driverClass: 'org.h2.Driver',
+      url: `jdbc:h2:mem:${databaseName}`,
+      username: 'sa',
+      password: '',
+      hibernateDialect: 'org.hibernate.dialect.H2Dialect',
+    },
+    postgresql: {
+      driver: 'org.postgresql:postgresql',
+      driverClass: 'org.postgresql.Driver',
+      url: `jdbc:postgresql://localhost:5432/${databaseName}`,
+      username: 'postgres',
+      password: 'postgres',
+      hibernateDialect: 'org.hibernate.dialect.PostgreSQLDialect',
+    },
+    mysql: {
+      driver: 'com.mysql:mysql-connector-j',
+      driverClass: 'com.mysql.cj.jdbc.Driver',
+      url: `jdbc:mysql://localhost:3306/${databaseName}`,
+      username: 'root',
+      password: 'root',
+      hibernateDialect: 'org.hibernate.dialect.MySQLDialect',
+    },
+  };
+
+  const db = dbMap[databaseType] || dbMap.postgresql;
+  return {
+    dependencies: projectConfig.dependencies || ['data-jpa'],
+    packageName: projectConfig.packageName,
+    databaseType,
+    databaseName,
+    databaseDriverClass: db.driverClass,
+    databaseUrl: db.url,
+    databaseUsername: db.username,
+    databasePassword: db.password,
+    hibernateDialect: db.hibernateDialect,
+  };
+}
+
+/**
+ * Regenerate db.yaml files from EJS templates using project's original DB config.
+ * Guarantees correctness even if backup contained stale/wrong content.
+ */
+async function regenerateDbYaml(projectDir, projectConfig) {
+  const dbContext = buildDbContext(projectConfig);
+  const templatesDir = path.join(__dirname, '../../templates/base');
+  const resourcesPath = path.join(projectDir, 'src', 'main', 'resources');
+
+  for (const env of ENVS) {
+    const templatePath = path.join(templatesDir, 'resources', 'parameters', env, 'db.yaml.ejs');
+    const destPath = path.join(resourcesPath, 'parameters', env, 'db.yaml');
+    if (await fs.pathExists(templatePath)) {
+      await renderAndWrite(templatePath, destPath, dbContext);
+    }
+  }
+}
+
+/**
+ * Rebuild the runtimeOnly DB driver line in build.gradle from project's original DB type.
+ */
+async function regenerateBuildGradleDbDriver(projectDir, projectConfig) {
+  const databaseType = projectConfig.databaseType || 'postgresql';
+  const driverMap = {
+    h2: `    runtimeOnly 'com.h2.database:h2'`,
+    postgresql: `    runtimeOnly 'org.postgresql:postgresql'`,
+    mysql: `    runtimeOnly 'com.mysql:mysql-connector-j'`,
+  };
+  const correctLine = driverMap[databaseType] || driverMap.postgresql;
+
+  const buildGradlePath = path.join(projectDir, 'build.gradle');
+  if (await fs.pathExists(buildGradlePath)) {
+    const current = await fs.readFile(buildGradlePath, 'utf-8');
+    const fixed = current.replace(
+      /^[ \t]*runtimeOnly\s+['"][^'"]+['"]\s*(?:\/\/.*)?$/m,
+      correctLine
+    );
+    await fs.writeFile(buildGradlePath, fixed, 'utf-8');
+  }
+}
 
 const H2_SECURITY_CONFIG = (packageName) => {
   const S = '$'; // prevent JS template interpolation of Spring EL ${...}
@@ -211,8 +302,31 @@ async function buildCommand(options = {}) {
   if (!options.mock && await configManager.hasMockBackup()) {
     console.log(chalk.yellow('⚠️  Detected active mock (H2) config from a previous --mock run.'));
     console.log(chalk.yellow('   Restoring original database configuration before continuing...\n'));
-    const n = await restoreFromH2(configManager);
-    console.log(chalk.green(`   ✅ ${n} file(s) restored to original database config.\n`));
+
+    // Clear the backup flag (we no longer rely on stored content — we regenerate from source)
+    await restoreFromH2(configManager);
+
+    // Force-regenerate db.yaml files from templates using project's original DB config
+    await regenerateDbYaml(projectDir, projectConfig);
+
+    // Force-regenerate build.gradle DB driver line
+    await regenerateBuildGradleDbDriver(projectDir, projectConfig);
+
+    // Force-regenerate SecurityConfig from the original template
+    const { packageName: pkgNameRestore } = projectConfig;
+    const pkgPathRestore = toPackagePath(pkgNameRestore);
+    const sharedBaseRestore = path.join(projectDir, 'src', 'main', 'java', pkgPathRestore, 'shared');
+    if (await fs.pathExists(sharedBaseRestore)) {
+      const sg = new SharedGenerator({
+        packageName: pkgNameRestore,
+        packagePath: pkgPathRestore,
+        projectName: projectConfig.projectName || projectConfig.artifactId,
+        groupId: projectConfig.groupId,
+      });
+      await sg.generateConfigurations(sharedBaseRestore);
+    }
+
+    console.log(chalk.green('   ✅ Database configuration restored to original.\n'));
   }
 
   // ── MOCK swap — only swap DB config, skip build steps ─────────────────────
