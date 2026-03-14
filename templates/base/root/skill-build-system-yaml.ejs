@@ -493,6 +493,7 @@ Antes de escribir cualquier YAML, verifica que NO estás cometiendo ninguno de e
 4. ❌ **No declarar `transitions` sin `initialValue` en el enum** — si hay lifecycle, declarar ambos
 5. ❌ **No inventar módulos en `reference.module`** — solo los declarados en `system/system.yaml → modules:`
 6. ❌ **No duplicar en `endpoints:`** lo que ya está en `system/system.yaml → exposes:`
+12. ❌ **`endpoints:` NUNCA es una lista plana** — usar siempre la estructura `{ basePath, versions: [{ version, operations: [...] }] }`. Una lista plana hace que el generador no produzca ningún Command, Handler ni Controller.
 7. ❌ **No inventar eventos en `events:`** — deben coincidir con `integrations.async[]` donde `producer` es este módulo
 8. ❌ **No inventar listeners** — deben coincidir con `integrations.async[].consumers[]` donde `module` es este módulo
 9. ❌ **No inventar ports** — deben coincidir con `integrations.sync[]` donde `caller` es este módulo
@@ -505,10 +506,31 @@ Para cada módulo, extrae del `system/system.yaml`:
 
 | Fuente en system.yaml | Destino en domain.yaml |
 |---|---|
-| `modules[x].exposes[]` | `endpoints:` (uno por operación) |
+| `modules[x].exposes[]` | `endpoints:` — objeto con `basePath` + `versions[].operations[]`; **NUNCA** lista plana |
 | `integrations.async[]` donde `producer = módulo` | `events:` (nombres de eventos a producir) |
 | `integrations.async[].consumers[]` donde `module = módulo` | `listeners:` (con `useCase`) |
 | `integrations.sync[]` donde `caller = módulo` | `ports:` (con `service`, `http`, `using`) |
+
+> ❌ **Formato ERRADO** — `endpoints:` como lista plana de objetos `{method, path, useCase}` — el generador lo ignora y no produce ningún Command/Handler:
+> ```yaml
+> # ❌ NUNCA así
+> endpoints:
+>   - method: POST
+>     path: /orders
+>     useCase: CreateOrder
+> ```
+> ✅ **Formato CORRECTO** — objeto con `basePath` y `versions[].operations[]`:
+> ```yaml
+> # ✅ SIEMPRE así
+> endpoints:
+>   basePath: /orders
+>   versions:
+>     - version: v1
+>       operations:
+>         - useCase: CreateOrder
+>           method: POST
+>           path: /
+> ```
 
 ### Estructura completa del `system/{module}.yaml`
 
@@ -956,6 +978,7 @@ Antes de guardar `system/{module}.yaml`, verifica:
 - [ ] `events[].triggers[]` referencia métodos que existen en `enums[].transitions[].method`
 - [ ] `{entityName}Id` declarado en `events[].fields` cuando el evento **cruza módulos via Kafka** (el generador lo mapea a `event.getAggregateId()` automáticamente)
 - [ ] `endpoints[].operations[].useCase` consistente con `modules[].exposes[].useCase`
+- [ ] `endpoints:` tiene la estructura `{ basePath, versions: [{ version, operations }] }` — **no** es una lista plana de operaciones
 - [ ] `endpoints[].path` son **relativos** al basePath
 - [ ] `listeners[]` presentes para todos los eventos donde este módulo es consumidor
 - [ ] `listeners[].useCase` coincide con `consumers[].useCase` en `system/system.yaml`
