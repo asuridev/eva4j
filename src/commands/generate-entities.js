@@ -569,14 +569,17 @@ async function generateEntitiesCommand(moduleName, options = {}) {
             continue;
           }
 
-          const topicKey = listener.topic.toLowerCase().replace(/_/g, '-');
+          // Strip any prefix before the last dot (e.g. "test-eva.ORDER_PLACED" → "ORDER_PLACED")
+          const topicRaw = listener.topic;
+          const topicSuffix = topicRaw.includes('.') ? topicRaw.slice(topicRaw.lastIndexOf('.') + 1) : topicRaw;
+          const topicKey = topicSuffix.toLowerCase().replace(/_/g, '-');
           const listenerContext = {
             packageName,
             moduleName,
             ...listener,
-            topicConstant: listener.topic,
+            topicConstant: topicRaw,
             topicSpringProperty: `\${topics.${topicKey}}`,
-            topicVariableName: toCamelCase(listener.topic.toLowerCase())
+            topicVariableName: toCamelCase(topicSuffix.toLowerCase())
           };
 
           // 0. Nested type records (auxiliary value objects for object-typed fields)

@@ -16,7 +16,7 @@ const generateRecordCommand = require('../src/commands/generate-record');
 const generateEntitiesCommand = require('../src/commands/generate-entities');
 const generateTemporalFlowCommand = require('../src/commands/generate-temporal-flow');
 const generateTemporalActivityCommand = require('../src/commands/generate-temporal-activity');
-const generateSystemCommand = require('../src/commands/generate-system');
+const buildCommand = require('../src/commands/build');
 const evaluateSystemCommand = require('../src/commands/evaluate-system');
 const infoCommand = require('../src/commands/info');
 const detachCommand = require('../src/commands/detach');
@@ -256,16 +256,6 @@ program
       return;
     }
 
-    if (type === 'system') {
-      try {
-        await generateSystemCommand();
-      } catch (error) {
-        console.error(chalk.red('Error:'), error.message);
-        process.exit(1);
-      }
-      return;
-    }
-
     console.error(chalk.red(`❌ Unknown type: ${type}`));
     console.log(chalk.yellow('\nUsage:'));
     console.log(chalk.gray('  eva4j generate usecase <name> <module>'));
@@ -277,7 +267,6 @@ program
     console.log(chalk.gray('  eva4j generate resource <module>'));
     console.log(chalk.gray('  eva4j generate record'));
     console.log(chalk.gray('  eva4j generate entities <module>'));
-    console.log(chalk.gray('  eva4j generate system'));
     console.log(chalk.gray('\nExamples:'));
     console.log(chalk.gray('  eva4j generate usecase create-provider provider'));
     console.log(chalk.gray('  eva4j g http-exchange user-service-port user'));
@@ -287,9 +276,22 @@ program
     console.log(chalk.gray('  eva4j g temporal-activity order register-order'));
     console.log(chalk.gray('  eva4j g resource product'));
     console.log(chalk.gray('  eva4j g record  # Reads JSON from clipboard'));
-    console.log(chalk.gray('  eva4j g entities order  # Generates from domain.yaml'));
-    console.log(chalk.gray('  eva4j g system          # Bootstrap from system.yaml\n'));
+    console.log(chalk.gray('  eva4j g entities order  # Generates from domain.yaml\n'));
     process.exit(1);
+  });
+
+// Build command
+program
+  .command('build')
+  .description('Bootstrap project from system/system.yaml: create modules, install broker client, copy domain.yaml files, and generate entities')
+  .option('--force', 'Overwrite files even if they were manually modified (bypasses safe mode)')
+  .action(async (options) => {
+    try {
+      await buildCommand(options);
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
   });
 
 // Evaluate command
