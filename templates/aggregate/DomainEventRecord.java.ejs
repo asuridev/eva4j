@@ -24,6 +24,15 @@ import java.util.UUID;
 <% if (needsList) { %>
 import java.util.List;
 <% } %>
+<%
+  const _STANDARD_DOMAIN_TYPES = new Set(['String','Integer','Long','Double','Float','Boolean','BigDecimal','LocalDate','LocalDateTime','LocalTime','Instant','UUID']);
+  const _customDomainElementTypes = _ownFields
+    ? [...new Set(_ownFields.filter(f => f.isCollection && f.collectionElementType && !_STANDARD_DOMAIN_TYPES.has(f.collectionElementType)).map(f => f.collectionElementType))]
+    : [];
+%>
+<% _customDomainElementTypes.forEach(typeName => { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.events.<%- typeName %>;
+<% }); %>
 
 /**
  * <%= name %> - Domain Event

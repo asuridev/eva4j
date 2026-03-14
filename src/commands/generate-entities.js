@@ -554,17 +554,17 @@ async function generateEntitiesCommand(moduleName, options = {}) {
                 .map(f => f.collectionElementType)
             )];
             for (const typeName of customElementTypes) {
-              const stubPath = path.join(moduleBasePath, 'application', 'events', `${typeName}.java`);
+              const stubPath = path.join(moduleBasePath, 'domain', 'models', 'events', `${typeName}.java`);
               await renderAndWrite(
-                path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerNestedType.java.ejs'),
+                path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainEventSnapshot.java.ejs'),
                 stubPath,
                 { packageName, moduleName, name: typeName, fields: [] },
                 { ...writeOptions, overwrite: false }
               );
               generatedFiles.push({
-                type: 'Event Nested Type',
+                type: 'Event Snapshot Type',
                 name: typeName,
-                path: `${moduleName}/application/events/${typeName}.java`
+                path: `${moduleName}/domain/models/events/${typeName}.java`
               });
             }
           }
@@ -1311,10 +1311,16 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
   }
 
   // ── Step 2: ApplicationMapper ────────────────────────────────────────
+  // Only emit Create{Aggregate}Command import and fromCommand() when a
+  // standard CreateOrder operation is declared — other POST use cases
+  // (e.g. PlaceOrder) are scaffolds and never produce that command class.
+  const hasCreateOperation = endpoints.versions.some(v =>
+    v.operations.some(op => op.useCase === `Create${aggregateName}`)
+  );
   await renderAndWrite(
     path.join(templatesDir, 'ApplicationMapper.java.ejs'),
     path.join(moduleBasePath, 'application', 'mappers', `${aggregateName}ApplicationMapper.java`),
-    { ...baseContext, commandFields: commandFieldsApp, oneToOneRelationships: oneToOneRelationshipsApp, oneToManyRelationships: oneToManyRelationshipsApp, validatedVos },
+    { ...baseContext, commandFields: commandFieldsApp, oneToOneRelationships: oneToOneRelationshipsApp, oneToManyRelationships: oneToManyRelationshipsApp, validatedVos, hasCreateOperation },
     writeOptions
   );
   generatedFiles.push({ type: 'Application Mapper', name: `${aggregateName}ApplicationMapper`, path: `${moduleName}/application/mappers/${aggregateName}ApplicationMapper.java` });

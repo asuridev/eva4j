@@ -313,6 +313,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-003': { label: 'Valor en enum *Type sin evento Kafka trazable que lo origine', severity: 'ok', findings: [] },
     'C2-004': { label: 'Trigger de evento referencia método de transición inexistente', severity: 'ok', findings: [] },
     'C2-005': { label: 'Transición de estado sin Domain Event asociado (sin trigger)', severity: 'ok', findings: [] },
+    'C2-006': { label: 'Colisión de nombre de useCase entre endpoints y listeners', severity: 'ok', findings: [] },
   };
 
   for (const [moduleName, config] of Object.entries(domainConfigs)) {
@@ -491,6 +492,27 @@ function runC2(domainConfigs, systemConfig) {
         }
       }
     }
+
+    // C2-006: useCase name collision between endpoints and listeners
+    // Both generate "{UseCase}Command.java" — the endpoint run overwrites the listener version.
+    const domainEpUseCases = new Set();
+    for (const ver of (config.endpoints && config.endpoints.versions) || []) {
+      for (const op of ver.operations || []) {
+        if (op.useCase) domainEpUseCases.add(op.useCase);
+      }
+    }
+    for (const listener of config.listeners || []) {
+      const uc = listener.useCase;
+      if (uc && domainEpUseCases.has(uc)) {
+        checks['C2-006'].findings.push(
+          finding(
+            moduleName,
+            `UseCase '${uc}' está declarado en endpoints: y en listeners: (evento '${listener.event}')`,
+            `Ambos generan '${uc}Command.java' — el endpoint sobreescribe el comando del listener. Renombra el useCase del listener, p.ej. '${uc.replace(/^Create/, 'Initialize')}'.`
+          )
+        );
+      }
+    }
   }
 
   setDefaultSeverities(checks, {
@@ -499,6 +521,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-003': 'warning',
     'C2-004': 'error',
     'C2-005': 'info',
+    'C2-006': 'error',
   });
 
   return checks;

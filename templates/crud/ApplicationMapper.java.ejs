@@ -1,6 +1,8 @@
 package <%= packageName %>.<%= moduleName %>.application.mappers;
 
+<% if (hasCreateOperation) { %>
 import <%= packageName %>.<%= moduleName %>.application.commands.Create<%= aggregateName %>Command;
+<% } %>
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
 <% secondaryEntities.forEach(entity => { %>
 import <%= packageName %>.<%= moduleName %>.application.dtos.Create<%= entity.name %>Dto;
@@ -31,6 +33,7 @@ public class <%= aggregateName %>ApplicationMapper {
 
     // ========== Command to Domain Mapping ==========
     
+<% if (hasCreateOperation) { %>
     /**
      * Convert Create<%= aggregateName %>Command to <%= aggregateName %> domain entity
      */
@@ -98,6 +101,7 @@ public class <%= aggregateName %>ApplicationMapper {
 <% } %>
         return entity;
     }
+<% } %>
 <% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>
 <% oneToManyRelationships.forEach(rel => { %>
     

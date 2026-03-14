@@ -23,7 +23,7 @@ import java.util.UUID;
 import java.util.List;
 <% } %>
 <% _customElementTypes.forEach(typeName => { %>
-import <%= packageName %>.<%= moduleName %>.application.events.<%- typeName %>;
+import <%= packageName %>.<%= moduleName %>.domain.models.events.<%- typeName %>;
 <% }); %>
 
 /**

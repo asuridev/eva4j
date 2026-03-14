@@ -23,12 +23,37 @@ async function parseDomainYaml(yamlPath, packageName = '', moduleName = '') {
     packageName,
     moduleName
   }));
-  
+
+  const endpoints = parseEndpoints(domainData);
+  const listeners = parseListeners(domainData);
+
+  // ── C2-006: useCase name collision between endpoints and listeners ─────────
+  // Both sections generate a "{UseCase}Command.java". The generator processes
+  // listeners first, then endpoints — the endpoint run silently overwrites the
+  // listener command, leaving the KafkaListener dispatching a constructor that
+  // no longer exists → compile error.
+  const endpointUseCases = new Set(
+    endpoints ? endpoints.versions.flatMap(v => v.operations.map(op => op.useCase)) : []
+  );
+  const collisions = listeners
+    .map(l => l.useCase)
+    .filter(uc => endpointUseCases.has(uc));
+  if (collisions.length > 0) {
+    throw new Error(
+      `[C2-006] useCase name collision in domain.yaml:\n` +
+      collisions.map(uc =>
+        `  - "${uc}" appears in both endpoints: (operation) and listeners: (useCase).\n` +
+        `    Both would generate "${uc}Command.java" — the endpoint version overwrites the listener version.\n` +
+        `    Fix: rename the listener useCase, e.g. "${uc.replace(/^Create/, 'Initialize')}".`
+      ).join('\n')
+    );
+  }
+
   return {
     aggregates,
     allEnums: extractAllEnums(domainData.aggregates),
-    endpoints: parseEndpoints(domainData),
-    listeners: parseListeners(domainData),
+    endpoints,
+    listeners,
     ports: parsePorts(domainData, moduleName)
   };
 }
