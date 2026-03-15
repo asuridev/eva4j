@@ -6,15 +6,83 @@ const inquirer = require('inquirer');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath, toCamelCase, toKebabCase, toPascalCase, getApplicationClassName } = require('../utils/naming');
-const { renderAndWrite } = require('../utils/template-engine');
+const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
 const { createOrUpdateUrlsConfig, ensureUrlsImport } = require('./generate-http-exchange');
 const SharedGenerator = require('../generators/shared-generator');
 const ChecksumManager = require('../utils/checksum-manager');
-const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext, updateKafkaYml } = require('./generate-kafka-event');
+const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext, updateKafkaYml,
+        generateEventRecord, createOrUpdateMessageBroker, updateDomainEventHandler } = require('./generate-kafka-event');
 
 // Maximum depth for recursive relationship traversal
 const MAX_DEPTH = 5;
+
+/**
+ * Create or update {Module}KafkaMessageBroker with a mock implementation that
+ * uses ApplicationEventPublisher + MockEvent instead of Kafka.
+ * Mirrors the logic of createOrUpdateKafkaMessageBroker but uses mock templates.
+ */
+async function createOrUpdateMockMessageBroker(projectDir, packagePath, context) {
+  const adapterPath = path.join(
+    projectDir, 'src', 'main', 'java', packagePath,
+    context.moduleName, 'infrastructure', 'adapters', 'kafkaMessageBroker',
+    `${context.kafkaMessageBrokerClassName}.java`
+  );
+
+  const methodName = `publish${context.eventClassName}`;
+  const mockTemplatesDir = path.join(__dirname, '..', '..', 'templates', 'mock');
+
+  if (await fs.pathExists(adapterPath)) {
+    let content = await fs.readFile(adapterPath, 'utf-8');
+
+    // If this file is still a Kafka implementation, replace it wholesale
+    const isKafkaImpl = content.includes('KafkaTemplate') || content.includes('kafkaTemplate');
+    if (isKafkaImpl) {
+      // Re-create from mock template (overwrite)
+      await renderAndWrite(
+        path.join(mockTemplatesDir, 'MockMessageBrokerImpl.java.ejs'),
+        adapterPath,
+        { ...context, topicName: context.topicNameSnake },
+        { force: true }
+      );
+      return;
+    }
+
+    // Already a mock impl — check if method already exists
+    if (content.includes(methodName)) {
+      return;
+    }
+
+    // Inject event import if missing
+    const eventImport = `import ${context.packageName}.${context.moduleName}.application.events.${context.eventClassName};`;
+    if (!content.includes(eventImport)) {
+      const pkgMatch = content.match(/(package\s+[\w.]+;\s*\n)/);
+      if (pkgMatch) {
+        const imports = [...content.matchAll(/import\s+[\w.]+;\s*\n/g)];
+        const insertPos = imports.length
+          ? imports[imports.length - 1].index + imports[imports.length - 1][0].length
+          : pkgMatch.index + pkgMatch[0].length;
+        content = content.slice(0, insertPos) + eventImport + '\n' + content.slice(insertPos);
+      }
+    }
+
+    // Append mock method before the last closing brace
+    const methodSnippet = await renderTemplate(
+      path.join(mockTemplatesDir, 'MockMessageBrokerImplMethod.java.ejs'),
+      { ...context, topicName: context.topicNameSnake }
+    );
+    const lastBrace = content.lastIndexOf('}');
+    content = content.slice(0, lastBrace) + '\n' + methodSnippet + '\n}\n';
+    await fs.writeFile(adapterPath, content, 'utf-8');
+  } else {
+    // Create new mock broker from template
+    await renderAndWrite(
+      path.join(mockTemplatesDir, 'MockMessageBrokerImpl.java.ejs'),
+      adapterPath,
+      { ...context, topicName: context.topicNameSnake }
+    );
+  }
+}
 
 /**
  * Build a relationship graph for secondary entities
@@ -204,9 +272,13 @@ async function generateEntitiesCommand(moduleName, options = {}) {
     }
 
     // Detect installed message broker for auto-wiring integration events
-    const broker = (hasDomainEventsInModule || (listeners && listeners.length > 0))
+    const installedBroker = (hasDomainEventsInModule || (listeners && listeners.length > 0))
       ? await getInstalledBroker(configManager)
       : null;
+    // When brokerMode:'mock' is requested AND a broker is installed, use mock Spring-Events adapter
+    const broker = (options.brokerMode === 'mock' && installedBroker)
+      ? 'mock'
+      : installedBroker;
 
     // Generate audit-related shared components if needed
     if (hasAuditableEntities || hasTrackUserEntities) {
@@ -578,6 +650,38 @@ async function generateEntitiesCommand(moduleName, options = {}) {
             name: 'MessageBroker (updated)',
             path: `${moduleName}/application/ports/MessageBroker.java`
           });
+        } else if (broker === 'mock') {
+          // ── Mock broker: Spring ApplicationEventPublisher instead of Kafka ──
+          // Generate MockEvent record in shared once (idempotent)
+          await sharedGenerator.generateMockEvent(sharedBasePath);
+
+          for (const event of aggregateDomainEvents) {
+            const kafkaCtx = buildKafkaEventContext(packageName, moduleName, event);
+            // 1. Integration Event record (same as Kafka — only the adapter differs)
+            await generateEventRecord(projectDir, packagePath, kafkaCtx);
+            generatedFiles.push({
+              type: 'Integration Event',
+              name: kafkaCtx.eventClassName,
+              path: `${moduleName}/application/events/${kafkaCtx.eventClassName}.java`
+            });
+            // 2. MessageBroker port interface (same as Kafka)
+            await createOrUpdateMessageBroker(projectDir, packagePath, kafkaCtx);
+            // 3. Mock KafkaMessageBroker impl (uses ApplicationEventPublisher)
+            await createOrUpdateMockMessageBroker(projectDir, packagePath, kafkaCtx);
+            // 4. DomainEventHandler (same as Kafka — calls messageBroker.publishX)
+            await updateDomainEventHandler(projectDir, packagePath, kafkaCtx);
+            // 5. NO kafka.yaml update and NO KafkaConfig update in mock mode
+          }
+          generatedFiles.push({
+            type: 'Integration Event',
+            name: `${toPascalCase(moduleName)}KafkaMessageBroker (mock)`,
+            path: `${moduleName}/infrastructure/adapters/kafkaMessageBroker/${toPascalCase(moduleName)}KafkaMessageBroker.java`
+          });
+          generatedFiles.push({
+            type: 'Integration Event',
+            name: 'MessageBroker (updated)',
+            path: `${moduleName}/application/ports/MessageBroker.java`
+          });
         }
       }
     }
@@ -645,15 +749,23 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           });
 
           // 2. Kafka listener class
+          // If the file is currently a mock Spring listener, force overwrite with the real Kafka impl
           const kafkaListenerPath = path.join(
             moduleBasePath, 'infrastructure', 'kafkaListener',
             `${listener.listenerClassName}.java`
           );
+          let kafkaListenerWriteOpts = writeOptions;
+          if (await fs.pathExists(kafkaListenerPath)) {
+            const existing = await fs.readFile(kafkaListenerPath, 'utf-8');
+            if (existing.includes('@EventListener') && !existing.includes('@KafkaListener')) {
+              kafkaListenerWriteOpts = { ...writeOptions, force: true };
+            }
+          }
           await renderAndWrite(
             path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerClass.java.ejs'),
             kafkaListenerPath,
             listenerContext,
-            writeOptions
+            kafkaListenerWriteOpts
           );
           generatedFiles.push({
             type: 'Kafka Listener',
@@ -699,6 +811,86 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           });
         }
         spinner.succeed(chalk.green(`Kafka listeners generated! ✨`));
+      } else if (broker === 'mock') {
+        // ── Mock listeners: @EventListener instead of @KafkaListener ──────────
+        spinner.start(`Generating ${listeners.length} Spring Event listener(s) (mock mode)...`);
+
+        // Ensure MockEvent is available in shared
+        await sharedGenerator.generateMockEvent(sharedBasePath);
+
+        for (const listener of listeners) {
+          if (!listener.topic) {
+            spinner.warn(chalk.yellow(`⚠ listener '${listener.event}': topic is required. Skipping.`));
+            continue;
+          }
+
+          const topicRaw = listener.topic;
+          const topicSuffix = topicRaw.includes('.') ? topicRaw.slice(topicRaw.lastIndexOf('.') + 1) : topicRaw;
+          const topicKey = topicSuffix.toLowerCase().replace(/_/g, '-');
+          const listenerContext = {
+            packageName,
+            moduleName,
+            ...listener,
+            topicConstant: topicRaw,
+            topicSpringProperty: `\${topics.${topicKey}}`,
+            topicVariableName: toCamelCase(topicSuffix.toLowerCase())
+          };
+
+          // 0. Nested type records
+          for (const nt of (listener.nestedTypes || [])) {
+            const ntPath = path.join(moduleBasePath, 'application', 'events', `${nt.name}.java`);
+            await renderAndWrite(
+              path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerNestedType.java.ejs'),
+              ntPath,
+              { packageName, moduleName, name: nt.name, fields: nt.fields },
+              writeOptions
+            );
+            generatedFiles.push({ type: 'Listener Nested Type', name: nt.name, path: `${moduleName}/application/events/${nt.name}.java` });
+          }
+
+          // 1. Integration Event record (same as Kafka)
+          const integrationEventPath = path.join(moduleBasePath, 'application', 'events', `${listener.integrationEventClassName}.java`);
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerIntegrationEvent.java.ejs'),
+            integrationEventPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({ type: 'Listener Integration Event', name: listener.integrationEventClassName, path: `${moduleName}/application/events/${listener.integrationEventClassName}.java` });
+
+          // 2. Spring @EventListener class (mock — same file path as Kafka listener)
+          const listenerPath = path.join(moduleBasePath, 'infrastructure', 'kafkaListener', `${listener.listenerClassName}.java`);
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'mock', 'SpringEventListener.java.ejs'),
+            listenerPath,
+            listenerContext,
+            { ...writeOptions, force: true }
+          );
+          generatedFiles.push({ type: 'Spring Listener (mock)', name: listener.listenerClassName, path: `${moduleName}/infrastructure/kafkaListener/${listener.listenerClassName}.java` });
+
+          // 3. NO kafka.yaml update in mock mode
+
+          // 4. Typed Command dispatched from the listener
+          const mockCommandPath = path.join(moduleBasePath, 'application', 'commands', `${listener.commandClassName}.java`);
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerCommand.java.ejs'),
+            mockCommandPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({ type: 'Listener Command', name: listener.commandClassName, path: `${moduleName}/application/commands/${listener.commandClassName}.java` });
+
+          // 5. Use case handler stub
+          const mockHandlerPath = path.join(moduleBasePath, 'application', 'usecases', `${listener.useCase}CommandHandler.java`);
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerCommandHandler.java.ejs'),
+            mockHandlerPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({ type: 'Handler', name: `${listener.useCase}CommandHandler`, path: `${moduleName}/application/usecases/${listener.useCase}CommandHandler.java` });
+        }
+        spinner.succeed(chalk.green(`Spring Event listeners generated (mock mode)! ✨`));
       } else if (listeners.length > 0) {
         console.log(chalk.yellow(`⚠ listeners: section found but no broker is installed. Run 'eva add kafka-client' to generate listener classes.`));
       }

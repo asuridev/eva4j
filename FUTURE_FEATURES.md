@@ -1391,7 +1391,6 @@ Implementa la misma interfaz `MessageBroker` que `KafkaMessageBroker`, pero re-p
 
 ```java
 @Component("{moduleCamelCase}InMemoryMessageBroker")
-@Profile("mock")
 public class {ModulePascal}InMemoryMessageBroker implements MessageBroker {
 
     private final ApplicationEventPublisher eventPublisher;
@@ -1448,7 +1447,6 @@ Un `CommandLineRunner` activo solo con profile `mock` que siembra datos realista
 
 ```java
 @Component
-@Profile("mock")
 public class MockDataSeeder implements CommandLineRunner {
 
     private final UseCaseMediator mediator;

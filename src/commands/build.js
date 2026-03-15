@@ -235,6 +235,17 @@ async function swapToH2(projectDir, packageName, configManager) {
     backups.securityConfig = { path: securityConfigPath, content: null };
   }
 
+  // ── KafkaConfig.java — backup so it can be restored later ────────────────
+  const kafkaConfigPath = path.join(
+    projectDir, 'src', 'main', 'java', packagePath,
+    'shared', 'infrastructure', 'configurations', 'kafkaConfig', 'KafkaConfig.java'
+  );
+  if (await fs.pathExists(kafkaConfigPath)) {
+    backups.kafkaConfig = { path: kafkaConfigPath, content: await fs.readFile(kafkaConfigPath, 'utf-8') };
+  } else {
+    backups.kafkaConfig = null; // no Kafka installed — nothing to do
+  }
+
   // Persist backups BEFORE writing any file so a crash mid-swap is recoverable
   await configManager.saveMockBackup(backups);
 
@@ -246,15 +257,25 @@ async function swapToH2(projectDir, packageName, configManager) {
   }
 
   if (backups.buildGradle) {
-    const swapped = backups.buildGradle.content.replace(
+    let swapped = backups.buildGradle.content.replace(
       /^[ \t]*runtimeOnly\s+['"][^'"]+['"]\s*(?:\/\/.*)?$/m,
       H2_GRADLE_LINE
+    );
+    // Remove spring-kafka dependencies block when Kafka is installed
+    swapped = swapped.replace(
+      /\n?[ \t]*\/\/ Kafka\n[ \t]*implementation 'org\.springframework\.kafka:spring-kafka'\n[ \t]*testImplementation 'org\.springframework\.kafka:spring-kafka-test'\n\n?[ \t]*/,
+      '\n\t'
     );
     await fs.writeFile(buildGradlePath, swapped, 'utf-8');
   }
 
   await fs.ensureDir(path.dirname(securityConfigPath));
   await fs.writeFile(securityConfigPath, H2_SECURITY_CONFIG(packageName), 'utf-8');
+
+  // ── Remove KafkaConfig.java (restored from backup on eva build) ──────────
+  if (backups.kafkaConfig) {
+    await fs.remove(kafkaConfigPath);
+  }
 
   return backups;
 }
@@ -329,7 +350,7 @@ async function buildCommand(options = {}) {
     console.log(chalk.green('   ✅ Database configuration restored to original.\n'));
   }
 
-  // ── MOCK swap — only swap DB config, skip build steps ─────────────────────
+  // ── MOCK swap — swap DB + broker config, then run entity generation ────────
   if (options.mock) {
     if (await configManager.hasMockBackup()) {
       console.log(chalk.yellow('\n⚡ Mock (H2) is already active. Run eva build without --mock to restore.\n'));
@@ -339,14 +360,73 @@ async function buildCommand(options = {}) {
     const { packageName: pkgName } = projectConfig;
     console.log(chalk.blue('\n🔀 eva build --mock\n'));
     console.log(chalk.gray(`  Project : ${projectConfig.projectName || projectConfig.artifactId}`));
-    console.log(chalk.yellow('  Mode    : switching to H2 in-memory database\n'));
-    console.log(chalk.blue('━━━ Swapping database config to H2 ━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+    console.log(chalk.yellow('  Mode    : switching to H2 in-memory database + Spring Event bus\n'));
+    console.log(chalk.blue('━━━ Swapping database & broker config ━━━━━━━━━━━━━━━━━━━━━━━━'));
 
     const backups = await swapToH2(projectDir, pkgName, configManager);
-    console.log(chalk.green(`  ✅ ${Object.keys(backups).length} file(s) replaced with H2 config`));
+    const hasKafkaBackup = !!backups.kafkaConfig;
+    console.log(chalk.green(`  ✅ ${Object.keys(backups).length} file(s) backed up and replaced`));
+    if (hasKafkaBackup) {
+      console.log(chalk.green('  ✅ KafkaConfig.java removed (Spring Events will be used instead)'));
+      console.log(chalk.green('  ✅ spring-kafka dependencies removed from build.gradle'));
+    }
     console.log(chalk.gray('     Backup saved to .eva4j.json — will be restored on next eva build\n'));
-    console.log(chalk.yellow('  ⚡ H2 active. Run ./gradlew bootRun to start with in-memory database.'));
-    console.log(chalk.yellow('     Run eva build (without --mock) to restore the original database.\n'));
+
+    // ── Regenerate broker layer if system.yaml exists and Kafka was installed ──
+    const systemDir = path.join(projectDir, 'system');
+    const systemYamlPath = path.join(systemDir, 'system.yaml');
+
+    if (hasKafkaBackup && (await fs.pathExists(systemYamlPath))) {
+      let systemConfig;
+      try {
+        const content = await fs.readFile(systemYamlPath, 'utf-8');
+        systemConfig = yaml.load(content);
+      } catch (err) {
+        console.error(chalk.red('❌ Failed to parse system/system.yaml:'), err.message);
+        process.exit(1);
+      }
+
+      const { modules: mockModules = [] } = systemConfig;
+      const pkgPath = toPackagePath(pkgName);
+
+      if (mockModules.length > 0) {
+        console.log(chalk.blue('━━━ Regenerating broker layer (mock) ━━━━━━━━━━━━━━━━━━━━━━━━'));
+
+        // Step 3: Copy domain.yaml files
+        for (const mod of mockModules) {
+          const sourceYaml = path.join(systemDir, `${mod.name}.yaml`);
+          const modulePackageName = toCamelCase(mod.name);
+          const destYaml = path.join(projectDir, 'src', 'main', 'java', pkgPath, modulePackageName, 'domain.yaml');
+          if (!(await fs.pathExists(sourceYaml))) {
+            console.log(chalk.yellow(`  ⚠️  system/${mod.name}.yaml not found — skipping ${mod.name}`));
+            continue;
+          }
+          const content = await fs.readFile(sourceYaml, 'utf-8');
+          await fs.ensureDir(path.dirname(destYaml));
+          await fs.writeFile(destYaml, content, 'utf-8');
+          console.log(chalk.green(`  ✅ ${mod.name}/domain.yaml updated`));
+        }
+
+        // Step 4: Regenerate entities with mock broker
+        for (const mod of mockModules) {
+          const modulePackageName = toCamelCase(mod.name);
+          const domainYamlPath = path.join(projectDir, 'src', 'main', 'java', pkgPath, modulePackageName, 'domain.yaml');
+          if (!(await fs.pathExists(domainYamlPath))) {
+            console.log(chalk.yellow(`  ⚠️  domain.yaml not found for '${mod.name}' — skipping`));
+            continue;
+          }
+          console.log(chalk.cyan(`\n  Regenerating broker layer for: ${mod.name}`));
+          await generateEntitiesCommand(mod.name, { force: true, brokerMode: 'mock' });
+        }
+      }
+    } else if (hasKafkaBackup) {
+      console.log(chalk.yellow('  ℹ️  No system/system.yaml found — broker files must be regenerated manually.'));
+      console.log(chalk.yellow('     Run: eva g entities <module> (with --force if needed)'));
+    }
+
+    console.log();
+    console.log(chalk.yellow('  ⚡ Mock mode active. Run ./gradlew bootRun to start.'));
+    console.log(chalk.yellow('     Run eva build (without --mock) to restore the original config.\n'));
     return;
   }
 

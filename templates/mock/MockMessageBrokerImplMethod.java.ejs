@@ -1,0 +1,6 @@
+  @Override
+  public void publish<%= eventClassName %>(<%= eventClassName %> event) {
+    @SuppressWarnings("unchecked")
+    Map<String, Object> payload = objectMapper.convertValue(event, Map.class);
+    eventPublisher.publishEvent(new MockEvent("<%= topicName %>", payload));
+  }

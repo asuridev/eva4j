@@ -194,6 +194,12 @@ class SharedGenerator {
       path.join(handlerExceptionPath, 'HandlerExceptions.java'));
   }
 
+  async generateMockEvent(basePath) {
+    const destPath = path.join(basePath, 'infrastructure', 'mockEvent', 'MockEvent.java');
+    const templatePath = path.join(__dirname, '../../templates/mock/MockEvent.java.ejs');
+    await renderAndWrite(templatePath, destPath, this.context, { overwrite: false });
+  }
+
   async generateConfigurations(basePath) {
     const configurationsPath = path.join(basePath, 'infrastructure', 'configurations');
     
