@@ -154,6 +154,7 @@ eva4j provides:
 - ✅ **No infrastructure from the start** - `--mock` replaces Kafka and the DB with in-memory equivalents
 - ✅ **Safe iteration** - Checksums prevent overwriting manual modifications on regeneration
 - ✅ **Consistent architecture** - Same patterns across all modules, no architectural drift
+- ✅ **Technology-agnostic specification** - The YAML describes domain structure, not framework details — while the current generator targets Spring Boot, the same specification is designed to power generators for other stacks and languages
 
 ---
 
