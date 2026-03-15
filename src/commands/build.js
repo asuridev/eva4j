@@ -242,9 +242,9 @@ async function swapToH2(projectDir, packageName, configManager) {
   );
   if (await fs.pathExists(kafkaConfigPath)) {
     backups.kafkaConfig = { path: kafkaConfigPath, content: await fs.readFile(kafkaConfigPath, 'utf-8') };
-  } else {
-    backups.kafkaConfig = null; // no Kafka installed — nothing to do
   }
+  // When Kafka is not installed, omit the key entirely — restoreFromH2() iterates
+  // Object.values(backups) and would crash trying to destructure a null entry.
 
   // Persist backups BEFORE writing any file so a crash mid-swap is recoverable
   await configManager.saveMockBackup(backups);
@@ -324,13 +324,12 @@ async function buildCommand(options = {}) {
     console.log(chalk.yellow('⚠️  Detected active mock (H2) config from a previous --mock run.'));
     console.log(chalk.yellow('   Restoring original database configuration before continuing...\n'));
 
-    // Clear the backup flag (we no longer rely on stored content — we regenerate from source)
+    // Restore original files verbatim from backup (db.yaml, build.gradle, SecurityConfig, KafkaConfig)
+    // The backups contain the exact content the developer had configured — do NOT regenerate from
+    // projectConfig defaults, which only knows the DB type and not the custom URL/user/password.
     await restoreFromH2(configManager);
 
-    // Force-regenerate db.yaml files from templates using project's original DB config
-    await regenerateDbYaml(projectDir, projectConfig);
-
-    // Force-regenerate build.gradle DB driver line
+    // Re-apply the correct runtimeOnly DB driver line as a safety net for build.gradle
     await regenerateBuildGradleDbDriver(projectDir, projectConfig);
 
     // Force-regenerate SecurityConfig from the original template
