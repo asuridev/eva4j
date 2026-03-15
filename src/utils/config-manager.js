@@ -156,7 +156,7 @@ class ConfigManager {
    * Persist mock backup data into .eva4j.json so it survives process restarts.
    * @param {Object} backups - Map of { key: { path, content } }
    */
-  async saveMockBackup(backups) {
+  async saveMockBackup(backups, opts = {}) {
     const config = await this.loadProjectConfig();
     if (!config) throw new Error('Project configuration not found.');
 
@@ -165,6 +165,9 @@ class ConfigManager {
       config._mockBackup[key] = { path: filePath, content };
     }
     config._mockActive = true;
+    if (opts.onlyBroker) {
+      config._mockOnlyBroker = true;
+    }
     config.updatedAt = new Date().toISOString();
     await fs.writeJson(this.configFile, config, { spaces: 2 });
   }
@@ -180,6 +183,7 @@ class ConfigManager {
     const backups = config._mockBackup;
     delete config._mockBackup;
     delete config._mockActive;
+    delete config._mockOnlyBroker;
     config.updatedAt = new Date().toISOString();
     await fs.writeJson(this.configFile, config, { spaces: 2 });
     return backups;
@@ -191,6 +195,15 @@ class ConfigManager {
   async hasMockBackup() {
     const config = await this.loadProjectConfig();
     return !!(config && config._mockActive);
+  }
+
+  /**
+   * Returns true if the active mock was started with --only-broker
+   * (i.e. only the broker was swapped, DB config was kept unchanged).
+   */
+  async hasMockOnlyBroker() {
+    const config = await this.loadProjectConfig();
+    return !!(config && config._mockOnlyBroker);
   }
 }
 

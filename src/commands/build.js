@@ -281,6 +281,50 @@ async function swapToH2(projectDir, packageName, configManager) {
 }
 
 /**
+ * Backup and swap ONLY the broker layer (Kafka → Spring Event bus).
+ * Database config (db.yaml) and SecurityConfig.java are left untouched.
+ * Persists backups to .eva4j.json with _mockOnlyBroker = true.
+ */
+async function swapBrokerOnly(projectDir, packageName, configManager) {
+  const backups = {};
+
+  // ── build.gradle ─────────────────────────────────────────────────────────
+  const buildGradlePath = path.join(projectDir, 'build.gradle');
+  if (await fs.pathExists(buildGradlePath)) {
+    backups.buildGradle = { path: buildGradlePath, content: await fs.readFile(buildGradlePath, 'utf-8') };
+  }
+
+  // ── KafkaConfig.java ──────────────────────────────────────────────────────
+  const packagePath = toPackagePath(packageName);
+  const kafkaConfigPath = path.join(
+    projectDir, 'src', 'main', 'java', packagePath,
+    'shared', 'infrastructure', 'configurations', 'kafkaConfig', 'KafkaConfig.java'
+  );
+  if (await fs.pathExists(kafkaConfigPath)) {
+    backups.kafkaConfig = { path: kafkaConfigPath, content: await fs.readFile(kafkaConfigPath, 'utf-8') };
+  }
+
+  // Persist backups BEFORE writing any file so a crash mid-swap is recoverable
+  await configManager.saveMockBackup(backups, { onlyBroker: true });
+
+  // ── Remove spring-kafka from build.gradle (keep existing DB driver line) ──
+  if (backups.buildGradle) {
+    const swapped = backups.buildGradle.content.replace(
+      /\n?[ \t]*\/\/ Kafka\n[ \t]*implementation 'org\.springframework\.kafka:spring-kafka'\n[ \t]*testImplementation 'org\.springframework\.kafka:spring-kafka-test'\n\n?[ \t]*/,
+      '\n\t'
+    );
+    await fs.writeFile(buildGradlePath, swapped, 'utf-8');
+  }
+
+  // ── Remove KafkaConfig.java (restored from backup on eva build) ───────────
+  if (backups.kafkaConfig) {
+    await fs.remove(kafkaConfigPath);
+  }
+
+  return backups;
+}
+
+/**
  * Restore all files from backup stored in .eva4j.json and clear the entry.
  */
 async function restoreFromH2(configManager) {
@@ -321,42 +365,128 @@ async function buildCommand(options = {}) {
 
   // ── 2b. Restore mock config if a previous --mock run left files swapped ──────
   if (!options.mock && await configManager.hasMockBackup()) {
-    console.log(chalk.yellow('⚠️  Detected active mock (H2) config from a previous --mock run.'));
-    console.log(chalk.yellow('   Restoring original database configuration before continuing...\n'));
+    const isOnlyBroker = await configManager.hasMockOnlyBroker();
+
+    if (isOnlyBroker) {
+      console.log(chalk.yellow('⚠️  Detected active --only-broker mock from a previous run.'));
+      console.log(chalk.yellow('   Restoring original broker configuration before continuing...\n'));
+    } else {
+      console.log(chalk.yellow('⚠️  Detected active mock (H2) config from a previous --mock run.'));
+      console.log(chalk.yellow('   Restoring original database configuration before continuing...\n'));
+    }
 
     // Restore original files verbatim from backup (db.yaml, build.gradle, SecurityConfig, KafkaConfig)
     // The backups contain the exact content the developer had configured — do NOT regenerate from
     // projectConfig defaults, which only knows the DB type and not the custom URL/user/password.
     await restoreFromH2(configManager);
 
-    // Re-apply the correct runtimeOnly DB driver line as a safety net for build.gradle
-    await regenerateBuildGradleDbDriver(projectDir, projectConfig);
+    if (!isOnlyBroker) {
+      // Re-apply the correct runtimeOnly DB driver line as a safety net for build.gradle
+      await regenerateBuildGradleDbDriver(projectDir, projectConfig);
 
-    // Force-regenerate SecurityConfig from the original template
-    const { packageName: pkgNameRestore } = projectConfig;
-    const pkgPathRestore = toPackagePath(pkgNameRestore);
-    const sharedBaseRestore = path.join(projectDir, 'src', 'main', 'java', pkgPathRestore, 'shared');
-    if (await fs.pathExists(sharedBaseRestore)) {
-      const sg = new SharedGenerator({
-        packageName: pkgNameRestore,
-        packagePath: pkgPathRestore,
-        projectName: projectConfig.projectName || projectConfig.artifactId,
-        groupId: projectConfig.groupId,
-      });
-      await sg.generateConfigurations(sharedBaseRestore);
+      // Force-regenerate SecurityConfig from the original template
+      const { packageName: pkgNameRestore } = projectConfig;
+      const pkgPathRestore = toPackagePath(pkgNameRestore);
+      const sharedBaseRestore = path.join(projectDir, 'src', 'main', 'java', pkgPathRestore, 'shared');
+      if (await fs.pathExists(sharedBaseRestore)) {
+        const sg = new SharedGenerator({
+          packageName: pkgNameRestore,
+          packagePath: pkgPathRestore,
+          projectName: projectConfig.projectName || projectConfig.artifactId,
+          groupId: projectConfig.groupId,
+        });
+        await sg.generateConfigurations(sharedBaseRestore);
+      }
     }
 
-    console.log(chalk.green('   ✅ Database configuration restored to original.\n'));
+    console.log(chalk.green('   ✅ Configuration restored to original.\n'));
   }
 
-  // ── MOCK swap — swap DB + broker config, then run entity generation ────────
+  // ── MOCK swap — swap DB + broker config (or broker only), then run entity generation ─
   if (options.mock) {
     if (await configManager.hasMockBackup()) {
-      console.log(chalk.yellow('\n⚡ Mock (H2) is already active. Run eva build without --mock to restore.\n'));
+      const alreadyOnlyBroker = await configManager.hasMockOnlyBroker();
+      const label = alreadyOnlyBroker ? 'broker-only mock' : 'mock (H2)';
+      console.log(chalk.yellow(`\n⚡ ${label} is already active. Run eva build without --mock to restore.\n`));
       process.exit(0);
     }
 
     const { packageName: pkgName } = projectConfig;
+
+    if (options.onlyBroker) {
+      // ── BROKER-ONLY mode: keep database, replace broker ───────────────────
+      console.log(chalk.blue('\n🔀 eva build --mock --only-broker\n'));
+      console.log(chalk.gray(`  Project : ${projectConfig.projectName || projectConfig.artifactId}`));
+      console.log(chalk.yellow('  Mode    : switching broker to Spring Event bus (database unchanged)\n'));
+      console.log(chalk.blue('━━━ Swapping broker config ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+
+      const backups = await swapBrokerOnly(projectDir, pkgName, configManager);
+      const hasKafkaBackup = !!backups.kafkaConfig;
+      console.log(chalk.green(`  ✅ ${Object.keys(backups).length} file(s) backed up and replaced`));
+      if (hasKafkaBackup) {
+        console.log(chalk.green('  ✅ KafkaConfig.java removed (Spring Events will be used instead)'));
+        console.log(chalk.green('  ✅ spring-kafka dependencies removed from build.gradle'));
+      }
+      console.log(chalk.gray('     Backup saved to .eva4j.json — will be restored on next eva build\n'));
+
+      // ── Regenerate broker layer if system.yaml exists and Kafka was installed
+      const systemDirBo = path.join(projectDir, 'system');
+      const systemYamlPathBo = path.join(systemDirBo, 'system.yaml');
+
+      if (hasKafkaBackup && (await fs.pathExists(systemYamlPathBo))) {
+        let systemConfigBo;
+        try {
+          const content = await fs.readFile(systemYamlPathBo, 'utf-8');
+          systemConfigBo = yaml.load(content);
+        } catch (err) {
+          console.error(chalk.red('❌ Failed to parse system/system.yaml:'), err.message);
+          process.exit(1);
+        }
+
+        const { modules: mockModulesBo = [] } = systemConfigBo;
+        const pkgPathBo = toPackagePath(pkgName);
+
+        if (mockModulesBo.length > 0) {
+          console.log(chalk.blue('━━━ Regenerating broker layer (mock) ━━━━━━━━━━━━━━━━━━━━━━━━'));
+
+          for (const mod of mockModulesBo) {
+            const sourceYaml = path.join(systemDirBo, `${mod.name}.yaml`);
+            const modulePackageName = toCamelCase(mod.name);
+            const destYaml = path.join(projectDir, 'src', 'main', 'java', pkgPathBo, modulePackageName, 'domain.yaml');
+            if (!(await fs.pathExists(sourceYaml))) {
+              console.log(chalk.yellow(`  ⚠️  system/${mod.name}.yaml not found — skipping ${mod.name}`));
+              continue;
+            }
+            const content = await fs.readFile(sourceYaml, 'utf-8');
+            await fs.ensureDir(path.dirname(destYaml));
+            await fs.writeFile(destYaml, content, 'utf-8');
+            console.log(chalk.green(`  ✅ ${mod.name}/domain.yaml updated`));
+          }
+
+          for (const mod of mockModulesBo) {
+            const modulePackageName = toCamelCase(mod.name);
+            const domainYamlPath = path.join(projectDir, 'src', 'main', 'java', pkgPathBo, modulePackageName, 'domain.yaml');
+            if (!(await fs.pathExists(domainYamlPath))) {
+              console.log(chalk.yellow(`  ⚠️  domain.yaml not found for '${mod.name}' — skipping`));
+              continue;
+            }
+            console.log(chalk.cyan(`\n  Regenerating broker layer for: ${mod.name}`));
+            await generateEntitiesCommand(mod.name, { force: false, brokerMode: 'mock' });
+          }
+        }
+      } else if (hasKafkaBackup) {
+        console.log(chalk.yellow('  ℹ️  No system/system.yaml found — broker files must be regenerated manually.'));
+        console.log(chalk.yellow('     Run: eva g entities <module> (with --force if needed)'));
+      }
+
+      console.log();
+      console.log(chalk.yellow('  ⚡ Broker-only mock active. Database config unchanged.'));
+      console.log(chalk.yellow('     Run ./gradlew bootRun to start.'));
+      console.log(chalk.yellow('     Run eva build (without --mock) to restore the original broker config.\n'));
+      return;
+    }
+
+    // ── FULL mock mode: DB → H2 + broker → Spring Events ─────────────────────
     console.log(chalk.blue('\n🔀 eva build --mock\n'));
     console.log(chalk.gray(`  Project : ${projectConfig.projectName || projectConfig.artifactId}`));
     console.log(chalk.yellow('  Mode    : switching to H2 in-memory database + Spring Event bus\n'));
