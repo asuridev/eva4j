@@ -37,23 +37,123 @@ eva g entities product
 
 ## 💎 Why eva4j?
 
-### The Problem
+### The real problem: AI agents cannot generate production-quality code directly
 
-Building Spring Boot applications with proper architecture requires:
-- ❌ Hours setting up project structure
-- ❌ Repetitive code for CRUD operations
-- ❌ Manual wiring of layers (domain, application, infrastructure)
-- ❌ Complex microservices infrastructure from day one
-- ❌ Risk of architectural inconsistencies
+The biggest bottleneck is no longer writing repetitive code — it's the gap between **business requirements** and **production code with the right architecture**.
+
+Teams today try to solve this in two ways, both with serious problems:
+
+**Option A — Direct prompt to the agent:** _"Create an inventory system with Spring Boot, PostgreSQL, Kafka, hexagonal architecture, CQRS..."_
+
+The agent generates something... but:
+- ❌ Architecture varies between modules — inconsistent
+- ❌ Hexagonal patterns are applied partially or incorrectly
+- ❌ No convention on where each class belongs
+- ❌ The code doesn't compile as a whole
+- ❌ Each regeneration produces something different
+- ❌ Impossible to iterate incrementally
+
+**Option B — Spec Driven Development (SDD):** _"Given this functional specification document, generate the code following these patterns..."_
+
+One step ahead of the free prompt: instead of an informal description, the agent receives a more structured functional specification — use cases, flows, business rules. The agent generates more organized code, but the underlying problem remains:
+
+- ⚠️ The agent must simultaneously focus on **two different planes**: interpreting the functional domain and producing code with the right architecture — and it tends to lose one when it digs into the other
+- ⚠️ Functional specifications don't dictate technical structure: the agent makes architecture decisions each session, producing different results
+- ⚠️ Ensuring consistency across modules requires ever more exhaustive specifications — and even then the generated code needs deep review
+- ⚠️ Every requirement change means regenerating and manually auditing the code to detect accumulated regressions or inconsistencies
+- ⚠️ **A change in the system definition translates into a code refactoring** — with hard-to-measure impact, prone to integration errors, and potentially affecting modules that appear unrelated to the change
+- ⚠️ Before working on business logic, the team must stand up the entire infrastructure (database, messaging broker)
+
+SDD improves the situation, but **still sends the agent to the wrong plane**: from the functional specification straight to code — skipping a fundamental intermediate layer.
+
+---
+
+### The new vision: technology-agnostic technical specifications as an intermediate step
+
+The problem with SDD is not the specification itself — it's that the **functional** specification is converted directly into code. The solution is to introduce an intermediate step: transform functional requirements into **technology-agnostic technical specifications** before generating a single line of code.
+
+These technical specifications don't talk about Spring Boot, JPA or Kafka. They talk about **domain entities, lifecycles, events, relationships between modules and API contracts**. They are understandable by the agent, the business team, and the generator — and can be reviewed, discussed, and iterated without touching code.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  LAYER 1 — Functional requirements                              │
+│  (business describes what the system must do)                   │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │  AI agent
+                                │  (translates domain into structure)
+┌───────────────────────────────▼──────────────────────────────────┐
+│  LAYER 2 — Technology-agnostic technical specification          │
+│  (agent + team iterate here — no code)                          │
+│                                                                  │
+│  system.yaml + {module}.yaml                                    │
+│  • Which modules (bounded contexts) make up the system?         │
+│  • How many aggregates does each module have?                   │
+│  • Which entities form each aggregate? Which is the root?       │
+│  • What fields and types does each entity have?                 │
+│  • What lifecycle do entities have (states/transitions)?        │
+│  • What events occur? Who produces them and who consumes them?  │
+│  • How do modules communicate with each other?                  │
+│  • What endpoints does each module expose and what use case?    │
+│                                                                  │
+│  Reviewable · Versionable · Evaluable · Iterable                │
+│  without needing to generate any code                           │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │  eva build
+                                │  (when the team validates
+                                │  that the specification is correct)
+┌───────────────────────────────▼──────────────────────────────────┐
+│  LAYER 3 — Code  (eva4j generates, team completes)              │
+│                                                                  │
+│  technical specification  ──▶  functional Spring Boot prototype │
+│                               • Compiles from the first build   │
+│                               • Endpoints respond immediately   │
+│                               • No infrastructure required      │
+│                                 (--mock: H2 + Spring Events)    │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**The agent does what it does well:** translating functional requirements into technology-agnostic technical specifications — modeling the domain, identifying entities, defining lifecycles, designing contracts between modules. The result is a precise and verifiable YAML, not code.
+
+**The team validates the specification** before a single line of Java exists — discussing entities, relationships and flows in a format readable by everyone.
+
+**eva4j does what the agent cannot do reliably:** converting that specification into code with correct hexagonal architecture, CQRS, DDD patterns and multi-environment configuration — identically every time, no matter how many times it runs.
+
+---
+
+### From prototype to production with minimal friction
+
+Eva4j does not generate a production-ready complete system in a single step — it generates a **functional and correct prototype** that the team can complement and iterate from day one:
+
+| What `eva build` delivers | What the team completes |
+|---|---|
+| Domain entities with constructors, getters and lifecycle methods | Domain-specific business logic |
+| Correctly structured CQRS handlers | The body of each handler (`UnsupportedOperationException` as a visible placeholder) |
+| JSR-303 validations, DTOs, Application↔Domain↔JPA mappers | Complex business validations and cross-aggregate rules |
+| Kafka, Feign, JPA multi-environment configuration | Specific queries, indexes, performance tuning |
+| REST endpoints that respond from day 1 | Edge cases, business error handling |
+| Optional mock infrastructure (H2 + Spring Events) | Integration with real infrastructure when the model is validated |
+
+**The full cycle:**
+
+1. The agent generates specifications from business requirements (`system.yaml` + `{module}.yaml`)
+2. The team reviews and validates that the specification correctly reflects the domain — without seeing code
+3. `eva build` → the prototype starts; endpoints respond; the team completes business logic **from day 1 without infrastructure**
+4. Requirements evolve → update the YAML → `eva build` regenerates safely (checksums protect manual modifications)
+5. When the prototype meets all verified requirements, moving to production is a configuration change — not a rewrite
+
+**A change in the system definition is a YAML diff — not a code refactoring.** The impact is always measurable: exactly the files that correspond to what changed in the specification. The new build faithfully reflects the new design, with no residue from the previous one.
+
+---
 
 ### The Solution
 
 eva4j provides:
-- ✅ **Project in seconds** - Complete structure with one command
-- ✅ **YAML-driven development** - Define domain model, generate 90% of code
-- ✅ **Automatic layer wiring** - Domain, application, infrastructure pre-connected
-- ✅ **Modular monolith first** - Simple development, microservices ready
-- ✅ **Architectural consistency** - Same patterns across all modules
+- ✅ **Specification as contract** - The YAML is the artifact that the agent, the team and the generator share — reviewable, versionable, evaluable before generating a single line of code
+- ✅ **Deterministic generation** - The same YAML always produces the same code, with no session-to-session variations
+- ✅ **Functional prototype from day 1** - The team works on business logic while the specification continues to be refined
+- ✅ **No infrastructure from the start** - `--mock` replaces Kafka and the DB with in-memory equivalents
+- ✅ **Safe iteration** - Checksums prevent overwriting manual modifications on regeneration
+- ✅ **Consistent architecture** - Same patterns across all modules, no architectural drift
 
 ---
 
@@ -195,7 +295,211 @@ Eva4j follows a **pragmatic approach** to microservices architecture:
 
 ---
 
-## 📥 Installation
+## 📐 Specification Files: `system/`
+
+eva4j projects store their specifications in the `system/` directory. These are the files an AI agent produces when designing a system: declarative structure, no side effects, verifiable before any code generation runs.
+
+```
+system/
+├── system.yaml          # Global architecture: modules, database, messaging, integrations
+├── product.yaml         # Domain model for the product module
+├── notification.yaml    # Domain model for the notification module
+└── order.yaml           # Domain model for the order module
+```
+
+### `system.yaml` — The System Architecture
+
+Defines which modules exist, how they communicate, and what infrastructure they use.
+
+```yaml
+system:
+  name: product-catalog
+  groupId: com.example
+  javaVersion: 21
+  springBootVersion: 3.5.5
+  database: postgresql           # postgresql | mysql | h2
+
+messaging:
+  enabled: true
+  broker: kafka
+  kafka:
+    bootstrapServers: localhost:9092
+    defaultGroupId: product-catalog
+
+modules:
+  - name: product
+    description: "Product catalogue. Lifecycle: DRAFT → PUBLISHED → DISCONTINUED."
+    exposes:
+      - method: POST
+        path: /products
+        useCase: CreateProduct
+      - method: GET
+        path: /products/{id}
+        useCase: GetProduct
+      - method: PUT
+        path: /products/{id}/publish
+        useCase: PublishProduct
+        description: "Transition DRAFT → PUBLISHED. Emits ProductPublishedEvent."
+
+  - name: notification
+    description: "Notifications via EMAIL, SMS or PUSH. Reacts to product domain events."
+    exposes:
+      - method: PUT
+        path: /notifications/{id}/read
+        useCase: MarkNotificationRead
+
+integrations:
+  async:
+    # Which module produces each event and which module consumes it
+    - event: ProductPublishedEvent
+      producer: product
+      topic: PRODUCT_PUBLISHED
+      consumers:
+        - module: notification
+          useCase: SendProductPublishedNotification
+```
+
+`eva build` reads this file and generates: modules with complete hexagonal architecture, Kafka dependencies, `KafkaConfig.java`, REST endpoints with their use cases, Integration Events, KafkaListeners and consumer CommandHandlers.
+
+---
+
+### `{module}.yaml` — The Domain Model
+
+Each module has its own YAML that defines the complete domain model: entities, value objects, enums with lifecycle transitions, relationships, events and ports.
+
+```yaml
+# system/product.yaml
+aggregates:
+  - name: Product
+    entities:
+      - name: Product
+        isRoot: true
+        tableName: products
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Product name is required"
+          - name: price
+            type: Price          # Value Object defined below
+          - name: status
+            type: ProductStatus  # Enum with lifecycle transitions
+            readOnly: true       # Excluded from CreateDto and business constructor
+
+    valueObjects:
+      - name: Price
+        fields:
+          - name: amount
+            type: BigDecimal
+          - name: currency
+            type: String
+        methods:
+          - name: isPositive
+            returnType: boolean
+            parameters: []
+            body: "return this.amount.compareTo(BigDecimal.ZERO) > 0;"
+
+    enums:
+      - name: ProductStatus
+        initialValue: DRAFT
+        transitions:
+          - from: DRAFT
+            to: PUBLISHED
+            method: publish
+          - from: [DRAFT, PUBLISHED]
+            to: DISCONTINUED
+            method: discontinue
+        values: [DRAFT, PUBLISHED, DISCONTINUED]
+
+    events:
+      - name: ProductPublishedEvent
+        triggers: [publish]         # raise() automatically injected inside publish()
+        fields:
+          - name: productId
+            type: String
+          - name: publishedAt
+            type: LocalDateTime
+
+# Consuming external events
+listeners:
+  - event: OrderPlacedEvent
+    producer: orders
+    topic: ORDER_PLACED
+    useCase: UpdateProductStock
+    fields:
+      - name: orderId
+        type: String
+      - name: quantity
+        type: Integer
+
+# Synchronous HTTP clients
+ports:
+  - name: findCategoryById
+    service: CategoryService
+    target: categories
+    baseUrl: http://localhost:8040
+    http: GET /categories/{id}
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+```
+
+`eva g entities product` generates from this single YAML: domain entity (no setters, no empty constructor), JPA entity, repository, lifecycle methods (`publish()`, `discontinue()`, `canPublish()`, `isPublished()`), Integration Event, `MessageBroker` port, `KafkaMessageBroker` adapter, consumer `KafkaListener`, `FeignClient` with ACL, `CreateProductCommand`, `ProductResponseDto`, Application↔Domain↔JPA mappers and `ProductController`.
+
+---
+
+### The AI → YAML → Code cycle
+
+```bash
+# 1. The AI agent generates the YAMLs from business requirements
+#    → system/system.yaml, system/product.yaml, system/notification.yaml
+
+# 2. One command turns the entire specification into code
+eva build
+#    ✅ Modules created with full hexagonal architecture
+#    ✅ Kafka configured and wired
+#    ✅ Entities, handlers, DTOs, mappers generated
+#    ✅ The project compiles and starts immediately
+
+./gradlew bootRun   # Endpoints already respond
+
+# 3. The developer implements only the domain-specific business logic
+#    Handlers have UnsupportedOperationException as a visible placeholder
+#    Entities have the correct structure ready to be completed
+
+# 4. When the domain evolves, update the YAMLs and regenerate
+eva build           # Checksums protect manual modifications
+```
+
+### `eva build --mock` — Iterate without external infrastructure
+
+Develop without needing to start Kafka or a real database:
+
+```bash
+eva build --mock               # DB → H2 in-memory  +  Kafka → Spring Event bus
+eva build --mock --only-broker # Broker only, keeps the configured database
+eva build                      # Restores the original configuration
+```
+
+| Flag | Database | Broker |
+|---|---|---|
+| `eva build --mock` | H2 in-memory | Spring Event bus |
+| `eva build --mock --only-broker` | Unchanged (PostgreSQL/MySQL) | Spring Event bus |
+| `eva build` (restore) | Original | Kafka |
+
+The original configuration is saved to `.eva4j.json` and restored automatically.
+
+---
+
+## �📥 Installation
 
 ```bash
 npm install -g eva4j
