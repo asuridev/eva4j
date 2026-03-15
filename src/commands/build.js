@@ -415,7 +415,7 @@ async function buildCommand(options = {}) {
             continue;
           }
           console.log(chalk.cyan(`\n  Regenerating broker layer for: ${mod.name}`));
-          await generateEntitiesCommand(mod.name, { force: true, brokerMode: 'mock' });
+          await generateEntitiesCommand(mod.name, { force: false, brokerMode: 'mock' });
         }
       }
     } else if (hasKafkaBackup) {
