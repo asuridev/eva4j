@@ -17,7 +17,7 @@ const generateEntitiesCommand = require('./generate-entities');
 // ── H2 mock config ─────────────────────────────────────────────────────────────
 const H2_DB_YAML = (packageName) => `spring:
   datasource:
-    url: jdbc:h2:mem:mockdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    url: jdbc:h2:file:./data/mockdb;AUTO_SERVER=TRUE
     username: sa
     password: ''
     driver-class-name: org.h2.Driver
@@ -26,7 +26,7 @@ const H2_DB_YAML = (packageName) => `spring:
       enabled: true
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
