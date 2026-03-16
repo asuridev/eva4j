@@ -432,6 +432,84 @@ entities:
 
 ---
 
+## 7b. Soft Delete
+
+When `hasSoftDelete: true` is set on the aggregate root, eva4j generates logical deletion instead of physical: the record is not removed from the database but stamped with a `deletedAt` timestamp.
+
+> **Scope rule:** `hasSoftDelete` is **only valid on the aggregate root** (`isRoot: true`). Setting it on a secondary entity emits a warning and is silently ignored — secondary entities are deleted physically via CASCADE from the root.
+
+### Syntax
+
+```yaml
+entities:
+  - name: order
+    isRoot: true          # ← mandatory: only root entities support this
+    tableName: orders
+    hasSoftDelete: true   # ✅ enables soft delete
+    audit:
+      enabled: true
+    fields:
+      - name: id
+        type: String
+      - name: orderNumber
+        type: String
+
+  - name: orderItem       # ← secondary entity
+    tableName: order_items
+    # hasSoftDelete: true ← ❌ ignored with warning
+```
+
+### What is generated
+
+| Artefact | `deletedAt` included | Notes |
+|---|---|---|
+| Full constructor (reconstruction) | ✅ | Required to hydrate persisted state |
+| Business constructor (new object) | ❌ | Starts as `null` |
+| `CreateDto` / `CreateCommand` | ❌ | Cannot create an already-deleted object |
+| `ResponseDto` | ❌ | Internal metadata, not exposed in API |
+| `toJpa()` in mapper | ✅ | Persists the timestamp after `softDelete()` |
+
+**Domain entity:**
+```java
+public class Order {
+    private LocalDateTime deletedAt;  // injected automatically
+
+    public void softDelete() {
+        if (this.deletedAt != null) {
+            throw new IllegalStateException("Order is already deleted");
+        }
+        this.deletedAt = java.time.LocalDateTime.now();
+    }
+
+    public boolean isDeleted() {
+        return this.deletedAt != null;
+    }
+}
+```
+
+**JPA entity:**
+```java
+@SQLRestriction("deleted_at IS NULL")   // filters ALL queries automatically
+@Entity
+@Table(name = "orders")
+public class OrderJpa extends AuditableEntity {
+    private LocalDateTime deletedAt;
+}
+```
+
+**DeleteCommandHandler** (generated when `hasSoftDelete: true`):
+```java
+// Finds → marks → saves — never deleteById
+Order order = repository.findById(id)
+    .orElseThrow(() -> new OrderNotFoundException(id));
+order.softDelete();
+repository.save(order);
+```
+
+> `deletedAt` **must not be defined manually** in `fields:` — the generator injects it automatically.
+
+---
+
 ## 8. Relationships
 
 ### Properties

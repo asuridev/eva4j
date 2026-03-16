@@ -412,20 +412,20 @@ aggregates:
 
 ---
 
-### 4. Soft Delete (0% implementado)
+### 4. Soft Delete ✅ Implementado
 
 **Impacto**: Medio - Común en apps business
 
-#### Casos de Uso No Cubiertos
+#### Sintaxis
 ```yaml
-# ❌ No soportado actualmente
-rootEntity:
-  name: order
-  softDelete: true  # Debería agregar deletedAt y lógica
+# ✅ Soportado — solo en la entidad raíz (isRoot: true)
+entities:
+  - name: order
+    isRoot: true
+    hasSoftDelete: true  # Genera deletedAt, softDelete(), @SQLRestriction
 ```
 
-**Esfuerzo para implementar**: Medio (4-5 horas)  
-**Prioridad**: 🟡 Media
+**Estado**: Implementado en `yaml-to-entity.js` + templates `AggregateRoot`, `JpaAggregateRoot`, repositorios y `DeleteCommandHandler`.
 
 ---
 
@@ -558,7 +558,7 @@ aggregates:
 
 1. ❌ **Validaciones JSR-303** (0%)
 2. ❌ **Auditoría (createdAt, updatedAt)** (0%)
-3. ❌ **Soft delete** (0%)
+3. ✅ **Soft delete** (implementado con `hasSoftDelete: true`)
 4. ❌ **Índices y constraints** (0%)
 5. ❌ **Herencia de entidades** (0%)
 6. ❌ **DTOs de aplicación** (0%)
@@ -598,7 +598,7 @@ aggregates:
 
 | # | Mejora | Impacto | Esfuerzo | Prioridad |
 |---|--------|---------|----------|-----------|
-| 5 | Soft delete | 🟡 Medio | 5h | 🟡 Media |
+| 5 | ~~Soft delete~~ | ✅ Implementado | — | — |
 | 6 | ManyToMany completo | 🟡 Medio | 6h | 🟡 Media |
 | 7 | OneToOne avanzado | 🟡 Bajo | 4h | 🔵 Baja |
 
@@ -640,9 +640,7 @@ aggregates:
 
 ### Mediano Plazo
 
-4. **Soft Delete**
-   - Útil para muchas apps
-   - Buena relación esfuerzo/beneficio
+4. ~~**Soft Delete**~~ ✅ Implementado con `hasSoftDelete: true`
 
 5. **ManyToMany completo**
    - Completa el soporte de relaciones JPA
@@ -794,15 +792,16 @@ entities:
 
 ---
 
-### 4. Soft Delete
+### 4. Soft Delete ✅ Implementado
 
 ```yaml
 entities:
   - name: Order
-    softDelete: true  # Agrega deletedAt y lógica
+    isRoot: true
+    hasSoftDelete: true  # Genera deletedAt, softDelete(), isDeleted(), @SQLRestriction
 ```
 
-**Implementación**: Campo `deletedAt` + custom queries en repositorio.
+**Implementado**: `deletedAt` inyectado automáticamente, `@SQLRestriction("deleted_at IS NULL")` en JPA, `softDelete()` + `isDeleted()` en dominio, `DeleteCommandHandler` usa borrado lógico.
 
 ---
 

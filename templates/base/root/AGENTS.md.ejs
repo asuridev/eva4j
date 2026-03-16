@@ -1972,6 +1972,8 @@ public class Product {
 
 ### Reglas para Agentes con Soft Delete
 
+- **SOLO** aplicar `hasSoftDelete: true` en la **entidad raíz** del agregado (`isRoot: true`)
+- **NUNCA** poner `hasSoftDelete: true` en entidades secundarias — el ciclo de vida lo controla la raíz mediante `cascade`; el generador emite un warning y descarta el flag
 - **NUNCA** usar `repository.deleteById()` — usar `entity.softDelete()` + `repository.save(entity)`
 - **NUNCA** exponer `deletedAt` en ResponseDtos (campo interno)
 - **SIEMPRE** usar `@SQLRestriction("deleted_at IS NULL")` para filtrado automático en JPA
