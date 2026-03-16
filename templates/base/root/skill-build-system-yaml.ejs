@@ -300,6 +300,7 @@ Antes de proponer el `system.yaml`, verifica:
 - [ ] Todo el contenido del archivo está en **inglés** (descriptions, comments, useCase names)
 - [ ] El archivo se guarda en `system/system.yaml` (directorio `system/` en la raíz del proyecto)
 - [ ] Tras crear `system.yaml`, proceder con el Paso 6 para generar `system/system.md`
+- [ ] Archivo `system/system.mmd` (diagrama de componentes) generado tras `system.md`
 - [ ] Archivo `system/{module}.yaml` (domain definition) generado para cada módulo
 - [ ] Archivo `system/{module}.md` (module spec) generado para cada módulo declarado en `modules:`
 
@@ -314,8 +315,9 @@ Antes de proponer el `system.yaml`, verifica:
 5. Menciona advertencias si detectas módulos muy acoplados, responsabilidades difusas o ciclos potenciales.
 6. Indica el comando siguiente: `eva generate system`.
 7. Procede inmediatamente al **Paso 6** para generar `system/system.md`.
-8. Procede inmediatamente al **Paso 7** para generar `system/{module}.yaml` por cada módulo.
-9. Procede inmediatamente al **Paso 8** para generar `system/{module}.md` por cada módulo.
+8. Procede inmediatamente al **Paso 6.5** para generar `system/system.mmd`.
+9. Procede inmediatamente al **Paso 7** para generar `system/{module}.yaml` por cada módulo.
+10. Procede inmediatamente al **Paso 8** para generar `system/{module}.md` por cada módulo.
 
 ---
 
@@ -457,9 +459,113 @@ el pago con el monto correcto y asociarlo al cliente.
 
 ---
 
+## Paso 6.5 — Crear diagrama de componentes (`system/system.mmd`)
+
+Inmediatamente después de guardar `system/system.md`, crea el archivo `system/system.mmd` en el **mismo directorio** `system/`.
+
+Este archivo es el **diagrama de componentes Mermaid** del sistema. Es una representación visual directa de la arquitectura descrita en `system.md`: muestra cada módulo como un componente, los actores externos que los consumen, los flujos asíncronos vía broker y las llamadas síncronas HTTP entre módulos.
+
+### Estructura del diagrama
+
+Usa el tipo `C4Component` si el sistema tiene más de 4 módulos o llamadas externas relevantes; usa `graph LR` para sistemas más simples. La convención preferida es `graph LR` con subgraphs y estilos explícitos:
+
+```mermaid
+graph LR
+    %% External actors
+    Client(["👤 Client"])
+
+    %% Modules — one subgraph per module
+    subgraph orders["orders"]
+        ORD_API["REST API"]
+        ORD_UC["Use Cases"]
+    end
+
+    subgraph payments["payments"]
+        PAY_API["REST API"]
+        PAY_UC["Use Cases"]
+    end
+
+    subgraph notifications["notifications"]
+        NOT_UC["Use Cases"]
+    end
+
+    %% Message broker (solo si hay mensajería async)
+    BROKER[["📨 Kafka"]]
+
+    %% External services (solo si hay ports)
+    EXT_GW[/"💳 PaymentGateway"/]
+
+    %% HTTP connections — sync
+    Client -->|"REST"| ORD_API
+    Client -->|"REST"| PAY_API
+    ORD_UC -->|"CustomerService\nGET /customers/{id}"| CUST_API
+
+    %% Async event flows — producer → broker → consumer(s)
+    ORD_UC -->|"OrderPlacedEvent"| BROKER
+    BROKER -->|"OrderPlacedEvent"| PAY_UC
+    BROKER -->|"OrderPlacedEvent"| NOT_UC
+    PAY_UC -->|"PaymentApprovedEvent"| BROKER
+    BROKER -->|"PaymentApprovedEvent"| ORD_UC
+
+    %% External port calls
+    PAY_UC -->|"processPayment"| EXT_GW
+
+    %% Styles
+    classDef module fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    classDef broker fill:#fef9c3,stroke:#ca8a04,color:#713f12
+    classDef actor fill:#f0fdf4,stroke:#16a34a,color:#14532d
+    classDef external fill:#fce7f3,stroke:#db2777,color:#831843
+    class orders,payments,notifications module
+    class BROKER broker
+    class Client actor
+    class EXT_GW external
+```
+
+### Reglas del diagrama de componentes
+
+- **Un subgraph por módulo** — el nombre del subgraph coincide exactamente con el nombre del módulo en `system.yaml`
+- **Actores externos** (`Client`, `Admin`, etc.) como nodos `(["..."])` fuera de los subgraphs — solo los que interactúan directamente con la API
+- **Broker** como nodo `[["..."`]] central — solo si `messaging.enabled: true`; omitir si no hay async
+- **Servicios externos** vía `ports:` como nodos `[/"..."/]` — uno por `service:` único en `integrations.sync`
+- **Flechas sync HTTP** (`-->|"PortName\nMETHOD /path"|`) entre módulo caller y módulo/servicio callee
+- **Flechas async** (`-->|"EventName"|`) siempre pasan por el broker: `producer → BROKER → consumer`; nunca directo
+- **Estilos obligatorios**: usar `classDef` para diferenciar visualmente módulos, broker, actores y servicios externos
+- **Todo en inglés**: labels de flechas, nombres de nodos, comments
+- **El archivo no contiene nada más que el bloque Mermaid** — sin frontmatter, sin texto markdown, solo el diagrama
+
+### Correspondencia con system.md
+
+El diagrama es una proyección visual 1:1 de lo descrito en `system.md`:
+
+| Elemento en system.md | Elemento en system.mmd |
+|---|---|
+| Módulo con endpoints REST | Subgraph con nodo `REST API` interno |
+| Módulo sin endpoints | Subgraph sin nodo REST |
+| `integrations.async[].producer` → broker | Flecha `producer → BROKER` |
+| `integrations.async[].consumers[]` | Flechas `BROKER → consumer` (una por consumidor) |
+| `integrations.sync[].caller` → `calls` | Flecha directa `caller → target` con label del port |
+| `integrations.sync[].calls` (externo) | Nodo `[/"ExtSvc"/]` fuera de subgraphs |
+| Actor que llama endpoints | Nodo `Client` con flecha REST al módulo |
+
+### Checklist del system.mmd
+
+Antes de guardar, verifica:
+
+- [ ] Un subgraph por cada módulo en `modules:`
+- [ ] Flechas async pasan siempre por el nodo BROKER
+- [ ] Flechas sync son directas entre módulos (no pasan por broker)
+- [ ] Servicios externos tienen nodo propio fuera de subgraphs
+- [ ] `classDef` aplicado a todos los nodos relevantes
+- [ ] Todo el contenido en inglés
+- [ ] El archivo contiene **solo** el bloque Mermaid (sin markdown alrededor)
+
+---
+
+---
+
 ## Paso 7 — Crear archivos de dominio por módulo (`system/{module}.yaml`)
 
-Inmediatamente después de crear `system/system.md`, genera **un archivo `domain.yaml` por cada módulo** declarado en `modules:`. La ruta es `system/{nombre-del-modulo}.yaml` (mismo directorio `system/`).
+Inmediatamente después de crear `system/system.mmd`, genera **un archivo `domain.yaml` por cada módulo** declarado en `modules:`. La ruta es `system/{nombre-del-modulo}.yaml` (mismo directorio `system/`).
 
 Este archivo es el **modelo de dominio del módulo**: define las entidades, value objects, enums, relaciones, eventos y configuraciones de infraestructura. Es el input directo para el comando `eva g entities <module>`.
 
@@ -1333,5 +1439,5 @@ flowchart TD
 Después de entregar el `system.yaml` v1, el usuario puede pedir ajustes:
 - Aplica el **cambio mínimo** necesario (no rehaces todo el archivo)
 - Vuelve a validar el checklist del Paso 4
-- Actualiza `system/system.md`, `system/{module}.yaml` **y** `system/{module}.md` del módulo afectado
+- Actualiza `system/system.md`, `system/system.mmd`, `system/{module}.yaml` **y** `system/{module}.md` del módulo afectado
 - Entrega solo el diff explicado, no los archivos completos de nuevo (salvo que se pida)
