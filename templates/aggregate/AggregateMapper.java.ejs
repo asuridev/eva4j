@@ -82,8 +82,9 @@ public class <%= aggregateName %>Mapper {
   <% } else if (!rel.isCollection && rel.type === 'OneToOne') { %>
         // Map OneToOne relationship <%= rel.fieldName %>
         if (domain.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>() != null) {
-            <%= rel.target %>Jpa <%= rel.fieldName %>Jpa = toJpa<%= rel.target %>(domain.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(), jpa);
-            jpa.set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%= rel.fieldName %>Jpa);
+            <%= rel.target %>Jpa <%= rel.fieldName %>Jpa = toJpa<%= rel.target %>(domain.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>());
+<% if (rel.mappedBy) { %>            <%= rel.fieldName %>Jpa.set<%= rel.mappedBy.charAt(0).toUpperCase() + rel.mappedBy.slice(1) %>(jpa);
+<% } %>            jpa.set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(<%= rel.fieldName %>Jpa);
         }
   <% } else if (!rel.isCollection) { %>
         jpa.set<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>(toJpa<%= rel.target %>(domain.get<%= rel.fieldName.charAt(0).toUpperCase() + rel.fieldName.slice(1) %>()));

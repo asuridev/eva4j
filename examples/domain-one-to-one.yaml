@@ -7,6 +7,7 @@ aggregates:
     entities:
       - name: User
         isRoot: true
+        hasSoftDelete: true
         tableName: users
         audit:
           enabled: true      # Agrega createdAt, updatedAt

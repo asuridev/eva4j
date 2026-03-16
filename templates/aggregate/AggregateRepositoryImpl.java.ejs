@@ -50,11 +50,6 @@ public class <%= rootEntity.name %>RepositoryImpl implements <%= rootEntity.name
     }
     
     @Override
-    public void deleteById(<%= rootEntity.fields[0].javaType %> id) {
-        jpaRepository.deleteById(id);
-    }
-    
-    @Override
     public boolean existsById(<%= rootEntity.fields[0].javaType %> id) {
         return jpaRepository.existsById(id);
     }

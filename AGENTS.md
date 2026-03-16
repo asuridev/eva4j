@@ -872,6 +872,8 @@ public class Product {
 
 ### Reglas para Agentes
 
+- **SOLO** aplicar `hasSoftDelete: true` en la **entidad raíz** del agregado (`isRoot: true`)
+- **NUNCA** poner `hasSoftDelete: true` en entidades secundarias — el ciclo de vida de estas lo controla la raíz mediante `cascade`; si se ignora, el generador emite un warning y descarta el flag
 - **NUNCA** usar `repository.deleteById()` cuando hay soft delete
 - **SIEMPRE** usar `entity.softDelete()` + `repository.save(entity)`
 - **NUNCA** exponer `deletedAt` en ResponseDtos

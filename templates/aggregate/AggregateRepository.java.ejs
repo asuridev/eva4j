@@ -17,8 +17,6 @@ public interface <%= rootEntity.name %>Repository {
     
     Page<<%= rootEntity.name %>> findAll(Pageable pageable);
     
-    void deleteById(<%= rootEntity.fields[0].javaType %> id);
-    
     boolean existsById(<%= rootEntity.fields[0].javaType %> id);
 <% if (!hasSoftDelete) { %>
     void deleteById(<%= rootEntity.fields[0].javaType %> id);

@@ -1288,6 +1288,100 @@ CREATE TABLE reviews (
 
 ---
 
+## Soft Delete
+
+Cuando una entidad tiene `hasSoftDelete: true`, eva4j genera **eliminación lógica** en lugar de física: el registro no se borra de la base de datos, sino que se marca con un timestamp `deletedAt`.
+
+### Configuración en domain.yaml
+
+```yaml
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true          # ← OBLIGATORIO: solo aplica en la raíz del agregado
+        tableName: orders
+        hasSoftDelete: true   # ✅ Activa soft delete
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+
+      - name: orderItem       # ← Entidad secundaria
+        tableName: order_items
+        # hasSoftDelete: true ← ❌ INCORRECTO — se ignora con warning
+        #                         Las secundarias se eliminan físicamente
+        #                         vía CASCADE desde la raíz
+```
+
+> **Regla de alcance:** `hasSoftDelete` **solo es válido en la entidad raíz** (`isRoot: true`). Ponerlo en una entidad secundaria emite un warning y es ignorado.
+
+### Por qué solo en la raíz
+
+En DDD, una entidad secundaria como `OrderItem` no tiene existencia independiente — su ciclo de vida lo controla el agregado raíz. Nunca se elimina directamente: se elimina removiéndola de la colección del raíz y JPA gestiona el `DELETE` físico vía `cascade`. Aplicar `@SQLRestriction` en una entidad secundaria rompería las relaciones: los items "eliminados" desaparecerían silenciosamente del `@OneToMany`, creando inconsistencias difíciles de detectar.
+
+### Qué genera el flag
+
+**Entidad de dominio:**
+```java
+public class Order {
+    private LocalDateTime deletedAt;     // ← Inyectado automáticamente
+
+    public void softDelete() {
+        if (this.deletedAt != null) {
+            throw new IllegalStateException("Order is already deleted");
+        }
+        this.deletedAt = java.time.LocalDateTime.now();
+    }
+
+    public boolean isDeleted() {
+        return this.deletedAt != null;
+    }
+}
+```
+
+**Entidad JPA:**
+```java
+@SQLRestriction("deleted_at IS NULL")   // ← Filtra automáticamente en TODAS las queries
+@Entity
+@Table(name = "orders")
+public class OrderJpa extends AuditableEntity {
+    private LocalDateTime deletedAt;     // ← Columna deleted_at
+}
+```
+
+**DeleteCommandHandler:**
+```java
+// Soft delete: busca → marca → guarda (nunca deleteById)
+Order order = repository.findById(id)
+    .orElseThrow(() -> new OrderNotFoundException(id));
+order.softDelete();
+repository.save(order);
+```
+
+### Campos excluidos automáticamente
+
+| Artefacto | `deletedAt` incluido | Motivo |
+|---|---|---|
+| Constructor completo (reconstrucción desde BD) | ✅ | Necesario para hidratar el estado |
+| Constructor de creación (nuevo objeto) | ❌ | Inicia siempre como `null` |
+| `CreateDto` / `CreateCommand` | ❌ | No se crea un objeto ya eliminado |
+| `ResponseDto` | ❌ | Metadato interno, no se expone en API |
+| `toJpa()` en el mapper | ✅ | Persiste el timestamp cuando se llama `softDelete()` |
+
+### Notas importantes
+
+- ✅ Compatible con `audit: { enabled: true }` y `audit: { trackUser: true }` — se pueden combinar
+- ✅ `@SQLRestriction` hace invisibles los registros eliminados en **todas** las queries automáticamente, sin necesidad de filtros manuales
+- ✅ `deletedAt` **no debe** definirse manualmente en `fields` — el generador lo inyecta
+- ❌ `hasSoftDelete: true` en una entidad secundaria es ignorado con warning
+- ❌ Cuando `hasSoftDelete: true`, usar `repository.deleteById()` genera un `DeleteCommandHandler` incorrecto — el generador lo previene automáticamente
+
+---
+
 ## Value Objects
 
 Los Value Objects son objetos inmutables que representan conceptos del dominio sin identidad propia.
@@ -3333,7 +3427,7 @@ eva4j generate entities <module-name>
 - Control de visibilidad de campos (`readOnly`, `hidden`, `defaultValue`)
 - Referencias cross-agregado (`reference:`)
 - Domain Events (`events:` con soporte opcional de Kafka)
-- Soft delete a nivel de módulo (configurado en `eva add module`)
+- Soft delete por entidad raíz (`hasSoftDelete: true` en `isRoot: true`) ✅ Implementado
 
 ### 🚧 Próximamente
 
