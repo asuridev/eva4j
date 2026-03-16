@@ -7,9 +7,10 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 ## � Tabla de Contenidos
 
 ### � Alta Prioridad
-- [Domain Events](#1-domain-events)
-- [Aggregate Boundaries por ID](#2-aggregate-boundaries-por-id)
-- [Soft Delete Completo](#3-soft-delete-completo)
+- [Domain Events](#1-domain-events) ✅
+- [Aggregate Boundaries por ID](#2-aggregate-boundaries-por-id) ✅
+- [Soft Delete Completo](#3-soft-delete-completo) ✅
+- [Transactional Outbox Pattern](#15-transactional-outbox-pattern)
 
 ### � Media Prioridad
 - [Paginación en Queries](#4-paginación-en-queries) ✅
@@ -20,21 +21,25 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 
 ### � Tooling y Calidad
 - [Validación de domain.yaml con JSON Schema](#9-validación-de-domainyaml-con-json-schema)
-- [Generación Incremental / Diff](#10-generación-incremental--diff)
+- [Generación Incremental / Diff](#10-generación-incremental--diff) ✅
 - [Comando eva4j doctor](#11-comando-eva4j-doctor)
 - [Tests Generados Completos](#12-tests-generados-completos)
 - [Diagrama Mermaid desde domain.yaml](#13-diagrama-mermaid-desde-domainyaml-eva-g-diagram)
 
 ### 🚀 Prototyping
-- [Mock Mode — `eva build --mock`](#17-mock-mode--eva-build---mock)
+- [Mock Mode — `eva build --mock`](#17-mock-mode--eva-build---mock) ✅
 
 ### ✅ Implementado
-- [Auditoría de Tiempo y Usuario](#15-auditoría-implementada)
-- [Validaciones JSR-303](#14-validaciones-jsr-303-implementado)
+- [Domain Events](#1-domain-events)
+- [Aggregate Boundaries por ID](#2-aggregate-boundaries-por-id)
+- [Soft Delete Completo](#3-soft-delete-completo)
+- [Paginación en Queries](#4-paginación-en-queries)
 - [Enums con Comportamiento y Transiciones](#7-enums-con-comportamiento-y-transiciones)
 - [Generación Incremental / Diff](#10-generación-incremental--diff)
-- [Paginación en Queries](#4-paginación-en-queries)
-- [Aggregate Boundaries por ID](#2-aggregate-boundaries-por-id-implementado)
+- [Auditoría de Tiempo y Usuario](#15-auditoría-implementada)
+- [Validaciones JSR-303](#14-validaciones-jsr-303-implementado)
+- [`defaultValue` para campos `readOnly`](#16-defaultvalue-para-campos-readonly-implementado)
+- [Mock Mode (`eva build --mock`)](#17-mock-mode--eva-build---mock)
 
 ---
 
@@ -42,7 +47,7 @@ Este documento describe las mejoras planificadas para futuras versiones de eva4j
 
 ---
 
-## 1. Domain Events
+## 1. Domain Events ✅
 
 ### Descripción
 
@@ -989,7 +994,7 @@ Otra opción es agregar un 5.º tab **"Dominio"** al reporte de `evaluate system
 
 ### Estado
 
-⏳ Pendiente de implementación
+✅ Implementado
 
 ---
 
@@ -1226,7 +1231,7 @@ Domain Events (ítem 1) implementados y funcionando — este ítem solo añade p
 
 ---
 
-## 17. Mock Mode — `eva build --mock`
+## 17. Mock Mode — `eva build --mock` ✅
 
 ### El Problema
 
@@ -1613,7 +1618,7 @@ Sin DataFaker, el seeder genera datos con patrones simples (`"User 0"`, `"user0@
 | 14 | Validaciones JSR-303 | Impl. | -- | ✅ Implementado |
 | 15 | Transactional Outbox Pattern | Alta | Alta | Pendiente |
 | 16 | `defaultValue` para campos `readOnly` | Impl. | -- | ✅ Implementado |
-| 17 | Mock Mode (`eva build --mock`) | Alta | Media | Pendiente |
+| 17 | Mock Mode (`eva build --mock`) | Alta | Media | ✅ Implementado |
 
 ---
 
