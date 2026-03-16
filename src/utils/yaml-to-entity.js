@@ -292,7 +292,7 @@ function buildAnnotationString(validation) {
   if (value !== undefined)     params.push(`value = ${value}`);
   if (min !== undefined)       params.push(`min = ${min}`);
   if (max !== undefined)       params.push(`max = ${max}`);
-  if (regexp !== undefined)    params.push(`regexp = "${regexp}"`);
+  if (regexp !== undefined)    params.push(`regexp = "${regexp.replace(/\\/g, '\\\\')}"`);
   if (integer !== undefined)   params.push(`integer = ${integer}`);
   if (fraction !== undefined)  params.push(`fraction = ${fraction}`);
   if (inclusive !== undefined) params.push(`inclusive = ${inclusive}`);

@@ -13,6 +13,7 @@ const { renderAndWrite } = require('../utils/template-engine');
 const addModuleCommand = require('./add-module');
 const addKafkaClientCommand = require('./add-kafka-client');
 const generateEntitiesCommand = require('./generate-entities');
+const { generateUnifiedPostmanCollection } = require('../generators/postman-generator');
 
 // ── H2 mock config ─────────────────────────────────────────────────────────────
 const H2_DB_YAML = (packageName) => `spring:
@@ -678,7 +679,32 @@ async function buildCommand(options = {}) {
       }
 
       console.log(chalk.cyan(`\n  Generating entities for: ${mod.name}`));
-      await generateEntitiesCommand(mod.name, generateOptions);
+      await generateEntitiesCommand(mod.name, { ...generateOptions, skipPostman: true });
+    }
+
+    console.log();
+
+    // ── STEP 5: Generate unified Postman collection ─────────────────────────
+    console.log(chalk.blue('━━━ Step 5: Generating unified Postman collection ━━━━━━━━━━━━'));
+
+    try {
+      const collectionPath = await generateUnifiedPostmanCollection({
+        projectDir,
+        systemDir,
+        packageName,
+        systemConfig,
+        projectConfig,
+      });
+
+      if (collectionPath) {
+        const relPath = path.relative(projectDir, collectionPath);
+        console.log(chalk.green(`  ✅ ${relPath}`));
+        console.log(chalk.cyan('\n  💡 Import this collection into Postman to test all your API endpoints!'));
+      } else {
+        console.log(chalk.gray('  ⏭  No modules with domain definitions found — skipping'));
+      }
+    } catch (err) {
+      console.log(chalk.yellow(`  ⚠️  Could not generate Postman collection: ${err.message}`));
     }
 
   console.log();

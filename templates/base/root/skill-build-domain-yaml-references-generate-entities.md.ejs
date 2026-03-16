@@ -1209,14 +1209,14 @@ When `domain.yaml` includes an `endpoints:` section, the generator examines each
 | `Update{Aggregate}` | **standard** | Exact string match | Full `UpdateCommand` + `UpdateCommandHandler` |
 | `Delete{Aggregate}` | **standard** | Exact string match | Full `DeleteCommand` + `DeleteCommandHandler` |
 | `Get{Aggregate}` | **standard** | Exact string match | Full `GetQuery` + `GetQueryHandler` (find + `mapper.toDto`) |
-| `FindAll{Aggregate}s` | **standard** | Exact string match (trailing literal `s`) | Full `ListQuery` + `ListQueryHandler` (paginated) |
+| `FindAll{PluralAggregate}` | **standard** | Proper English plural of aggregate name (via `pluralize` library) | Full `ListQuery` + `ListQueryHandler` (paginated) |
 | `{MethodPascal}{Aggregate}` | **transition** | `MethodPascal` is `toPascalCase(transitions[n].method)` for any enum in the aggregate | Full `TransitionCommand(id)` + handler that calls `entity.{method}() → save()` |
 | `Add{EntityName}` | **subEntityAdd** | `EntityName` is the `target` of a `OneToMany` relationship on the root | Full `AddCommand(id, entityFields…)` + handler that calls `entity.add{Entity}(new {Entity}(…)) → save()` |
 | `Remove{EntityName}` | **subEntityRemove** | Same `target` from a `OneToMany` relationship | Full `RemoveCommand(id, itemId)` + handler that calls `entity.remove{Entity}ById(itemId) → save()` |
-| `FindAll{Aggregate}sBy{FieldPascal}` | **findBy** | `FieldPascal` is `toPascalCase(fieldName)` for any field in the root entity | Full `FindByQuery` + `FindByQueryHandler` + `findBy{FieldPascal}` added to `{Aggregate}Repository`, `{Aggregate}RepositoryImpl`, and `{Aggregate}JpaRepository` |
+| `FindAll{PluralAggregate}By{FieldPascal}` | **findBy** | `FieldPascal` is `toPascalCase(fieldName)` for any field in the root entity | Full `FindByQuery` + `FindByQueryHandler` + `findBy{FieldPascal}` added to `{Aggregate}Repository`, `{Aggregate}RepositoryImpl`, and `{Aggregate}JpaRepository` |
 | _anything else_ | **scaffold** | No pattern matched | `*Command(id)` or `*Query(id)` + handler that throws `UnsupportedOperationException` with a TODO comment |
 
-> **Note on `FindAll{Aggregate}s`:** The trailing `s` is a literal character. For `Aggregate = Order` the standard name is `FindAllOrders` (not `FindAllOrder`). Irregular plurals are not supported — use the exact pattern or it will be classified as scaffold.
+> **Note on `FindAll{PluralAggregate}`:** The aggregate name is pluralized using the `pluralize` library, which handles English irregular plurals correctly. For example: `Order` → `FindAllOrders`, `Delivery` → `FindAllDeliveries`, `Category` → `FindAllCategories`. Using the wrong plural (e.g. `FindAllDeliverys`) will cause it to be classified as scaffold.
 
 ### 16.2 Transition pattern in detail
 
@@ -1334,7 +1334,7 @@ public void handle(RemoveOrderItemCommand command) {
 
 ### 16.4 FindBy pattern in detail
 
-Strict pattern: `FindAll{Aggregate}sBy{FieldPascal}` — both parts are required.
+Strict pattern: `FindAll{PluralAggregate}By{FieldPascal}` — both parts are required.
 
 When detected, the generator:
 1. Creates a paginated `FindBy{Field}Query` + `FindBy{Field}QueryHandler`.
@@ -1350,7 +1350,7 @@ fields:
 operations:
   - method: GET
     path: /customer/{customerId}
-    useCase: FindAllOrdersByCustomerId   # ← FindAll + Order + s + By + CustomerId
+    useCase: FindAllOrdersByCustomerId   # ← FindAll + Orders + By + CustomerId
     type: query
 ```
 
@@ -1452,7 +1452,7 @@ listeners:
 ### Example — generated Kafka listener
 
 ```java
-@Component
+@Component("<moduleName>.PaymentApprovedKafkaListener")  // qualified to avoid cross-module collisions
 public class PaymentApprovedKafkaListener {
 
     private final UseCaseMediator useCaseMediator;
@@ -1493,6 +1493,10 @@ public class ConfirmReservationCommandHandler
     }
 }
 ```
+
+### Cross-module listener collision safety
+
+When multiple modules consume the **same** Kafka event, the generator produces listener classes with identical names (e.g. `PaymentApprovedKafkaListener` in both `orders` and `notifications`). This is safe because the generator qualifies each bean with `@Component("<moduleName>.<listenerClassName>")`, preventing `ConflictingBeanDefinitionException`. **No special naming action is required** — unlike `ports[]` where `service:` must be unique per module.
 
 ### Contrast: produced vs. consumed events
 
@@ -1594,7 +1598,7 @@ ports:
 
 | Property | Convention | Notes |
 |----------|------------|-------|
-| `service:` | PascalCase | Groups methods into one FeignClient |
+| `service:` | PascalCase | Groups methods into one FeignClient. **Must be unique across modules** — if multiple modules call the same external service, each must use a context-specific name (e.g. `OrderCustomerService` in `orders`, `DeliveryCustomerService` in `deliveries`) to avoid Spring bean name collisions |
 | `baseUrl:` | URL string | Declare on **first entry** of each `service:` only |
 | `http:` | `VERB /path` | Same format as `exposes:` in `system.yaml` |
 | `returnList:` | boolean | `true` → `List<{DomainType}>` return type (default: `false`) |

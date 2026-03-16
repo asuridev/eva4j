@@ -30,7 +30,7 @@ import java.time.LocalTime;
  * Consumes events produced by: <%= producer %>.
  * Dispatches to use case: <%= useCase %>.
  */
-@Component
+@Component("<%= moduleName %>.<%= listenerClassName %>")
 public class <%= listenerClassName %> {
 
     private final UseCaseMediator useCaseMediator;

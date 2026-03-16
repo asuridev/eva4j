@@ -706,6 +706,8 @@ Genera por cada entrada (hasta **6 artefactos**):
 **`nestedTypes:` — cuándo usarlo:**  
 Declara un `nestedType` cuando un campo del payload es un **objeto anidado** (no un escalar). El generador produce un record en el mismo paquete `application/events/`, que tanto la `IntegrationEvent` como el `Command` y el `KafkaListener` usan directamente.
 
+**Colisión de nombres entre módulos:** cuando varios módulos consumen el mismo evento Kafka, el generador produce clases listener con el mismo nombre (ej: `PaymentApprovedKafkaListener` en `orders` y en `notifications`). Esto es seguro porque el generador usa `@Component("<moduleName>.<listenerClassName>")` para calificar el bean y evitar `ConflictingBeanDefinitionException`. **No se requiere acción del agente** — a diferencia de `ports[]`, donde el nombre de `service:` debe ser único por módulo.
+
 **Contraste eventos producidos vs. consumidos:**
 ```
 aggregates:
@@ -805,7 +807,7 @@ Por cada método:
 
 ### Reglas de `ports[]`
 
-- **`service:`** — PascalCase, agrupa métodos en un mismo FeignClient
+- **`service:`** — PascalCase, agrupa métodos en un mismo FeignClient. **Si varios módulos llaman al mismo servicio externo, cada módulo debe usar un nombre de `service:` propio que refleje su bounded context** (ej: `OrderCustomerService` en `orders`, `DeliveryCustomerService` en `deliveries`). Reutilizar el mismo nombre (`CustomerService`) en módulos distintos causa colisión de beans Spring (`ConflictingBeanDefinitionException`) porque el generador produce un `FeignAdapter` con el mismo nombre de clase en cada módulo
 - **`baseUrl:`** — declarar solo en la primera entrada de cada `service:`; si se omite en todas → warning + `http://localhost:8080`
 - **`body:`** — solo en POST/PUT/PATCH; en GET/DELETE emite warning y se ignora
 - **`domainType:`** — sobrescribe el tipo de dominio auto-derivado del nombre del método (ej: `domainType: Seat` en `findAvailableSeats`)
@@ -1240,7 +1242,7 @@ private String customerId;
 1. **SIEMPRE** declarar `endpoints:` cuando el API REST tiene comportamientos custom (confirmar, cancelar, activar, etc.)
 2. **NUNCA** usar `endpoints:` si solo necesitas CRUD estándar — el flujo interactivo es más simple
 3. **SIEMPRE** usar PascalCase para los nombres de `useCase` (ej: `ConfirmOrder`, no `confirmOrder`)
-4. **CONOCER** cuáles son los 5 use cases estándar por aggregate: `Create{E}`, `Update{E}`, `Delete{E}`, `Get{E}`, `FindAll{E}s` — estos generan implementación completa
+4. **CONOCER** cuáles son los 5 use cases estándar por aggregate: `Create{E}`, `Update{E}`, `Delete{E}`, `Get{E}`, `FindAll{Plural(E)}` — estos generan implementación completa (e.g. `FindAllOrders`, `FindAllDeliveries`, `FindAllCategories`)
 5. **SABER** que cualquier otro nombre genera un **scaffold** con `UnsupportedOperationException` — el desarrollador debe implementar el handler
 6. **APLICAR** la regla anti-duplicado: si el mismo useCase aparece en v1 y v2, se genera solo una vez
 7. **NOMBRAR** los controladores según la convención: `{Aggregate}{VersionCapitalized}Controller` (ej: `OrderV1Controller`)
@@ -1481,9 +1483,11 @@ Al generar o modificar código, verificar:
 - [ ] Distinguir entre Domain Event (`domain/models/events/X.java`) e Integration Event (`application/events/XIntegrationEvent.java`) — cambios de broker solo afectan al adaptador `MessageBroker`
 - [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
 - [ ] Cada `listener` genera hasta 6 artefactos: NestedType(s) → IntegrationEvent → KafkaListener → kafka.yaml → Command → CommandHandler
+- [ ] Varios módulos pueden consumir el mismo evento Kafka sin colisión — el generador califica el bean automáticamente con `@Component("moduleName.listenerClassName")`
 - [ ] Campos de tipo objeto en listeners → declarar `nestedTypes:` para generar records auxiliares en `application/events/`
 - [ ] Endpoints REST específicos → declarar `endpoints:` con versiones y operaciones; usar nombres estándar para implementación completa
 - [ ] Clientes HTTP síncronos → declarar en `ports[]` (nivel raíz); `baseUrl:` en la primera entrada de cada `service:`
+- [ ] Si varios módulos llaman al mismo servicio → cada uno usa un `service:` con nombre propio del bounded context (ej: `OrderCustomerService`, `DeliveryCustomerService`) — nunca el mismo nombre genérico en módulos distintos
 - [ ] Métodos con respuesta → incluir `fields:` en la entrada del puerto; sin `fields:` = retorno `void`
 - [ ] Respuestas en lista → agregar `returnList: true` en el método correspondiente
 - [ ] Métodos con cuerpo (POST/PUT/PATCH) → incluir `body:`; campos de tipo objeto en `nestedTypes:`

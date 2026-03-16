@@ -4,7 +4,7 @@ import <%= packageName %>.<%= moduleName %>.application.commands.Create<%= aggre
 import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggregateName %>Command;
 import <%= packageName %>.<%= moduleName %>.application.commands.Update<%= aggregateName %>Command;
 import <%= packageName %>.<%= moduleName %>.application.queries.Get<%= aggregateName %>Query;
-import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
+import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateNamePlural %>Query;
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
 import <%= packageName %>.shared.application.dtos.PagedResponse;
 import <%= packageName %>.shared.infrastructure.configurations.useCaseConfig.UseCaseMediator;
@@ -49,15 +49,15 @@ public class <%= aggregateName %>Controller {
 
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
-    @Operation(summary = "Get all <%= aggregateName %>s (paginated)")
+    @Operation(summary = "Get all <%= aggregateNamePlural %> (paginated)")
     public PagedResponse<<%= aggregateName %>ResponseDto> findAll(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "id") String sortBy,
             @RequestParam(defaultValue = "ASC") String sortDirection) {
-        log.info("Finding all <%= aggregateName %>s — page={}, size={}, sortBy={}, sortDirection={}",
+        log.info("Finding all <%= aggregateNamePlural %> — page={}, size={}, sortBy={}, sortDirection={}",
                 page, size, sortBy, sortDirection);
-        return useCaseMediator.dispatch(new FindAll<%= aggregateName %>sQuery(page, size, sortBy, sortDirection));
+        return useCaseMediator.dispatch(new FindAll<%= aggregateNamePlural %>Query(page, size, sortBy, sortDirection));
     }
 
     @DeleteMapping("/{id}")

@@ -255,6 +255,34 @@ function validateSystem(systemConfig) {
     }
   }
 
+  // S3-006: duplicate port name across different caller modules → ConflictingBeanDefinitionException
+  let s3_006_found = false;
+  const portsByName = {};
+  for (const sync of syncIntegrations) {
+    const portName = sync.port;
+    if (!portName) continue;
+    if (!portsByName[portName]) portsByName[portName] = [];
+    portsByName[portName].push(sync.caller);
+  }
+  for (const [portName, callers] of Object.entries(portsByName)) {
+    const uniqueCallers = [...new Set(callers)];
+    if (uniqueCallers.length > 1) {
+      const suggestions = uniqueCallers.map((c) => {
+        const prefix = c.replace(/-([a-z])/g, (_, l) => l.toUpperCase());
+        return `${prefix[0].toUpperCase() + prefix.slice(1)}${portName}`;
+      }).join(', ');
+      errors.push(
+        `[S3-006] Port '${portName}' es usado por módulos distintos (${uniqueCallers.join(', ')}). ` +
+        `Esto causa ConflictingBeanDefinitionException en Spring. ` +
+        `Cada módulo debe usar un nombre propio: ej. ${suggestions}`
+      );
+      s3_006_found = true;
+    }
+  }
+  if (!s3_006_found && syncIntegrations.length > 0) {
+    ok.push('[S3-006] No hay nombres de port duplicados entre módulos distintos ✓');
+  }
+
   // ── S4 — Coherencia de endpoints ─────────────────────────────────────────
 
   for (const mod of modules) {

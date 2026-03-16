@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 <% }); %>
 <% (nestedTypes || []).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
 <% }); %>
-@Component
+@Component("<%= moduleName %>.<%= feignAdapterClassName %>")
 public class <%= feignAdapterClassName %> implements <%= serviceName %> {
 
     private final <%= feignClientClassName %> feignClient;

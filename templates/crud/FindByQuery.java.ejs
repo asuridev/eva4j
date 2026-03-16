@@ -6,7 +6,7 @@ import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %
 
 /**
  * <%= useCaseName %>Query
- * Returns a paginated list of <%= aggregateName %>s filtered by <%= fieldName %>.
+ * Returns a paginated list of <%= aggregateNamePlural %> filtered by <%= fieldName %>.
  */
 public record <%= useCaseName %>Query(
         <%- fieldJavaType %> <%= fieldName %>,

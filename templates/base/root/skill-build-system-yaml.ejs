@@ -144,7 +144,7 @@ integrations:
   sync:
     - caller: orders                  # módulo que hace la llamada
       calls: customers                # módulo destino
-      port: CustomerService           # PascalCase + sufijo Service
+      port: OrderCustomerService      # PascalCase + sufijo Service — prefijado con módulo caller para evitar colisiones
       using:
         - GET /customers/{id}         # debe existir en exposes: de 'customers'
 ```
@@ -160,7 +160,7 @@ integrations:
 | Módulos | plural, kebab-case | `orders`, `order-items`, `product-catalog` |
 | Eventos | PascalCase + tiempo pasado + sufijo `Event` | `OrderPlacedEvent` ✅ `PlaceOrderEvent` ❌ |
 | Topics Kafka | SCREAMING_SNAKE_CASE — **sin `topicPrefix`** | `ORDER_PLACED` ✅  `test-eva.ORDER_PLACED` ❌ |
-| Port names | PascalCase + sufijo `Service` | `CustomerService` |
+| Port names | PascalCase + sufijo `Service` — **único por módulo** | `OrderCustomerService`, `DeliveryCustomerService` |
 | useCases | PascalCase, verbo + sustantivo | `CreateOrder`, `GetCustomer`, `FindAllOrders` |
 | `consumers[].useCase` | PascalCase, verbo + sustantivo | `HandleOrderPlaced`, `NotifyOrderPlaced`, `ConfirmReservation` |
 
@@ -168,10 +168,12 @@ integrations:
 
 - ❌ **Sin dependencias circulares síncronas** — si `A` llama a `B`, `B` no puede llamar a `A`
 - ❌ **Sin campos de dominio** — entidades, campos, enums → van en `domain.yaml`
+- ❌ **Sin nombres de `port` genéricos compartidos entre módulos** — si `orders` y `deliveries` llaman a `customers`, usar `OrderCustomerService` y `DeliveryCustomerService` respectivamente; **nunca** `CustomerService` en ambos (causa `ConflictingBeanDefinitionException` en Spring)
 - ✅ Cada módulo tiene **una sola responsabilidad**
 - ✅ `calls.using:` solo referencia endpoints declarados en `exposes:` del módulo destino
 - ✅ `consumers[].module` debe existir en `modules:`
 - ✅ Módulos pasivos (notificaciones, auditoría, reportes) son **consumidores**, nunca `caller`
+- ℹ️ Varios módulos pueden consumir el mismo evento Kafka sin riesgo de colisión — el generador califica el bean automáticamente con `@Component("moduleName.listenerClassName")`; **no se requiere renombrar el listener**
 
 ### useCases — patrones de nombres
 
@@ -202,7 +204,7 @@ eva4j distingue dos categorías al leer el `useCase`:
 | `Update{Aggregate}` | PUT `/resource/{id}` | Handler completo con repositorio |
 | `Delete{Aggregate}` | DELETE `/resource/{id}` | Handler completo con repositorio |
 | `Get{Aggregate}` | GET `/resource/{id}` | Handler completo con repositorio |
-| `FindAll{Aggregate}s` | GET `/resource` | Handler completo con repositorio |
+| `FindAll{PluralAggregate}` | GET `/resource` | Handler completo con repositorio |
 
 **Casos de uso de negocio** — el generador produce un **scaffold** con `throw new UnsupportedOperationException(...)` que el desarrollador implementa:
 
@@ -605,6 +607,7 @@ Antes de escribir cualquier YAML, verifica que NO estás cometiendo ninguno de e
 9. ❌ **No inventar ports** — deben coincidir con `integrations.sync[]` donde `caller` es este módulo
 10. ❌ **Todo el contenido del archivo debe estar en inglés** — field names, comments, descriptions, values
 11. ❌ **No dejar transiciones sin evidencia de activación** — toda transición que se ejecuta como consecuencia de una respuesta de `ports:` (éxito o falla) o de un proceso interno/scheduler **debe** tener un domain event con `triggers` — es el único mecanismo que permite al validador C2-001 reconocerlas como alcanzables
+13. ❌ **No reutilizar el mismo nombre de `service:` en `ports[]` de módulos distintos** — si dos módulos llaman al mismo servicio externo, cada uno debe usar un nombre propio de su bounded context (ej: `OrderCustomerService` en `orders`, `DeliveryCustomerService` en `deliveries`); el mismo nombre produce `ConflictingBeanDefinitionException` en Spring
 
 ### Inferencia desde system.yaml
 

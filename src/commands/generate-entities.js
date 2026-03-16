@@ -5,7 +5,7 @@ const fs = require('fs-extra');
 const inquirer = require('inquirer');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toPackagePath, toCamelCase, toKebabCase, toPascalCase, getApplicationClassName } = require('../utils/naming');
+const { toPackagePath, toCamelCase, toKebabCase, toPascalCase, getApplicationClassName, pluralizeWord } = require('../utils/naming');
 const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
 const { createOrUpdateUrlsConfig, ensureUrlsImport } = require('./generate-http-exchange');
@@ -1208,22 +1208,24 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           writeOptions
         );
         
-        // Generate Postman Collection for this aggregate
-        const collectionPath = await generatePostmanCollection(
-          aggregate,
-          moduleName,
-          moduleBasePath,
-          projectDir,
-          packageName,
-          apiVersion,
-          projectConfig,
-          allEnums,
-          writeOptions
-        );
-        postmanCollections.push({
-          name: aggregate.name,
-          path: path.relative(projectDir, collectionPath)
-        });
+        // Generate Postman Collection for this aggregate (skip when called from eva build)
+        if (!options.skipPostman) {
+          const collectionPath = await generatePostmanCollection(
+            aggregate,
+            moduleName,
+            moduleBasePath,
+            projectDir,
+            packageName,
+            apiVersion,
+            projectConfig,
+            allEnums,
+            writeOptions
+          );
+          postmanCollections.push({
+            name: aggregate.name,
+            path: path.relative(projectDir, collectionPath)
+          });
+        }
       }
 
       spinner.succeed(chalk.green('CRUD resources generated! ✨'));
@@ -1325,12 +1327,13 @@ function transformRelsForApp(rels, validatedVoNames) {
  */
 function classifyUseCase(op, aggregateName, aggregate) {
   // 1. Standard CRUD
+  const aggregateNamePlural = pluralizeWord(aggregateName);
   const standardMap = {
     [`Create${aggregateName}`]: 'create',
     [`Update${aggregateName}`]: 'update',
     [`Delete${aggregateName}`]: 'delete',
     [`Get${aggregateName}`]: 'getById',
-    [`FindAll${aggregateName}s`]: 'findAll'
+    [`FindAll${aggregateNamePlural}`]: 'findAll'
   };
   if (standardMap[op.useCase]) {
     return { category: 'standard', variant: standardMap[op.useCase] };
@@ -1389,7 +1392,8 @@ function classifyUseCase(op, aggregateName, aggregate) {
   // 4. FindBy field — pattern: FindAll{Aggregate}sBy{FieldPascal}
   for (const field of (rootEntity.fields || [])) {
     const fieldPascal = toPascalCase(field.name);
-    if (op.useCase === `FindAll${aggregateName}sBy${fieldPascal}`) {
+    const aggregateNamePlural = pluralizeWord(aggregateName);
+    if (op.useCase === `FindAll${aggregateNamePlural}By${fieldPascal}`) {
       return {
         category: 'findBy',
         fieldName: field.name,
@@ -1459,6 +1463,7 @@ function enrichEndpointOperation(op, aggregateName, idType) {
  */
 async function generateEndpointsResources(aggregate, endpoints, moduleName, moduleBasePath, packageName, generatedFiles, writeOptions = {}, sharedGeneratedUseCases = null) {
   const { name: aggregateName, rootEntity, secondaryEntities, valueObjects = [] } = aggregate;
+  const aggregateNamePlural = pluralizeWord(aggregateName);
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'crud');
 
   const idField = rootEntity.fields[0];
@@ -1511,7 +1516,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
   const oneToManyRelationshipsApp = transformRelsForApp(oneToManyRelationships, validatedVoNames);
 
   const baseContext = {
-    packageName, moduleName, aggregateName, rootEntity, secondaryEntities,
+    packageName, moduleName, aggregateName, aggregateNamePlural, rootEntity, secondaryEntities,
     responseFields, responseSecondaryEntities, idType,
     commandFields: commandFieldsApp, oneToManyRelationships, oneToOneRelationships,
     hasValueObjects, hasEnums, imports: rootEntity.imports,
@@ -1708,17 +1713,17 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
         } else if (cl.variant === 'findAll') {
           await renderAndWrite(
             path.join(templatesDir, 'ListQuery.java.ejs'),
-            path.join(moduleBasePath, 'application', 'queries', `FindAll${aggregateName}sQuery.java`),
+            path.join(moduleBasePath, 'application', 'queries', `FindAll${aggregateNamePlural}Query.java`),
             baseContext, writeOptions
           );
-          generatedFiles.push({ type: 'Query', name: `FindAll${aggregateName}sQuery`, path: `${moduleName}/application/queries/FindAll${aggregateName}sQuery.java` });
+          generatedFiles.push({ type: 'Query', name: `FindAll${aggregateNamePlural}Query`, path: `${moduleName}/application/queries/FindAll${aggregateNamePlural}Query.java` });
 
           await renderAndWrite(
             path.join(templatesDir, 'ListQueryHandler.java.ejs'),
-            path.join(moduleBasePath, 'application', 'usecases', `FindAll${aggregateName}sQueryHandler.java`),
+            path.join(moduleBasePath, 'application', 'usecases', `FindAll${aggregateNamePlural}QueryHandler.java`),
             baseContext, writeOptions
           );
-          generatedFiles.push({ type: 'Handler', name: `FindAll${aggregateName}sQueryHandler`, path: `${moduleName}/application/usecases/FindAll${aggregateName}sQueryHandler.java` });
+          generatedFiles.push({ type: 'Handler', name: `FindAll${aggregateNamePlural}QueryHandler`, path: `${moduleName}/application/usecases/FindAll${aggregateNamePlural}QueryHandler.java` });
         }
 
       } else if (cl.category === 'transition') {
@@ -1914,6 +1919,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
  */
 async function generateCrudResources(aggregate, moduleName, moduleBasePath, packageName, apiVersion, generatedFiles, writeOptions = {}) {
   const { name: aggregateName, rootEntity, secondaryEntities, valueObjects = [] } = aggregate;
+  const aggregateNamePlural = pluralizeWord(aggregateName);
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'crud');
   
   // Get ID field and type
@@ -2017,6 +2023,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     packageName,
     moduleName,
     aggregateName,
+    aggregateNamePlural,
     rootEntity,
     secondaryEntities,
     responseFields,
@@ -2115,11 +2122,11 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   
   await renderAndWrite(
     path.join(templatesDir, 'ListQuery.java.ejs'),
-    path.join(moduleBasePath, 'application', 'queries', `FindAll${aggregateName}sQuery.java`),
+    path.join(moduleBasePath, 'application', 'queries', `FindAll${aggregateNamePlural}Query.java`),
     baseContext,
     writeOptions
   );
-  generatedFiles.push({ type: 'Query', name: `FindAll${aggregateName}sQuery`, path: `${moduleName}/application/queries/FindAll${aggregateName}sQuery.java` });
+  generatedFiles.push({ type: 'Query', name: `FindAll${aggregateNamePlural}Query`, path: `${moduleName}/application/queries/FindAll${aggregateNamePlural}Query.java` });
   
   // 4. Generate Handlers
   await renderAndWrite(
@@ -2146,11 +2153,11 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   
   await renderAndWrite(
     path.join(templatesDir, 'ListQueryHandler.java.ejs'),
-    path.join(moduleBasePath, 'application', 'usecases', `FindAll${aggregateName}sQueryHandler.java`),
+    path.join(moduleBasePath, 'application', 'usecases', `FindAll${aggregateNamePlural}QueryHandler.java`),
     baseContext,
     writeOptions
   );
-  generatedFiles.push({ type: 'Handler', name: `FindAll${aggregateName}sQueryHandler`, path: `${moduleName}/application/usecases/FindAll${aggregateName}sQueryHandler.java` });
+  generatedFiles.push({ type: 'Handler', name: `FindAll${aggregateNamePlural}QueryHandler`, path: `${moduleName}/application/usecases/FindAll${aggregateNamePlural}QueryHandler.java` });
   
   await renderAndWrite(
     path.join(templatesDir, 'DeleteCommandHandler.java.ejs'),
@@ -2326,6 +2333,7 @@ async function generatePostmanCollection(
   
   const context = {
     aggregateName,
+    aggregateNamePlural: pluralizeWord(aggregateName),
     moduleName,
     resourceNameKebab,
     apiVersion,

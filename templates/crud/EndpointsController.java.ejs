@@ -36,7 +36,7 @@ import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggre
 import <%= packageName %>.<%= moduleName %>.application.queries.Get<%= aggregateName %>Query;
 <% } -%>
 <% if (hasFindAll) { -%>
-import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
+import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateNamePlural %>Query;
 <% } -%>
 <% customCmdUCs.forEach(function(op) { -%>
 import <%= packageName %>.<%= moduleName %>.application.commands.<%= op.useCase %>Command;
@@ -105,9 +105,9 @@ public class <%= controllerName %> {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "id") String sortBy,
             @RequestParam(defaultValue = "ASC") String sortDirection) {
-        log.info("Finding all <%= aggregateName %>s — page={}, size={}, sortBy={}, sortDirection={}",
+        log.info("Finding all <%= aggregateNamePlural %> — page={}, size={}, sortBy={}, sortDirection={}",
                 page, size, sortBy, sortDirection);
-        return useCaseMediator.dispatch(new FindAll<%= aggregateName %>sQuery(page, size, sortBy, sortDirection));
+        return useCaseMediator.dispatch(new FindAll<%= aggregateNamePlural %>Query(page, size, sortBy, sortDirection));
     }
 <%  } else if (op.isStandard && op.standardType === 'delete') { %>
     public void <%= op.methodName %>(@PathVariable <%- idType %> id) {

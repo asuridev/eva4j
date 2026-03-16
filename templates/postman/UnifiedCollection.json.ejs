@@ -1,0 +1,185 @@
+<%
+/**
+ * UnifiedCollection.json.ejs
+ *
+ * Generates a single Postman 2.1.0 collection covering ALL modules in the
+ * system.  The hierarchy is:
+ *
+ *   {SystemName} API
+ *   └── {ModuleName}
+ *       └── {AggregateName}
+ *           ├── POST   Create {Agg}
+ *           ├── GET    Get {Agg} by ID
+ *           ├── GET    Get All {Agg}s
+ *           ├── PUT    Update {Agg}
+ *           ├── DELETE Delete {Agg}
+ *           └── PUT    {Custom} {Agg}   (confirm, cancel, …)
+ *
+ * Context expected:
+ *   - systemName        : string
+ *   - collectionId      : string (UUID)
+ *   - port              : number
+ *   - modules           : Array<ModuleCtx>
+ *
+ * ModuleCtx:
+ *   - name              : string   (module name, e.g. "product")
+ *   - aggregates        : Array<AggregateCtx>
+ *
+ * AggregateCtx:
+ *   - name              : string   (PascalCase, e.g. "Product")
+ *   - trackUser         : boolean
+ *   - idType            : string   ("String" | "UUID" | "Long")
+ *   - exampleId         : string
+ *   - operations        : Array<OperationCtx>   (when endpoints: section exists)
+ *   - defaultCrud       : boolean               (true when no endpoints: section)
+ *   - bodies            : { [useCase]: object }  (pre-generated JSON bodies keyed by useCase)
+ *
+ * OperationCtx:
+ *   - useCase           : string
+ *   - method            : string   (GET, POST, PUT, PATCH, DELETE)
+ *   - path              : string   (e.g. "/{id}" or "/publish")
+ *   - basePath          : string   (e.g. "/products")
+ *   - version           : string   (e.g. "v1")
+ */
+
+function buildUrl(port, version, basePath, opPath) {
+  // Normalise: remove leading slash from basePath if present, and from opPath
+  let bPath = basePath.replace(/^\//, '');
+  let oPath = opPath.replace(/^\//, '');
+
+  // Build full path segments
+  const segments = ['api', version];
+  if (bPath) segments.push(...bPath.split('/').filter(Boolean));
+  if (oPath) segments.push(...oPath.split('/').filter(Boolean));
+
+  const raw = 'http://localhost:' + port + '/' + segments.join('/');
+  return { raw, segments, port: String(port) };
+}
+
+function hasBody(method) {
+  return method === 'POST' || method === 'PUT' || method === 'PATCH';
+}
+
+// ----- Build the items tree ------------------------------------------------
+const moduleItems = [];
+
+for (const mod of modules) {
+  const aggregateItems = [];
+
+  for (const agg of mod.aggregates) {
+    const requestItems = [];
+
+    if (agg.operations && agg.operations.length > 0) {
+      // Endpoint-driven: use declared operations
+      for (const op of agg.operations) {
+        const url = buildUrl(port, op.version, op.basePath, op.path);
+        // Replace {id} with example ID
+        const rawUrl = url.raw.replace(/\{id\}/g, agg.exampleId);
+        const pathSegments = url.segments.map(s => s === '{id}' ? agg.exampleId : s);
+
+        const headers = [{ key: 'Content-Type', value: 'application/json', type: 'text' }];
+        if (agg.trackUser) {
+          headers.push({ key: 'X-User', value: 'system', type: 'text' });
+        }
+
+        const item = {
+          name: op.useCase,
+          request: {
+            method: op.method,
+            header: headers,
+            url: {
+              raw: rawUrl,
+              protocol: 'http',
+              host: ['localhost'],
+              port: String(port),
+              path: pathSegments
+            }
+          },
+          response: []
+        };
+
+        if (hasBody(op.method) && agg.bodies[op.useCase]) {
+          item.request.body = {
+            mode: 'raw',
+            raw: JSON.stringify(agg.bodies[op.useCase], null, 2),
+            options: { raw: { language: 'json' } }
+          };
+        }
+
+        requestItems.push(item);
+      }
+    } else if (agg.defaultCrud) {
+      // No endpoints section → generate 5 standard CRUD requests
+      const resource = agg.resourceNameKebab;
+      const crudOps = [
+        { useCase: 'Create ' + agg.name,           method: 'POST',   path: '' },
+        { useCase: 'Get ' + agg.name + ' by ID',   method: 'GET',    path: '/' + agg.exampleId },
+        { useCase: 'Get All ' + agg.name + 's',    method: 'GET',    path: '' },
+        { useCase: 'Update ' + agg.name,            method: 'PUT',    path: '/' + agg.exampleId },
+        { useCase: 'Delete ' + agg.name,            method: 'DELETE', path: '/' + agg.exampleId },
+      ];
+
+      for (const op of crudOps) {
+        const url = buildUrl(port, 'v1', resource, op.path);
+
+        const headers = [{ key: 'Content-Type', value: 'application/json', type: 'text' }];
+        if (agg.trackUser) {
+          headers.push({ key: 'X-User', value: 'system', type: 'text' });
+        }
+
+        const item = {
+          name: op.useCase,
+          request: {
+            method: op.method,
+            header: headers,
+            url: {
+              raw: url.raw,
+              protocol: 'http',
+              host: ['localhost'],
+              port: String(port),
+              path: url.segments
+            }
+          },
+          response: []
+        };
+
+        if (hasBody(op.method) && agg.bodies['default']) {
+          item.request.body = {
+            mode: 'raw',
+            raw: JSON.stringify(agg.bodies['default'], null, 2),
+            options: { raw: { language: 'json' } }
+          };
+        }
+
+        requestItems.push(item);
+      }
+    }
+
+    if (requestItems.length > 0) {
+      aggregateItems.push({
+        name: agg.name,
+        item: requestItems
+      });
+    }
+  }
+
+  if (aggregateItems.length > 0) {
+    moduleItems.push({
+      name: mod.name,
+      item: aggregateItems
+    });
+  }
+}
+
+const collection = {
+  info: {
+    _postman_id: collectionId,
+    name: systemName + ' API',
+    description: 'Auto-generated unified API collection for all modules in ' + systemName + '.\nGenerated by eva4j with realistic fake data.',
+    schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
+    version: '1.0.0'
+  },
+  item: moduleItems
+};
+%>
+<%- JSON.stringify(collection, null, 2) %>

@@ -1,6 +1,6 @@
 package <%= packageName %>.<%= moduleName %>.application.usecases;
 
-import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateName %>sQuery;
+import <%= packageName %>.<%= moduleName %>.application.queries.FindAll<%= aggregateNamePlural %>Query;
 import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %>ResponseDto;
 import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
@@ -18,17 +18,17 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * FindAll<%= aggregateName %>sQueryHandler
- * Handles retrieval of all <%= aggregateName %>s (paginated)
+ * FindAll<%= aggregateNamePlural %>QueryHandler
+ * Handles retrieval of all <%= aggregateNamePlural %> (paginated)
  */
 @Slf4j
 @ApplicationComponent
-public class FindAll<%= aggregateName %>sQueryHandler implements QueryHandler<FindAll<%= aggregateName %>sQuery, PagedResponse<<%= aggregateName %>ResponseDto>> {
+public class FindAll<%= aggregateNamePlural %>QueryHandler implements QueryHandler<FindAll<%= aggregateNamePlural %>Query, PagedResponse<<%= aggregateName %>ResponseDto>> {
 
     private final <%= aggregateName %>Repository repository;
     private final <%= aggregateName %>ApplicationMapper mapper;
 
-    public FindAll<%= aggregateName %>sQueryHandler(<%= aggregateName %>Repository repository,
+    public FindAll<%= aggregateNamePlural %>QueryHandler(<%= aggregateName %>Repository repository,
                                                      <%= aggregateName %>ApplicationMapper mapper) {
         this.repository = repository;
         this.mapper = mapper;
@@ -36,8 +36,8 @@ public class FindAll<%= aggregateName %>sQueryHandler implements QueryHandler<Fi
 
     @Override
     @Transactional(readOnly = true)
-    public PagedResponse<<%= aggregateName %>ResponseDto> handle(FindAll<%= aggregateName %>sQuery query) {
-        log.info("Handling FindAll<%= aggregateName %>sQuery — page={}, size={}, sortBy={}, sortDirection={}",
+    public PagedResponse<<%= aggregateName %>ResponseDto> handle(FindAll<%= aggregateNamePlural %>Query query) {
+        log.info("Handling FindAll<%= aggregateNamePlural %>Query — page={}, size={}, sortBy={}, sortDirection={}",
                 query.page(), query.size(), query.sortBy(), query.sortDirection());
 
         Sort sort = Sort.by(Sort.Direction.fromString(query.sortDirection()), query.sortBy());
@@ -48,7 +48,7 @@ public class FindAll<%= aggregateName %>sQueryHandler implements QueryHandler<Fi
                 .map(mapper::toDto)
                 .toList();
 
-        log.info("FindAll<%= aggregateName %>s retrieved — page={}/{}, totalElements={}",
+        log.info("FindAll<%= aggregateNamePlural %> retrieved — page={}/{}, totalElements={}",
                 page.getNumber() + 1, page.getTotalPages(), page.getTotalElements());
 
         return PagedResponse.of(content, page.getNumber(), page.getSize(), page.getTotalElements());

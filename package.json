@@ -41,6 +41,7 @@
   },
   "homepage": "https://github.com/asuridev/eva4j#readme",
   "dependencies": {
+    "@faker-js/faker": "^10.3.0",
     "chalk": "^4.1.2",
     "clipboardy": "^2.3.0",
     "commander": "^11.1.0",

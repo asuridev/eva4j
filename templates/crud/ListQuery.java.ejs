@@ -4,7 +4,7 @@ import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %
 import <%= packageName %>.shared.application.dtos.PagedResponse;
 import <%= packageName %>.shared.domain.interfaces.Query;
 
-public record FindAll<%= aggregateName %>sQuery(
+public record FindAll<%= aggregateNamePlural %>Query(
     int page,
     int size,
     String sortBy,

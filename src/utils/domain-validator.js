@@ -1,5 +1,7 @@
 'use strict';
 
+const { pluralizeWord } = require('./naming');
+
 /**
  * Domain-level validator for eva evaluate system --domain
  *
@@ -314,6 +316,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-004': { label: 'Trigger de evento referencia método de transición inexistente', severity: 'ok', findings: [] },
     'C2-005': { label: 'Transición de estado sin Domain Event asociado (sin trigger)', severity: 'ok', findings: [] },
     'C2-006': { label: 'Colisión de nombre de useCase entre endpoints y listeners', severity: 'ok', findings: [] },
+    'C2-007': { label: 'UseCase FindAll con nombre de agregado sin pluralizar correctamente', severity: 'ok', findings: [] },
   };
 
   for (const [moduleName, config] of Object.entries(domainConfigs)) {
@@ -513,6 +516,33 @@ function runC2(domainConfigs, systemConfig) {
         );
       }
     }
+
+    // C2-007: FindAll use case name must use proper English plural of the aggregate
+    for (const agg of config.aggregates || []) {
+      const aggName = agg.name;
+      const expectedPlural = pluralizeWord(aggName);
+      const expectedFindAll = `FindAll${expectedPlural}`;
+
+      for (const ver of (config.endpoints && config.endpoints.versions) || []) {
+        for (const op of ver.operations || []) {
+          const uc = op.useCase || '';
+          if (!uc.startsWith('FindAll')) continue;
+          const suffix = uc.slice(7); // after 'FindAll'
+          // Match singular name or naive 's' suffix targeting this aggregate
+          if (suffix === aggName || suffix === `${aggName}s`) {
+            if (uc !== expectedFindAll) {
+              checks['C2-007'].findings.push(
+                finding(
+                  moduleName,
+                  `UseCase '${uc}' debería ser '${expectedFindAll}' (plural correcto de '${aggName}')`,
+                  `Agregado: ${aggName}, versión: ${ver.version}. Sin el plural correcto, el generador creará un scaffold en lugar de la implementación estándar paginada.`
+                )
+              );
+            }
+          }
+        }
+      }
+    }
   }
 
   setDefaultSeverities(checks, {
@@ -522,6 +552,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-004': 'error',
     'C2-005': 'info',
     'C2-006': 'error',
+    'C2-007': 'error',
   });
 
   return checks;

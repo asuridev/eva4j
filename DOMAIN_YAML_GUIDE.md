@@ -2911,7 +2911,7 @@ El tipo del use case se infiere automáticamente del método HTTP:
 
 | Categoría | Nombres Match | Generado |
 |-----------|---------------|---------|
-| **Estándar** | `Create{Aggregate}`, `Update{Aggregate}`, `Delete{Aggregate}`, `Get{Aggregate}`, `FindAll{Aggregate}s` | Implementación completa con lógica de repositorio |
+| **Estándar** | `Create{Aggregate}`, `Update{Aggregate}`, `Delete{Aggregate}`, `Get{Aggregate}`, `FindAll{PluralAggregate}` | Implementación completa con lógica de repositorio |
 | **Scaffold** | Cualquier otro nombre (`ConfirmOrder`, `ActivateProduct`, etc.) | Clase con `// TODO` — el desarrollador completa la lógica |
 
 Los use cases estándar reutilizan los templates CRUD existentes (implementación idéntica al flujo sin `endpoints:`). Los scaffolds generan archivos con `UnsupportedOperationException` y comentarios guía.
@@ -2985,14 +2985,13 @@ application/
     ConfirmOrderCommand.java         ← scaffold (TODO)
   queries/
     GetOrderQuery.java               ← estándar (completo)
-    FindAllOrdersQuery.java          ← NOTA: no es estándar (estándar sería FindAllOrders s)
-                                       → scaffold (TODO)
+    FindAllOrdersQuery.java          ← estándar (completo)
   usecases/
     CreateOrderCommandHandler.java   ← estándar
     DeleteOrderCommandHandler.java   ← estándar
     ConfirmOrderCommandHandler.java  ← scaffold
     GetOrderQueryHandler.java        ← estándar
-    FindAllOrdersQueryHandler.java   ← scaffold
+    FindAllOrdersQueryHandler.java   ← estándar
   dtos/
     OrderResponseDto.java
   mappers/
