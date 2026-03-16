@@ -1,6 +1,6 @@
-# EJEMPLO 8: DOMINIO CON SOFT DELETE Y AUDITORÍA AVANZADA
-# Testing de entidades con soft delete y auditoría
-# Ideal para: Validar características de auditoría y borrado lógico
+# EJEMPLO 8: DOMINIO CON SOFT DELETE Y AUDITORÍA
+# Validar borrado lógico: registros marcados como eliminados no aparecen en queries.
+# Ideal para: sistemas con normativa de retención de datos o restauración de registros.
 
 aggregates:
   - name: Document
@@ -8,7 +8,9 @@ aggregates:
       - name: Document
         isRoot: true
         tableName: documents
-        auditable: true
+        hasSoftDelete: true          # ✅ Activa borrado lógico (deletedAt)
+        audit:
+          enabled: true
         fields:
           - name: id
             type: String
@@ -24,14 +26,6 @@ aggregates:
             type: Integer
           - name: authorId
             type: String
-          - name: lastModifiedBy
-            type: String
-          - name: isDeleted
-            type: Boolean
-          - name: deletedAt
-            type: LocalDateTime
-          - name: deletedBy
-            type: String
           - name: metadata
             type: DocumentMetadata
           - name: tags
@@ -42,15 +36,11 @@ aggregates:
             mappedBy: document
             cascade: [PERSIST, MERGE]
             fetch: LAZY
-          - type: OneToMany
-            target: Attachment
-            mappedBy: document
-            cascade: [PERSIST, MERGE, REMOVE]
-            fetch: LAZY
       
       - name: Revision
         tableName: document_revisions
-        auditable: true
+        audit:
+          enabled: true
         fields:
           - name: id
             type: Long
@@ -64,27 +54,6 @@ aggregates:
             type: String
           - name: comment
             type: String
-       
-      
-      - name: Attachment
-        tableName: document_attachments
-        auditable: true
-        fields:
-          - name: id
-            type: Long
-          - name: fileName
-            type: String
-          - name: fileSize
-            type: Long
-          - name: mimeType
-            type: String
-          - name: storageUrl
-            type: String
-          - name: uploadedBy
-            type: String
-          - name: isDeleted
-            type: Boolean
-        
     
     valueObjects:
       - name: DocumentMetadata
@@ -97,8 +66,6 @@ aggregates:
             type: String
           - name: expirationDate
             type: LocalDate
-          - name: reviewDate
-            type: LocalDate
     
     enums:
       - name: DocumentType
@@ -107,16 +74,52 @@ aggregates:
           - INVOICE
           - REPORT
           - PROPOSAL
-          - MEMO
-          - POLICY
-          - PROCEDURE
           - OTHER
       
       - name: DocumentStatus
+        initialValue: DRAFT
+        transitions:
+          - from: DRAFT
+            to: IN_REVIEW
+            method: submitForReview
+          - from: IN_REVIEW
+            to: APPROVED
+            method: approve
+          - from: IN_REVIEW
+            to: DRAFT
+            method: returnToDraft
+          - from: APPROVED
+            to: PUBLISHED
+            method: publish
         values:
           - DRAFT
           - IN_REVIEW
           - APPROVED
           - PUBLISHED
+
+# Comportamiento generado por hasSoftDelete: true
+# ─────────────────────────────────────────────────────────────────────────────
+# Entidad de dominio (Document.java):
+#   - Campo private LocalDateTime deletedAt; (inyectado automáticamente)
+#   - Métodos softDelete() e isDeleted() generados
+#   - deletedAt excluido del constructor de creación y de CreateDocumentCommand
+#   - deletedAt NO aparece en DocumentResponseDto
+#
+# Entidad JPA (DocumentJpa.java):
+#   - @SQLRestriction("deleted_at IS NULL") → Hibernate filtra eliminados en TODAS las queries
+#   - Campo @Column(name = "deleted_at") private LocalDateTime deletedAt;
+#
+# Repositorio (DocumentRepository.java):
+#   - Sin deleteById() — la eliminación física no está disponible
+#
+# Handler (DeleteDocumentCommandHandler.java):
+#   - findById → entity.softDelete() → repository.save(entity)
+#   - Nunca llama deleteById()
+#
+# Resultado en API:
+#   DELETE /documents/{id}  → 200 OK, deletedAt seteado, registro invisible
+#   GET    /documents/{id}  → 404 Not Found (filtrado por @SQLRestriction)
+#   GET    /documents       → no retorna documentos eliminados
+
           - ARCHIVED
           - OBSOLETE

@@ -256,20 +256,22 @@ private String productId;
 
 ---
 
-## 3. Soft Delete Completo
+## 3. Soft Delete Completo ✅
 
 ### Descripción
 
-El archivo de ejemplo `domain-soft-delete.yaml` existe pero la generación real del patrón no está completamente implementada. Soft delete es crítico en sistemas donde la normativa exige conservar registros históricos o donde el negocio necesita restaurar datos eliminados accidentalmente.
+Implementado como `hasSoftDelete: true` en la entidad raíz del agregado. El generador inyecta automáticamente el campo `deletedAt`, añade `@SQLRestriction("deleted_at IS NULL")` en la entidad JPA para filtrar eliminados en todas las queries, genera `softDelete()` e `isDeleted()` en el dominio, y cambia el `DeleteCommandHandler` a borrado lógico.
 
-### Sintaxis en domain.yaml
+### Sintaxis
 
 ```yaml
 entities:
   - name: product
     isRoot: true
     tableName: products
-    softDelete: true
+    hasSoftDelete: true
+    audit:
+      enabled: true
     fields:
       - name: id
         type: String
@@ -279,57 +281,31 @@ entities:
         type: BigDecimal
 ```
 
-### Código Generado
+### Archivos Modificados
 
-```java
-@MappedSuperclass
-public abstract class SoftDeletableEntity {
-    @Column(name = "deleted", nullable = false)
-    private Boolean deleted = false;
+| Archivo | Cambio |
+|---|---|
+| `src/utils/yaml-to-entity.js` | ✅ Parsea `hasSoftDelete`, inyecta `deletedAt` en campo de entidad |
+| `src/commands/generate-entities.js` | ✅ Propaga `hasSoftDelete` a todos los contextos, excluye `deletedAt` de comandos/respuestas |
+| `templates/aggregate/AggregateRoot.java.ejs` | ✅ Excluye `deletedAt` del constructor de creación, genera `softDelete()` e `isDeleted()` |
+| `templates/aggregate/JpaAggregateRoot.java.ejs` | ✅ Añade `@SQLRestriction("deleted_at IS NULL")` e import condicional |
+| `templates/aggregate/AggregateRepository.java.ejs` | ✅ Elimina `deleteById()` del puerto cuando hay soft delete |
+| `templates/aggregate/AggregateRepositoryImpl.java.ejs` | ✅ Mismo cambio en la implementación |
+| `templates/crud/DeleteCommandHandler.java.ejs` | ✅ Dos ramas: `findById→softDelete()→save()` vs `deleteById()` |
+| `examples/domain-soft-delete.yaml` | ✅ Reescrito con sintaxis `hasSoftDelete: true` |
 
-    @Column(name = "deleted_at")
-    private LocalDateTime deletedAt;
+### Comportamiento generado
 
-    public void softDelete() {
-        this.deleted = true;
-        this.deletedAt = LocalDateTime.now();
-    }
+- `deletedAt` inyectado automáticamente — no declarar a mano en `fields:`
+- `deletedAt` excluido de `CreateCommand`, `ResponseDto` (invisible en API)
+- `GET /products` y `GET /products/{id}` nunca retornan registros eliminados
+- `DELETE /products/{id}` sobre un registro ya eliminado retorna 404
+- `deleteById()` eliminado del contrato del repositorio
 
-    public void restore() {
-        this.deleted = false;
-        this.deletedAt = null;
-    }
-}
-```
+### Scope excluido
 
-```java
-@Entity
-@Table(name = "products")
-@Where(clause = "deleted = false")
-@SQLDelete(sql = "UPDATE products SET deleted = true, deleted_at = NOW() WHERE id = ?")
-public class ProductJpa extends SoftDeletableEntity {
-    @Id
-    private String id;
-}
-```
-
-```java
-// DeleteCommandHandler actualizado
-public void handle(DeleteProductCommand command) {
-    Product product = productRepository.findById(command.id()).orElseThrow();
-    product.softDelete();
-    productRepository.save(product);
-}
-```
-
-```java
-// Endpoint de restauración generado automáticamente
-@PatchMapping("/{id}/restore")
-public ResponseEntity<Void> restore(@PathVariable String id) {
-    restoreProductUseCase.handle(new RestoreProductCommand(id));
-    return ResponseEntity.noContent().build();
-}
-```
+- Endpoint de restauración (`PATCH /{id}/restore`) — pendiente de implementar como use case adicional
+- Query param `includeDeleted=true` — requiere query nativa separada
 
 ---
 
@@ -1623,7 +1599,7 @@ Sin DataFaker, el seeder genera datos con patrones simples (`"User 0"`, `"user0@
 |---|---|---|---|---|
 | 1 | Domain Events | Alta | Alta | ✅ Implementado |
 | 2 | Aggregate Boundaries por ID | Alta | Media | ✅ Implementado |
-| 3 | Soft Delete Completo | Alta | Baja | Parcial |
+| 3 | Soft Delete Completo | Alta | Baja | ✅ Implementado |
 | 4 | Paginación en Queries | Impl. | -- | ✅ Implementado |
 | 5 | Optimistic Locking | Media | Baja | Pendiente |
 | 6 | Read Models / Proyecciones | Media | Alta | Pendiente |

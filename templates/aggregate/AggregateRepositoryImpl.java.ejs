@@ -58,6 +58,12 @@ public class <%= rootEntity.name %>RepositoryImpl implements <%= rootEntity.name
     public boolean existsById(<%= rootEntity.fields[0].javaType %> id) {
         return jpaRepository.existsById(id);
     }
+<% if (!hasSoftDelete) { %>
+    @Override
+    public void deleteById(<%= rootEntity.fields[0].javaType %> id) {
+        jpaRepository.deleteById(id);
+    }
+<% } %>
 <% if (findByOps && findByOps.length > 0) { %>
 <% findByOps.forEach(function(op) { %>
     @Override

@@ -90,7 +90,7 @@ public class <%= name %> {
 <% }); %>
     }
 
-<% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly && !f.autoInit); %>
+<% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.readOnly && !f.autoInit); %>
 <% const autoInitFields = fields.filter(f => f.autoInit); %>
 <% const defaultValueFields = fields.filter(f => f.readOnly && !f.autoInit && f.javaDefaultValue); %>
 <% if (creationFields.length > 0 || autoInitFields.length > 0 || defaultValueFields.length > 0) { %>
@@ -241,5 +241,23 @@ public class <%= name %> {
     }
 <%     }); %>
 <% }); %>
+<% } %>
+<% if (hasSoftDelete) { %>
+
+    // ─── Soft Delete ─────────────────────────────────────────────────────────
+    /**
+     * Marks this entity as deleted by setting deletedAt timestamp.
+     * Use this instead of physical deletion to preserve records.
+     */
+    public void softDelete() {
+        if (this.deletedAt != null) {
+            throw new IllegalStateException("<%= name %> is already deleted");
+        }
+        this.deletedAt = java.time.LocalDateTime.now();
+    }
+
+    public boolean isDeleted() {
+        return this.deletedAt != null;
+    }
 <% } %>
 }

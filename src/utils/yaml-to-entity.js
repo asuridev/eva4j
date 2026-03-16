@@ -148,8 +148,16 @@ function parseAggregate(aggregateData) {
  * @returns {Object} Parsed entity
  */
 function parseEntity(entityData, aggregateName, packageName = '', moduleName = '', aggregateEnums = [], valueObjectNames = [], inverseRelationships = {}) {
-  const { name, isRoot = false, tableName, properties, fields: fieldsYaml, relationships = [], auditable = false, audit } = entityData;
+  const { name, isRoot = false, tableName, properties, fields: fieldsYaml, relationships = [], auditable = false, audit, hasSoftDelete = false } = entityData;
   
+  // Validate hasSoftDelete
+  if (hasSoftDelete !== undefined && typeof hasSoftDelete !== 'boolean') {
+    throw new Error(`Entity "${name}": hasSoftDelete must be a boolean (true/false)`);
+  }
+  if (hasSoftDelete === true && isRoot === false) {
+    console.warn(`⚠️  Entity "${name}": hasSoftDelete is only supported on the aggregate root (isRoot: true). It will be ignored for secondary entities.`);
+  }
+
   // Accept both 'properties' and 'fields' field names
   let entityFields = properties || fieldsYaml || [];
   
@@ -213,6 +221,15 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
       ];
     }
   }
+
+  // Inject deletedAt field for soft-delete root entities
+  const effectiveSoftDelete = hasSoftDelete === true && isRoot === true;
+  if (effectiveSoftDelete) {
+    entityFields = [
+      ...entityFields,
+      { name: 'deletedAt', type: 'LocalDateTime' }
+    ];
+  }
   
   const className = toPascalCase(name);
   const fieldName = toCamelCase(name);
@@ -245,6 +262,7 @@ function parseEntity(entityData, aggregateName, packageName = '', moduleName = '
     fieldName,
     tableName: table,
     isRoot,
+    hasSoftDelete: effectiveSoftDelete,
     auditable: auditable === true, // Legacy support
     audit: auditConfig, // New audit configuration
     fields,

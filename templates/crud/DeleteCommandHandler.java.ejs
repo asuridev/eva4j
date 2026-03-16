@@ -2,6 +2,9 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 
 import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggregateName %>Command;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
+<% if (hasSoftDelete) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
+<% } %>
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
 import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
@@ -26,12 +29,17 @@ public class Delete<%= aggregateName %>CommandHandler implements CommandHandler<
     @Transactional
     public void handle(Delete<%= aggregateName %>Command command) {
         log.info("Handling Delete<%= aggregateName %>Command for id: {}", command.id());
-        
+<% if (hasSoftDelete) { %>
+        <%= aggregateName %> entity = repository.findById(command.id())
+                .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
+        entity.softDelete();
+        repository.save(entity);
+<% } else { %>
         if (!repository.existsById(command.id())) {
             throw new NotFoundException("<%= aggregateName %> not found with id: " + command.id());
         }
-        
         repository.deleteById(command.id());
+<% } %>
         log.info("<%= aggregateName %> deleted successfully with id: {}", command.id());
     }
 }

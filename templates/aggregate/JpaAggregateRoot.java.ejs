@@ -22,11 +22,17 @@ import <%= packageName %>.shared.domain.AuditableEntity;
 <% } else if (auditable) { %>
 import <%= packageName %>.shared.domain.AuditableEntity;
 <% } %>
+<% if (hasSoftDelete) { %>
+import org.hibernate.annotations.SQLRestriction;
+<% } %>
 
 /**
  * <%= name %>Jpa - JPA Entity
  * Persistence entity with JPA annotations
  */
+<% if (hasSoftDelete) { %>
+@SQLRestriction("deleted_at IS NULL")
+<% } %>
 @Entity
 @Table(name = "<%= tableName %>")
 @Getter

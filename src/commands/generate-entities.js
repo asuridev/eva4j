@@ -378,6 +378,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         valueObjects,
         aggregateMethods: aggregate.aggregateMethods,
         auditable: rootEntity.auditable,
+        hasSoftDelete: rootEntity.hasSoftDelete || false,
         domainEvents: aggregate.domainEvents || [],
         triggeredEventsMap: aggregate.triggeredEventsMap || {}
       };
@@ -402,7 +403,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         valueObjects,
         enums: allEnums,
         auditable: rootEntity.auditable,
-        audit: rootEntity.audit
+        audit: rootEntity.audit,
+        hasSoftDelete: rootEntity.hasSoftDelete || false
       };
 
       await renderAndWrite(
@@ -520,6 +522,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         packageName,
         moduleName,
         rootEntity,
+        hasSoftDelete: rootEntity.hasSoftDelete || false,
         findByOps: []
       };
 
@@ -547,6 +550,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         aggregateName,
         rootEntity,
         hasDomainEvents: (aggregate.domainEvents || []).length > 0,
+        hasSoftDelete: rootEntity.hasSoftDelete || false,
         findByOps: []
       };
 
@@ -1462,7 +1466,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
 
   const commandFields = rootEntity.fields.filter(f =>
     f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' &&
-    f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
+    f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.readOnly
   );
 
   const validatedVos = valueObjects.filter(vo =>
@@ -1488,7 +1492,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
   const resourceNameKebab = toKebabCase(aggregateName);
 
   const responseFields = rootEntity.fields.filter(f =>
-    f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden
+    f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.hidden
   );
   const responseSecondaryEntities = secondaryEntities.map(entity => ({
     ...entity,
@@ -1511,7 +1515,8 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
     responseFields, responseSecondaryEntities, idType,
     commandFields: commandFieldsApp, oneToManyRelationships, oneToOneRelationships,
     hasValueObjects, hasEnums, imports: rootEntity.imports,
-    resourceNameCamel, resourceNameKebab
+    resourceNameCamel, resourceNameKebab,
+    hasSoftDelete: rootEntity.hasSoftDelete || false
   };
 
   // ── Step 1: Validated VO Dtos ────────────────────────────────────────
@@ -1547,7 +1552,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
   // ── Step 3: ResponseDto ──────────────────────────────────────────────
   const responseDtoContext = {
     ...baseContext,
-    allFields: rootEntity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden),
+    allFields: rootEntity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.hidden),
     relationships: rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse)
   };
   await renderAndWrite(
@@ -1915,9 +1920,10 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const idField = rootEntity.fields[0];
   const idType = idField.javaType;
   
-  // Filter command fields (exclude id, audit fields, and readOnly fields)
+  // Filter command fields (exclude id, audit fields, soft-delete fields, and readOnly fields)
   const commandFields = rootEntity.fields.filter(f => 
-    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
+    f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' &&
+    f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.readOnly
   );
 
   // Validated VOs: VOs where any field has validation annotations
@@ -1982,9 +1988,9 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   const resourceNameCamel = toCamelCase(aggregateName);
   const resourceNameKebab = toKebabCase(aggregateName);
   
-  // Filter audit user fields and hidden fields from response DTOs
+  // Filter audit user fields, soft-delete fields, and hidden fields from response DTOs
   const responseFields = rootEntity.fields.filter(f => 
-    f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden
+    f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.hidden
   );
   
   const responseSecondaryEntities = secondaryEntities.map(entity => ({
@@ -2024,7 +2030,9 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     imports: rootEntity.imports,
     apiVersion,
     resourceNameCamel,
-    resourceNameKebab
+    resourceNameKebab,
+    hasSoftDelete: rootEntity.hasSoftDelete || false,
+    hasCreateOperation: true  // In interactive CRUD flow, Create is always generated
   };
 
   // 0. Generate Create<VoName>Dto for validated Value Objects
@@ -2055,7 +2063,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       commandFields: commandFieldsApp,
       oneToOneRelationships: oneToOneRelationshipsApp,
       oneToManyRelationships: oneToManyRelationshipsApp,
-      validatedVos
+      validatedVos,
+      hasCreateOperation: true
     },
     writeOptions
   );
@@ -2162,7 +2171,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   // 5. Generate DTOs
   const responseDtoContext = {
     ...baseContext,
-    allFields: rootEntity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.hidden),
+    allFields: rootEntity.fields.filter(f => f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.hidden),
     relationships: rootEntity.relationships.filter(r => (r.type === 'OneToMany' || r.type === 'OneToOne') && !r.isInverse)
   };
   

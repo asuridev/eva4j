@@ -8,6 +8,7 @@ aggregates:
       - name: Order
         isRoot: true
         tableName: orders
+        hasSoftDelete: true
         audit:
           enabled: true      # Agrega createdAt, updatedAt
           trackUser: true    # Agrega createdBy, updatedBy
