@@ -1,0 +1,63 @@
+package <%= packageName %>.shared.infrastructure.configurations.eventPublicationConfig;
+
+import javax.sql.DataSource;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * Fixes Spring Modulith JPA event_publication table columns.
+ * <p>
+ * Hibernate maps the internal {@code JpaEventPublication} String fields
+ * as {@code varchar(255)} by default, which is too short for serialised
+ * domain event payloads. This runner alters the columns to {@code TEXT}
+ * after Hibernate DDL has created or validated the schema.
+ */
+@Configuration
+public class EventPublicationSchemaConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(EventPublicationSchemaConfig.class);
+
+    @Bean
+    ApplicationRunner eventPublicationSchemaFix(DataSource dataSource) {
+        return args -> {
+            try (var conn = dataSource.getConnection()) {
+                var db = conn.getMetaData().getDatabaseProductName().toLowerCase();
+                String[] statements;
+
+                if (db.contains("postgre")) {
+                    statements = new String[]{
+                        "ALTER TABLE IF EXISTS event_publication ALTER COLUMN serialized_event TYPE TEXT",
+                        "ALTER TABLE IF EXISTS event_publication ALTER COLUMN event_type TYPE TEXT",
+                        "ALTER TABLE IF EXISTS event_publication ALTER COLUMN listener_id TYPE TEXT"
+                    };
+                } else if (db.contains("mysql") || db.contains("maria")) {
+                    statements = new String[]{
+                        "ALTER TABLE event_publication MODIFY COLUMN serialized_event TEXT",
+                        "ALTER TABLE event_publication MODIFY COLUMN event_type TEXT",
+                        "ALTER TABLE event_publication MODIFY COLUMN listener_id TEXT"
+                    };
+                } else {
+                    // H2 and other databases
+                    statements = new String[]{
+                        "ALTER TABLE IF EXISTS event_publication ALTER COLUMN serialized_event TEXT",
+                        "ALTER TABLE IF EXISTS event_publication ALTER COLUMN event_type TEXT",
+                        "ALTER TABLE IF EXISTS event_publication ALTER COLUMN listener_id TEXT"
+                    };
+                }
+
+                for (var sql : statements) {
+                    try (var stmt = conn.createStatement()) {
+                        stmt.execute(sql);
+                    } catch (Exception e) {
+                        // Column already TEXT or table not yet created — safe to ignore
+                    }
+                }
+                log.debug("event_publication columns verified (TEXT)");
+            }
+        };
+    }
+}

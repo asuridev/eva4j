@@ -215,6 +215,10 @@ class SharedGenerator {
     await this.generateFile('configurations/swaggerConfig/SwaggerConfig.java.ejs', 
       path.join(configurationsPath, 'swaggerConfig', 'SwaggerConfig.java'));
     
+    // Event publication schema fix (Spring Modulith varchar(255) → TEXT)
+    await this.generateFile('configurations/eventPublicationConfig/EventPublicationSchemaConfig.java.ejs', 
+      path.join(configurationsPath, 'eventPublicationConfig', 'EventPublicationSchemaConfig.java'));
+
     // UseCase config
     await this.generateFile('configurations/useCaseConfig/UseCaseAutoRegister.java.ejs', 
       path.join(configurationsPath, 'useCaseConfig', 'UseCaseAutoRegister.java'));
