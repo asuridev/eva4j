@@ -298,10 +298,8 @@ async function evaluateSystemCommand(type, options = {}) {
 
   const spinner = ora('Analyzing system/system.yaml...').start();
 
-  // ── 2. Run validation ───────────────────────────────────────────────────
-  const validation = validateSystem(systemConfig);
-
-  // ── 2b. Load domain YAMLs ─────────────────────────────────────────────────
+  // ── 2a. Load domain YAMLs (needed by both system and domain validation) ──
+  const domainConfigs = {};
   let domainValidation = null;
   const systemDir = path.join(process.cwd(), 'system');
   let allFiles;
@@ -315,7 +313,6 @@ async function evaluateSystemCommand(type, options = {}) {
   if (domainFiles.length === 0) {
     console.warn(chalk.yellow('⚠  No domain YAML files found in system/ (excluding system.yaml). Domain tab will be hidden.'));
   } else {
-    const domainConfigs = {};
     for (const file of domainFiles) {
       const moduleName = path.basename(file, '.yaml');
       try {
@@ -325,6 +322,13 @@ async function evaluateSystemCommand(type, options = {}) {
         console.warn(chalk.yellow(`⚠  Could not parse ${file}: ${err.message}`));
       }
     }
+  }
+
+  // ── 2b. Run system validation (receives domainConfigs to cross-check) ───
+  const validation = validateSystem(systemConfig, domainConfigs);
+
+  // ── 2c. Run domain validation ───────────────────────────────────────────
+  if (Object.keys(domainConfigs).length > 0) {
     domainValidation = validateDomain(domainConfigs, systemConfig);
   }
 

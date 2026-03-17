@@ -51,7 +51,26 @@ function wordsOverlap(wordsA, wordsB) {
   for (const a of wordsA) {
     for (const b of wordsB) {
       if (a.startsWith(b) || b.startsWith(a)) return true;
+      // Shared-prefix matching: "reservation" ↔ "reserve" share "reser" (5+ chars)
+      const minLen = Math.min(a.length, b.length);
+      if (minLen >= 5 && a.substring(0, 5) === b.substring(0, 5)) return true;
     }
+  }
+  return false;
+}
+
+/**
+ * Fuzzy field-name matching for C4-004: checks exact match, then suffix match.
+ * e.g. "cancellationReason" matches event field "reason" (suffix),
+ *      "failureReason" matches "reason" (suffix).
+ */
+function fieldMatchesAnyEventField(fieldName, eventFieldNames) {
+  if (eventFieldNames.has(fieldName)) return true;
+  const lower = fieldName.toLowerCase();
+  for (const ef of eventFieldNames) {
+    const efLower = ef.toLowerCase();
+    if (lower.endsWith(efLower) && efLower.length >= 3) return true;
+    if (efLower.endsWith(lower) && lower.length >= 3) return true;
   }
   return false;
 }
@@ -295,7 +314,7 @@ function runC1(domainConfigs, systemConfig) {
 
   // Assign severities
   setDefaultSeverities(checks, {
-    'C1-001': 'warning',
+    'C1-001': 'info',
     'C1-002': 'error',
     'C1-003': 'error',
     'C1-004': 'error',
@@ -377,7 +396,7 @@ function runC2(domainConfigs, systemConfig) {
               finding(
                 moduleName,
                 `Transición '${methodName}' de ${en.name} (${tr.from} → ${tr.to}) no tiene endpoint HTTP ni listener asociado`,
-                `Agregado: ${agg.name}, Enum: ${en.name}`
+                `Agregado: ${agg.name}, Enum: ${en.name}. Nota: puede invocarse internamente desde otro use case del módulo`
               )
             );
           }
@@ -458,11 +477,14 @@ function runC2(domainConfigs, systemConfig) {
         }
       }
     }
-    // Also include listener event names and field names as traceable origins.
+    // Also include listener event names, field names, and useCase names as traceable origins.
     // Field names cover cases like wasLateReturn → [late, return] tracing LATE_RETURN,
     // where the semantic connection is in a boolean field name, not the event name itself.
+    // UseCase names cover cases like ReserveStock → [reserve, stock] tracing RESERVATION,
+    // where the enum value originates from a listener-triggered use case.
     for (const listener of config.listeners || []) {
       for (const w of extractWords(listener.event)) moduleEventTokens.add(w);
+      for (const w of extractWords(listener.useCase || '')) moduleEventTokens.add(w);
       for (const f of listener.fields || []) {
         for (const w of extractWords(f.name)) moduleEventTokens.add(w);
       }
@@ -482,7 +504,8 @@ function runC2(domainConfigs, systemConfig) {
         if (!en.name.endsWith('Type')) continue;
         for (const val of en.values || []) {
           const valWords = extractWords(val);
-          const traceable = valWords.some((w) => moduleEventTokens.has(w));
+          const traceable = valWords.some((w) => moduleEventTokens.has(w))
+            || valWords.some((w) => [...moduleEventTokens].some((t) => wordsOverlap([w], [t])));
           if (!traceable) {
             checks['C2-003'].findings.push(
               finding(
@@ -825,8 +848,8 @@ function runC4(domainConfigs, systemConfig) {
           //     implicitly by the event name, e.g. PaymentApprovedEvent implies status=APPROVED)
           const isSystemConstant = field.defaultValue !== undefined && field.defaultValue !== null;
           const isStateMachineField = stateMachineEnumNames.has(field.type);
-          if (critical && field.readOnly && !field.hidden && !isSystemConstant && !isStateMachineField && !AUDIT_FIELDS.has(field.name)) {
-            if (!moduleEventFieldNames.has(field.name)) {
+          if (critical && entity.isRoot && field.readOnly && !field.hidden && !isSystemConstant && !isStateMachineField && !AUDIT_FIELDS.has(field.name)) {
+            if (!fieldMatchesAnyEventField(field.name, moduleEventFieldNames)) {
               checks['C4-004'].findings.push(
                 finding(
                   moduleName,

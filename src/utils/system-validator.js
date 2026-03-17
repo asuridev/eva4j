@@ -4,9 +4,10 @@
  * Validates a parsed system.yaml object against the S1–S5 static evaluation rules.
  *
  * @param {object} systemConfig - Parsed system.yaml content
+ * @param {Record<string, object>} [domainConfigs={}] - moduleName → parsed domain YAML (used to check domain-level events)
  * @returns {{ errors: string[], warnings: string[], info: string[], ok: string[], score: number }}
  */
-function validateSystem(systemConfig) {
+function validateSystem(systemConfig, domainConfigs = {}) {
   const errors = [];
   const warnings = [];
   const info = [];
@@ -91,7 +92,7 @@ function validateSystem(systemConfig) {
       const desc = (mod.description || '').toLowerCase();
       const documentedAsReactive = desc.includes('consume') || desc.includes('reactiv') || desc.includes('event') || desc.includes('suscri') || desc.includes('listen');
       if (!documentedAsReactive) {
-        warnings.push(`[S1-004] Módulo '${mod.name}' es puramente reactivo (solo consume eventos) pero su description no lo documenta explícitamente`);
+        info.push(`[S1-004] Módulo '${mod.name}' es puramente reactivo (solo consume eventos) pero su description no lo documenta explícitamente`);
       }
     }
   }
@@ -153,9 +154,17 @@ function validateSystem(systemConfig) {
   }
 
   // S2-005: module consumes but never produces
+  // Also check domain-level events[] — a module may produce Domain Events not yet
+  // wired in system.yaml integrations.async[], which is a valid design-in-progress.
   for (const mod of modules) {
     if (consumerSet.has(mod.name) && !producerSet.has(mod.name)) {
-      warnings.push(`[S2-005] Módulo '${mod.name}' consume eventos pero no produce ninguno`);
+      const domainCfg = domainConfigs[mod.name];
+      const producesDomainEvents = (domainCfg?.aggregates || []).some(
+        (agg) => (agg.events || []).length > 0
+      );
+      if (!producesDomainEvents) {
+        warnings.push(`[S2-005] Módulo '${mod.name}' consume eventos pero no produce ninguno`);
+      }
     }
   }
 
@@ -170,15 +179,6 @@ function validateSystem(systemConfig) {
   }
   if (!s2_006_found && asyncEvents.length > 0) {
     ok.push('[S2-006] Todos los nombres de eventos siguen la convención PascalCase + sufijo Event ✓');
-  }
-
-  // S2-007: topic name doesn't include topicPrefix
-  if (topicPrefix) {
-    for (const ev of asyncEvents) {
-      if (ev.topic && !ev.topic.toLowerCase().includes(topicPrefix.toLowerCase())) {
-        info.push(`[S2-007] Topic '${ev.topic}' (evento '${ev.event}') no incluye el prefijo configurado '${topicPrefix}'`);
-      }
-    }
   }
 
   // ── S3 — Integridad de llamadas síncronas ────────────────────────────────
