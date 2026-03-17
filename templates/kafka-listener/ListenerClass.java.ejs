@@ -44,7 +44,7 @@ public class <%= listenerClassName %> {
         this.objectMapper = objectMapper;
     }
 
-    @KafkaListener(topics = "<%= topicSpringProperty %>")
+    @KafkaListener(topics = "<%= topicSpringProperty %>", groupId = "${spring.application.name}-<%= moduleName %>-group")
     public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
 <% (fields || []).forEach(f => { %><%
   const listMatch = f.javaType.match(/^List<(.+)>$/);

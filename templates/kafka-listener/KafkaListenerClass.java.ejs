@@ -26,7 +26,7 @@ public class <%= listenerClassName %> {
         this.useCaseMediator = useCaseMediator;
     }
 
-    @KafkaListener(topics = "<%= topicSpringProperty %>")
+    @KafkaListener(topics = "<%= topicSpringProperty %>", groupId = "${spring.application.name}-<%= moduleName %>-group")
     public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
         // TODO: Implement event processing logic
         // Example: useCaseMediator.dispatch(new YourCommand(event.data()));
