@@ -9,6 +9,7 @@ import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
 <% if (hasNestedRelationships || fields.some(f => f.isCollection)) { %>
 import java.util.List;
 <% } %>
+import io.swagger.v3.oas.annotations.media.Schema;
 <% imports.forEach(imp => { %>
 <%- imp %>
 <% }); %>
@@ -18,6 +19,9 @@ public record Create<%= entityName %>Dto(
 <% (field.validationAnnotations || []).forEach(annotation => { %>
     <%- annotation %>
 <% }); %>
+<% if (field.schemaExample) { %>
+    @Schema(example = "<%= field.schemaExample %>")
+<% } %>
     <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1 || hasNestedRelationships || (forwardOneToOneRels && forwardOneToOneRels.length > 0)) { %>,<% } %>
 <% }); %>
 <% if (hasNestedRelationships) { %>

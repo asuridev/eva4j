@@ -1,6 +1,7 @@
 package <%= packageName %>.<%= moduleName %>.application.commands;
 
 import <%= packageName %>.shared.domain.interfaces.Command;
+import io.swagger.v3.oas.annotations.media.Schema;
 <% if (hasValueObjects) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.*;
 <% } %>
@@ -29,6 +30,9 @@ public record Create<%= aggregateName %>Command(
 <% (field.validationAnnotations || []).forEach(annotation => { %>
     <%- annotation %>
 <% }); %>
+<% if (field.schemaExample) { %>
+    @Schema(example = "<%= field.schemaExample %>")
+<% } %>
     <%- field.javaType %> <%= field.name %><% if (idx < commandFields.length - 1 || (oneToManyRelationships && oneToManyRelationships.length > 0) || (oneToOneRelationships && oneToOneRelationships.length > 0)) { %>,<% } %>
 <% }); %>
 <% if (oneToManyRelationships && oneToManyRelationships.length > 0) { %>

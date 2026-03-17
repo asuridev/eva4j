@@ -4,6 +4,7 @@ package <%= packageName %>.<%= moduleName %>.application.commands;
 <%- imp %>
 <% }); %>
 import <%= packageName %>.shared.domain.interfaces.Command;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * <%= useCaseName %>Command
@@ -12,6 +13,9 @@ import <%= packageName %>.shared.domain.interfaces.Command;
 public record <%= useCaseName %>Command(
         <%- idType %> id<% if (entityFields && entityFields.length > 0) { %>,<% } %>
 <% (entityFields || []).forEach(function(field, idx) { %>
+<% if (field.schemaExample) { %>
+        @Schema(example = "<%= field.schemaExample %>")
+<% } %>
         <%- field.javaType %> <%= field.name %><% if (idx < entityFields.length - 1) { %>,<% } %>
 <% }); %>
 ) implements Command {}

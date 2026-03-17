@@ -3,6 +3,7 @@ package <%= packageName %>.<%= moduleName %>.application.dtos;
 <% if (hasEnums) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.enums.*;
 <% } %>
+import io.swagger.v3.oas.annotations.media.Schema;
 <% imports.forEach(imp => { %>
 <%- imp %>
 <% }); %>
@@ -12,6 +13,9 @@ public record Create<%= voName %>Dto(
 <% (field.validationAnnotations || []).forEach(annotation => { %>
     <%- annotation %>
 <% }); %>
+<% if (field.schemaExample) { %>
+    @Schema(example = "<%= field.schemaExample %>")
+<% } %>
     <%- field.javaType %> <%= field.name %><% if (idx < fields.length - 1) { %>,<% } %>
 <% }); %>
 ) {

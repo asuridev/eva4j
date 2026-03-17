@@ -11,6 +11,7 @@ const { parseDomainYaml, generateEntityImports, generateValidationImports } = re
 const { createOrUpdateUrlsConfig, ensureUrlsImport } = require('./generate-http-exchange');
 const SharedGenerator = require('../generators/shared-generator');
 const ChecksumManager = require('../utils/checksum-manager');
+const { generateFakeValue, initSeed } = require('../utils/fake-data');
 const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext, updateKafkaYml,
         generateEventRecord, createOrUpdateMessageBroker, updateDomainEventHandler } = require('./generate-kafka-event');
 
@@ -1316,6 +1317,35 @@ function transformRelsForApp(rels, validatedVoNames) {
 }
 
 /**
+ * Enrich fields with @Schema(example) values for Swagger UI.
+ * Uses the same fake-data heuristics as the Postman collection generator.
+ */
+function enrichFieldsWithSchemaExamples(fields, allEnums, valueObjects) {
+  return fields.map(f => {
+    // Skip VOs (nested DTOs describe themselves), collections, and already-enriched
+    if (f.originalVoType || f.isValueObject || f.isCollection) return f;
+    const example = generateFakeValue(f, allEnums, valueObjects);
+    if (example === null || example === undefined || typeof example === 'object') return f;
+    return { ...f, schemaExample: String(example) };
+  });
+}
+
+/**
+ * Recursively enrich relationship fields with schema examples.
+ */
+function enrichRelsWithSchemaExamples(rels, allEnums, valueObjects) {
+  return (rels || []).map(rel => ({
+    ...rel,
+    fields: enrichFieldsWithSchemaExamples(rel.fields || [], allEnums, valueObjects),
+    nestedRelationships: enrichRelsWithSchemaExamples(rel.nestedRelationships, allEnums, valueObjects),
+    nestedOneToOneRelationships: (rel.nestedOneToOneRelationships || []).map(otoRel => ({
+      ...otoRel,
+      fields: enrichFieldsWithSchemaExamples(otoRel.fields || [], allEnums, valueObjects)
+    }))
+  }));
+}
+
+/**
  * Classify an endpoint operation into a semantic category.
  * Returns { category, ...metadata } where category is one of:
  *   'standard'        → matches the 5 CRUD patterns exactly
@@ -1508,12 +1538,19 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
       .map(r => ({ targetEntityName: r.target, fieldName: r.fieldName }))
   }));
 
-  const commandFieldsApp = transformFieldsForApp(commandFields, validatedVoNames);
+  // Schema examples for Swagger UI (same heuristics as Postman generator)
+  const localAllEnums = [...(aggregate.enums || []), ...(rootEntity.enums || [])];
+  initSeed(42);
+
+  const commandFieldsApp = enrichFieldsWithSchemaExamples(
+    transformFieldsForApp(commandFields, validatedVoNames), localAllEnums, valueObjects);
   const oneToOneRelationshipsApp = oneToOneRelationships.map(rel => ({
     ...rel,
-    fields: transformFieldsForApp(rel.fields || [], validatedVoNames)
+    fields: enrichFieldsWithSchemaExamples(
+      transformFieldsForApp(rel.fields || [], validatedVoNames), localAllEnums, valueObjects)
   }));
-  const oneToManyRelationshipsApp = transformRelsForApp(oneToManyRelationships, validatedVoNames);
+  const oneToManyRelationshipsApp = enrichRelsWithSchemaExamples(
+    transformRelsForApp(oneToManyRelationships, validatedVoNames), localAllEnums, valueObjects);
 
   const baseContext = {
     packageName, moduleName, aggregateName, aggregateNamePlural, rootEntity, secondaryEntities,
@@ -1527,7 +1564,8 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
   // ── Step 1: Validated VO Dtos ────────────────────────────────────────
   for (const vo of validatedVos) {
     const voDtoContext = {
-      packageName, moduleName, voName: vo.name, fields: vo.fields,
+      packageName, moduleName, voName: vo.name,
+      fields: enrichFieldsWithSchemaExamples(vo.fields, localAllEnums, valueObjects),
       hasEnums: (vo.imports || []).some(i => i.includes('.enums.')),
       imports: [...(vo.imports || []), ...generateValidationImports(vo.fields)]
     };
@@ -1591,7 +1629,8 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
       f.name !== 'createdBy' && f.name !== 'updatedBy' && !f.readOnly
     );
     const entityNestedRels = enrichRelationshipsRecursively(entity, secondaryEntities, 0, new Set());
-    const createFieldsApp = transformFieldsForApp(createFields, validatedVoNames);
+    const createFieldsApp = enrichFieldsWithSchemaExamples(
+      transformFieldsForApp(createFields, validatedVoNames), localAllEnums, valueObjects);
     const dtoVoDtoImports = validatedVos.filter(vo => createFieldsApp.some(f => f.originalVoType === vo.name))
       .map(vo => `import ${packageName}.${moduleName}.application.dtos.Create${vo.name}Dto;`);
     const createDtoImports = [...new Set([
@@ -1755,7 +1794,7 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
           useCaseName: op.useCase,
           idType,
           entityName: cl.entityName,
-          entityFields: cl.entityFields,
+          entityFields: enrichFieldsWithSchemaExamples(cl.entityFields || [], localAllEnums, valueObjects),
           addMethodName: cl.addMethodName,
           imports: cl.entityImports
         };
@@ -2011,12 +2050,19 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
   }));
   
   // Apply app-layer field transformation (VO fields become Create<Vo>Dto types)
-  const commandFieldsApp = transformFieldsForApp(commandFields, validatedVoNames);
+  // Schema examples for Swagger UI (same heuristics as Postman generator)
+  const localAllEnums = [...(aggregate.enums || []), ...(rootEntity.enums || [])];
+  initSeed(42);
+
+  const commandFieldsApp = enrichFieldsWithSchemaExamples(
+    transformFieldsForApp(commandFields, validatedVoNames), localAllEnums, valueObjects);
   const oneToOneRelationshipsApp = oneToOneRelationships.map(rel => ({
     ...rel,
-    fields: transformFieldsForApp(rel.fields || [], validatedVoNames)
+    fields: enrichFieldsWithSchemaExamples(
+      transformFieldsForApp(rel.fields || [], validatedVoNames), localAllEnums, valueObjects)
   }));
-  const oneToManyRelationshipsApp = transformRelsForApp(oneToManyRelationships, validatedVoNames);
+  const oneToManyRelationshipsApp = enrichRelsWithSchemaExamples(
+    transformRelsForApp(oneToManyRelationships, validatedVoNames), localAllEnums, valueObjects);
 
   // Base context for all templates
   const baseContext = {
@@ -2048,7 +2094,7 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       packageName,
       moduleName,
       voName: vo.name,
-      fields: vo.fields,
+      fields: enrichFieldsWithSchemaExamples(vo.fields, localAllEnums, valueObjects),
       hasEnums: (vo.imports || []).some(i => i.includes('.enums.')),
       imports: [...(vo.imports || []), ...generateValidationImports(vo.fields)]
     };
@@ -2242,7 +2288,8 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
       new Set()
     );
     
-    const createFieldsApp = transformFieldsForApp(createFields, validatedVoNames);
+    const createFieldsApp = enrichFieldsWithSchemaExamples(
+      transformFieldsForApp(createFields, validatedVoNames), localAllEnums, valueObjects);
     const dtoVoDtoImports = validatedVos
       .filter(vo => createFieldsApp.some(f => f.originalVoType === vo.name))
       .map(vo => `import ${packageName}.${moduleName}.application.dtos.Create${vo.name}Dto;`);
