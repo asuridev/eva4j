@@ -629,6 +629,7 @@ Verifies that all declared dependencies between modules are consistent: cross-ag
 | C3-004 | 🟡 warning | Sync dependency on a module that emits no Kafka events |
 | C3-005 | 🔴 error | Bidirectional sync coupling between two modules (A calls B **and** B calls A) |
 | C3-006 | 🟡 warning | `system.yaml` declares a sync call but the caller module has no matching port |
+| C3-007 | 🔴 error | Same `useCase` generates identically-named `CommandHandler`/`QueryHandler` in 2+ modules — causes `ConflictingBeanDefinitionException` |
 
 > **Note:** C3-002, C3-003, and C3-004 are skipped for external services — targets ending in `-external` or whose `baseUrl` points to a non-localhost host.
 
@@ -678,6 +679,38 @@ ports:
 **Message:** `[C3-005] Acoplamiento síncrono bidireccional entre 'reservations' y 'payments'`
 
 **Fix:** Same as [S3-003](#s3-003--bidirectional-sync-coupling) — break the cycle with an async event or a shared read-model.
+
+#### C3-007 — Cross-module useCase name collision (bean conflict)
+
+Two modules consuming the same Kafka event with the same `useCase` name — or a listener `useCase` matching an endpoint `useCase` in another module — generates two handler classes with the same simple name. Since `UseCaseConfig` scans the entire base package and `@ApplicationComponent` does not qualify the bean name, Spring throws `ConflictingBeanDefinitionException`.
+
+```yaml
+# orders/domain.yaml
+listeners:
+  - event: PaymentApprovedEvent
+    useCase: HandlePaymentApproved   # → HandlePaymentApprovedCommandHandler.java
+
+# deliveries/domain.yaml
+listeners:
+  - event: PaymentApprovedEvent
+    useCase: HandlePaymentApproved   # ❌ ERROR — same handler class name
+```
+
+**Message:** `[C3-007] 'HandlePaymentApprovedCommandHandler' se genera en 'orders' y 'deliveries' — causa ConflictingBeanDefinitionException`
+
+**Fix:** Rename the `useCase` in each module to reflect its bounded context:
+
+```yaml
+# orders/domain.yaml
+listeners:
+  - event: PaymentApprovedEvent
+    useCase: ConfirmOrder              # ✅ Semantically correct for orders
+
+# deliveries/domain.yaml
+listeners:
+  - event: PaymentApprovedEvent
+    useCase: ScheduleDelivery          # ✅ Semantically correct for deliveries
+```
 
 #### C3-006 — system.yaml sync call without matching port
 

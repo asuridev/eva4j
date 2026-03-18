@@ -591,6 +591,7 @@ function runC3(domainConfigs, systemConfig) {
     'C3-004': { label: 'Dependencia síncrona a módulo que no emite eventos Kafka', severity: 'ok', findings: [] },
     'C3-005': { label: 'Acoplamiento síncrono bidireccional entre dos módulos', severity: 'ok', findings: [] },
     'C3-006': { label: 'system.yaml declara llamada síncrona pero módulo no tiene port correspondiente', severity: 'ok', findings: [] },
+    'C3-007': { label: 'Colisión de bean CommandHandler/QueryHandler entre módulos (mismo useCase)', severity: 'ok', findings: [] },
   };
 
   const internalModuleNames = new Set(Object.keys(domainConfigs));
@@ -741,6 +742,54 @@ function runC3(domainConfigs, systemConfig) {
     }
   }
 
+  // C3-007: cross-module useCase name collision → ConflictingBeanDefinitionException
+  // Two modules generating a handler with the same simple class name causes Spring bean conflict
+  // because UseCaseConfig scans the entire base package and @ApplicationComponent has no qualifier.
+  const handlerRegistry = {}; // handlerClassName → [{module, source}]
+  for (const [moduleName, config] of Object.entries(domainConfigs)) {
+    // Collect handler names from listeners
+    for (const listener of config.listeners || []) {
+      const uc = listener.useCase;
+      if (!uc) continue;
+      const handlerName = `${uc}CommandHandler`;
+      if (!handlerRegistry[handlerName]) handlerRegistry[handlerName] = [];
+      handlerRegistry[handlerName].push({ module: moduleName, source: `listener(${listener.event})` });
+    }
+    // Collect handler names from endpoints
+    for (const ver of (config.endpoints && config.endpoints.versions) || []) {
+      for (const op of ver.operations || []) {
+        if (!op.useCase) continue;
+        const resolvedType = op.type || (op.method === 'GET' ? 'query' : 'command');
+        const suffix = resolvedType === 'query' ? 'QueryHandler' : 'CommandHandler';
+        const handlerName = `${op.useCase}${suffix}`;
+        if (!handlerRegistry[handlerName]) handlerRegistry[handlerName] = [];
+        handlerRegistry[handlerName].push({ module: moduleName, source: `endpoint(${op.method} ${op.path})` });
+      }
+    }
+  }
+  const seenC3007 = new Set();
+  for (const [handlerName, entries] of Object.entries(handlerRegistry)) {
+    const distinctModules = [...new Set(entries.map((e) => e.module))];
+    if (distinctModules.length < 2) continue;
+    for (let i = 0; i < distinctModules.length; i++) {
+      for (let j = i + 1; j < distinctModules.length; j++) {
+        const pair = [distinctModules[i], distinctModules[j]].sort().join('↔');
+        const key = `${pair}:${handlerName}`;
+        if (seenC3007.has(key)) continue;
+        seenC3007.add(key);
+        const sourcesA = entries.filter((e) => e.module === distinctModules[i]).map((e) => e.source).join(', ');
+        const sourcesB = entries.filter((e) => e.module === distinctModules[j]).map((e) => e.source).join(', ');
+        checks['C3-007'].findings.push(
+          finding(
+            distinctModules[i],
+            `'${handlerName}' se genera en '${distinctModules[i]}' y '${distinctModules[j]}' — causa ConflictingBeanDefinitionException`,
+            `${distinctModules[i]}: ${sourcesA} | ${distinctModules[j]}: ${sourcesB}. Fix: renombrar el useCase en uno de los módulos con un nombre semántico de su bounded context`
+          )
+        );
+      }
+    }
+  }
+
   setDefaultSeverities(checks, {
     'C3-001': 'info',    // reference.module may come from request context (JWT/header) — not always an active integration
     'C3-002': 'error',
@@ -748,6 +797,7 @@ function runC3(domainConfigs, systemConfig) {
     'C3-004': 'warning',
     'C3-005': 'error',
     'C3-006': 'warning',
+    'C3-007': 'error',
   });
 
   return checks;
