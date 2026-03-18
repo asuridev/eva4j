@@ -64,6 +64,7 @@ class BaseGenerator {
     await fs.ensureDir(path.join(resources, 'static'));
     await fs.ensureDir(path.join(resources, 'templates'));
     await fs.ensureDir(path.join(this.projectDir, 'system'));
+    await fs.ensureDir(path.join(this.projectDir, '.agents'));
   }
 
   async generateApplication() {
@@ -133,10 +134,7 @@ class BaseGenerator {
       path.join(this.projectDir, 'AGENTS.md'));
     await this.generateFile('root/system.yaml.ejs', 
       path.join(this.projectDir, 'system.yaml'));
-    await this.generateFile('root/skill-build-system-yaml.ejs', 
-      path.join(this.projectDir, '.agents', 'skills', 'build-system-yaml', 'SKILL.md'));
-    await this.generateFile('root/skill-build-domain-yaml-references-generate-entities.md.ejs', 
-      path.join(this.projectDir, '.agents', 'skills', 'build-system-yaml', 'references', 'GENERATE_ENTITIES.md'));
+    await this.copySkills();
     
     if (this.context.features.includeDocker) {
       await this.generateFile('docker/docker-compose.yaml.ejs', 
@@ -149,6 +147,12 @@ class BaseGenerator {
     await this.generateFile('test/ApplicationTests.java.ejs', 
       path.join(this.projectDir, 'src', 'test', 'java', packagePath, 
         `${this.context.applicationClassName}Tests.java`));
+  }
+
+  async copySkills() {
+    const srcSkillsDir = path.join(__dirname, '../skills');
+    const destSkillsDir = path.join(this.projectDir, '.agents', 'skills');
+    await fs.copy(srcSkillsDir, destSkillsDir);
   }
 
   async generateFile(templateRelPath, destPath) {
