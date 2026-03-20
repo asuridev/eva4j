@@ -4,16 +4,15 @@ import <%= packageName %>.<%= moduleName %>.application.commands.<%= useCaseName
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * <%= useCaseName %>CommandHandler
  * Loads the <%= aggregateName %> aggregate and calls entity.<%= domainMethod %>() to execute the transition.
  */
-@Slf4j
 @ApplicationComponent
 public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useCaseName %>Command> {
 
@@ -25,15 +24,12 @@ public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useC
 
     @Override
     @Transactional
+    @LogExceptions
     public void handle(<%= useCaseName %>Command command) {
-        log.info("Handling <%= useCaseName %>Command for id: {}", command.id());
-
         <%= aggregateName %> entity = repository.findById(command.id())
                 .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
 
         entity.<%= domainMethod %>();
         repository.save(entity);
-
-        log.info("<%= aggregateName %> id: {} transitioned via <%= domainMethod %>()", command.id());
     }
 }

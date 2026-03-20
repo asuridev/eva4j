@@ -5,15 +5,14 @@ import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregate
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Create<%= aggregateName %>CommandHandler
  * Handles the creation of a new <%= aggregateName %> aggregate
  */
-@Slf4j
 @ApplicationComponent
 public class Create<%= aggregateName %>CommandHandler implements CommandHandler<Create<%= aggregateName %>Command> {
 
@@ -27,9 +26,8 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
 
     @Override
     @Transactional
+    @LogExceptions
     public void handle(Create<%= aggregateName %>Command command) {
-        log.info("Handling Create<%= aggregateName %>Command: {}", command);
-        
         // Create root entity with main fields only
         <%= aggregateName %> entity = new <%= aggregateName %>(
 <% if (commandFields) { %>
@@ -86,7 +84,6 @@ public class Create<%= aggregateName %>CommandHandler implements CommandHandler<
 <% }); %>
 <% } %>
         // Persist aggregate
-        <%= aggregateName %> saved = repository.save(entity);
-        log.info("<%= aggregateName %> created successfully with id: {}", saved.getId());
+        repository.save(entity);
     }
 }

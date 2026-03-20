@@ -7,9 +7,9 @@ import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateNam
 import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 <% } %>
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -20,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
  * Non-null command fields override the current value; null fields are preserved
  * from the loaded entity. No setters are required on the domain entity.
  */
-@Slf4j
 @ApplicationComponent
 public class Update<%= aggregateName %>CommandHandler implements CommandHandler<Update<%= aggregateName %>Command> {
 
@@ -42,9 +41,8 @@ public class Update<%= aggregateName %>CommandHandler implements CommandHandler<
 
     @Override
     @Transactional
+    @LogExceptions
     public void handle(Update<%= aggregateName %>Command command) {
-        log.info("Handling Update<%= aggregateName %>Command for id: {}", command.id());
-
         <%= aggregateName %> existing = repository
                 .findById(command.id())
                 .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
@@ -100,6 +98,5 @@ public class Update<%= aggregateName %>CommandHandler implements CommandHandler<
 <% } %>
 
         repository.save(updated);
-        log.info("<%= aggregateName %> updated successfully with id: {}", command.id());
     }
 }

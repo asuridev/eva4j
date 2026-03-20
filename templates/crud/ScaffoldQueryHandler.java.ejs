@@ -4,8 +4,8 @@ import <%= packageName %>.<%= moduleName %>.application.dtos.<%= aggregateName %
 import <%= packageName %>.<%= moduleName %>.application.queries.<%= useCaseName %>Query;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.interfaces.QueryHandler;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * <%= useCaseName %>QueryHandler
@@ -16,7 +16,6 @@ import lombok.extern.slf4j.Slf4j;
  *   2. Retrieve data from the repository
  *   3. Map the result to a DTO and return it
  */
-@Slf4j
 @ApplicationComponent
 public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseName %>Query, <%= aggregateName %>ResponseDto> {
 
@@ -27,9 +26,8 @@ public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseN
     }
 
     @Override
+    @LogExceptions
     public <%= aggregateName %>ResponseDto handle(<%= useCaseName %>Query query) {
-        log.info("Handling <%= useCaseName %>Query: {}", query);
-
         // TODO: Implement query logic
         // Example:
         // return repository.findById(query.id())

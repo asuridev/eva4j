@@ -5,9 +5,9 @@ import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregate
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= entityName %>;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -16,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * The aggregate root must expose: <%= addMethodName %>(<%= entityName %> item)
  */
-@Slf4j
 @ApplicationComponent
 public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useCaseName %>Command> {
 
@@ -28,16 +27,13 @@ public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useC
 
     @Override
     @Transactional
+    @LogExceptions
     public void handle(<%= useCaseName %>Command command) {
-        log.info("Handling <%= useCaseName %>Command for <%= aggregateName %> id: {}", command.id());
-
         <%= aggregateName %> entity = repository.findById(command.id())
                 .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
 
         <%= entityName %> item = new <%= entityName %>(<% (entityFields || []).forEach(function(field, idx) { %>command.<%= field.name %>()<% if (idx < entityFields.length - 1) { %>, <% } %><% }); %>);
         entity.<%= addMethodName %>(item);
         repository.save(entity);
-
-        log.info("<%= entityName %> added to <%= aggregateName %> id: {}", command.id());
     }
 }

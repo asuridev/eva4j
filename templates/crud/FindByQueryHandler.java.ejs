@@ -7,8 +7,8 @@ import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregate
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.application.dtos.PagedResponse;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.interfaces.QueryHandler;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -22,7 +22,6 @@ import java.util.List;
  * Returns paginated <%= aggregateNamePlural %> filtered by <%= fieldName %>.
  * Calls repository.<%= jpaMethodName %>(<%= fieldName %>, pageable).
  */
-@Slf4j
 @ApplicationComponent
 public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseName %>Query, PagedResponse<<%= aggregateName %>ResponseDto>> {
 
@@ -37,10 +36,8 @@ public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseN
 
     @Override
     @Transactional(readOnly = true)
+    @LogExceptions
     public PagedResponse<<%= aggregateName %>ResponseDto> handle(<%= useCaseName %>Query query) {
-        log.info("Handling <%= useCaseName %>Query — <%= fieldName %>={}, page={}, size={}",
-                query.<%= fieldName %>(), query.page(), query.size());
-
         Sort sort = Sort.by(Sort.Direction.fromString(query.sortDirection()), query.sortBy());
         Pageable pageable = PageRequest.of(query.page(), query.size(), sort);
 
@@ -48,9 +45,6 @@ public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseN
         List<<%= aggregateName %>ResponseDto> content = page.getContent().stream()
                 .map(mapper::toDto)
                 .toList();
-
-        log.info("<%= useCaseName %> retrieved — page={}/{}, totalElements={}",
-                page.getNumber() + 1, page.getTotalPages(), page.getTotalElements());
 
         return PagedResponse.of(content, page.getNumber(), page.getSize(), page.getTotalElements());
     }

@@ -3,8 +3,8 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 import <%= packageName %>.<%= moduleName %>.application.commands.<%= useCaseName %>Command;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -16,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
  *   2. Call the appropriate domain method (e.g. entity.someBusinessMethod())
  *   3. Persist the result via repository.save(entity)
  */
-@Slf4j
 @ApplicationComponent
 public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useCaseName %>Command> {
 
@@ -28,9 +27,8 @@ public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useC
 
     @Override
     @Transactional
+    @LogExceptions
     public void handle(<%= useCaseName %>Command command) {
-        log.info("Handling <%= useCaseName %>Command: {}", command);
-
         // TODO: Implement business logic
         // Example:
         // <%= aggregateName %> entity = repository.findById(command.id())

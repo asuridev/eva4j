@@ -2,6 +2,7 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 
 import <%= packageName %>.<%= moduleName %>.application.commands.<%= commandClassName %>;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
 
 /**
@@ -16,6 +17,7 @@ public class <%= useCase %>CommandHandler implements CommandHandler<<%= commandC
   }
 
   @Override
+  @LogExceptions
   public void handle(<%= commandClassName %> command) {
     // TODO: implement <%= useCase %> logic
   }

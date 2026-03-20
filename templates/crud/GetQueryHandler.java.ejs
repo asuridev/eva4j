@@ -6,16 +6,15 @@ import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateNam
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
 import <%= packageName %>.shared.domain.interfaces.QueryHandler;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Get<%= aggregateName %>QueryHandler
  * Handles retrieval of a single <%= aggregateName %> by ID
  */
-@Slf4j
 @ApplicationComponent
 public class Get<%= aggregateName %>QueryHandler implements QueryHandler<Get<%= aggregateName %>Query, <%= aggregateName %>ResponseDto> {
 
@@ -30,13 +29,11 @@ public class Get<%= aggregateName %>QueryHandler implements QueryHandler<Get<%= 
 
     @Override
     @Transactional(readOnly = true)
+    @LogExceptions
     public <%= aggregateName %>ResponseDto handle(Get<%= aggregateName %>Query query) {
-        log.info("Handling Get<%= aggregateName %>Query for id: {}", query.id());
-        
         <%= aggregateName %> entity = repository.findById(query.id())
             .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + query.id()));
         
-        log.info("<%= aggregateName %> retrieved successfully with id: {}", query.id());
         return mapper.toDto(entity);
     }
 }
