@@ -170,7 +170,7 @@ class SharedGenerator {
 
   async generateErrorMessages(basePath) {
     const errorMessagePath = path.join(basePath, 'domain', 'errorMessage');
-    const files = ['ErrorMessage', 'FullErrorMessage', 'ShortErrorMessage'];
+    const files = ['ErrorResponse'];
     
     for (const file of files) {
       await this.generateFile(`errorMessage/${file}.java.ejs`, 

@@ -1,12 +1,11 @@
 package <%= packageName %>.shared.infrastructure.handlerException;
 
-
 import <%= packageName %>.shared.domain.customExceptions.*;
-import <%= packageName %>.shared.domain.errorMessage.ErrorMessage;
-import <%= packageName %>.shared.domain.errorMessage.FullErrorMessage;
-import <%= packageName %>.shared.domain.errorMessage.ShortErrorMessage;
+import <%= packageName %>.shared.domain.errorMessage.ErrorResponse;
 import feign.RetryableException;
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -25,140 +24,161 @@ import org.springframework.web.server.MethodNotAllowedException;
 import org.springframework.web.server.ServerWebInputException;
 import org.yaml.snakeyaml.constructor.DuplicateKeyException;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @RestControllerAdvice
 public class HandlerExceptions {
 
+  private static final Logger log = LoggerFactory.getLogger(HandlerExceptions.class);
+
+  // ── Validation errors ──────────────────────────────────────────
+
   @ResponseStatus(HttpStatus.BAD_REQUEST)
   @ExceptionHandler(MethodArgumentNotValidException.class)
   @ResponseBody
-  public ErrorMessage onMethodArgumentNotValidException(MethodArgumentNotValidException ex){
-    List<String> messagesErrors = new ArrayList<>();
-    ex.getBindingResult().getFieldErrors().forEach(error -> {
-      messagesErrors.add(error.getField() + " " + error.getDefaultMessage());
-    });
-    return  new FullErrorMessage(messagesErrors,"BadRequest",HttpStatus.BAD_REQUEST.value());
+  public ErrorResponse onMethodArgumentNotValidException(MethodArgumentNotValidException ex) {
+    List<String> details = ex.getBindingResult().getFieldErrors().stream()
+        .map(error -> error.getField() + " " + error.getDefaultMessage())
+        .toList();
+    return new ErrorResponse(HttpStatus.BAD_REQUEST.value(), "Bad Request", "Validation failed", details);
   }
-
 
   @ResponseStatus(HttpStatus.BAD_REQUEST)
   @ExceptionHandler(ConstraintViolationException.class)
   @ResponseBody
-  public ErrorMessage onConstraintValidationException(ConstraintViolationException ex){
-    List<String> errors = new ArrayList<>();
-    ex.getConstraintViolations().forEach( error -> {
-      errors.add(error.getMessage());
-    });
-    return  new FullErrorMessage(errors,"Bad Request",HttpStatus.BAD_REQUEST.value());
+  public ErrorResponse onConstraintValidationException(ConstraintViolationException ex) {
+    List<String> details = ex.getConstraintViolations().stream()
+        .map(v -> v.getMessage())
+        .toList();
+    return new ErrorResponse(HttpStatus.BAD_REQUEST.value(), "Bad Request", "Constraint violation", details);
   }
 
-  //Spring Exceptions
+  @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+  @ExceptionHandler(ValidationException.class)
+  @ResponseBody
+  public ErrorResponse onValidationException(ValidationException ex) {
+    String message = ex.getRowNumber() != null
+        ? "Row " + ex.getRowNumber() + ": " + ex.getMessage()
+        : ex.getMessage();
+    return new ErrorResponse(HttpStatus.UNPROCESSABLE_ENTITY.value(), "Validation Error", message);
+  }
+
+  // ── Spring framework errors ────────────────────────────────────
+
   @ResponseStatus(HttpStatus.BAD_REQUEST)
   @ExceptionHandler({
-          DuplicateKeyException.class,
-          MethodNotAllowedException.class,
-          ServerWebInputException.class,
-          MethodArgumentTypeMismatchException.class,
-          HttpMessageNotReadableException.class,
-          DataIntegrityViolationException.class
+      DuplicateKeyException.class,
+      MethodNotAllowedException.class,
+      ServerWebInputException.class,
+      MethodArgumentTypeMismatchException.class,
+      HttpMessageNotReadableException.class
   })
   @ResponseBody
-  public ErrorMessage onSpringBadRequest(Exception ex){
-    return new FullErrorMessage( List.of(ex.getClass().getSimpleName()), "Bad Request",HttpStatus.BAD_REQUEST.value());
+  public ErrorResponse onSpringBadRequest(Exception ex) {
+    return new ErrorResponse(HttpStatus.BAD_REQUEST.value(), "Bad Request", "Malformed request");
+  }
+
+  @ResponseStatus(HttpStatus.CONFLICT)
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  @ResponseBody
+  public ErrorResponse onDataIntegrityViolation(DataIntegrityViolationException ex) {
+    return new ErrorResponse(HttpStatus.CONFLICT.value(), "Conflict", "Data integrity violation — a constraint was not satisfied");
+  }
+
+  // ── Security errors ────────────────────────────────────────────
+
+  @ResponseStatus(HttpStatus.UNAUTHORIZED)
+  @ExceptionHandler({
+      UnauthorizedException.class,
+      BadCredentialsException.class,
+      DisabledException.class,
+      LockedException.class,
+      InternalAuthenticationServiceException.class
+  })
+  @ResponseBody
+  public ErrorResponse onUnauthorizedException(Exception ex) {
+    return new ErrorResponse(HttpStatus.UNAUTHORIZED.value(), "Unauthorized",
+        ex.getMessage() != null ? ex.getMessage() : "Authentication required");
   }
 
   @ResponseStatus(HttpStatus.FORBIDDEN)
-  @ExceptionHandler(
-          AuthorizationDeniedException.class
-  )
+  @ExceptionHandler({ForbiddenException.class, AuthorizationDeniedException.class})
   @ResponseBody
-  public ErrorMessage onAuthorizationDeniedException( AuthorizationDeniedException ex) {
-    if (ex.getMessage() == null) return new ShortErrorMessage("Forbidden", HttpStatus.FORBIDDEN.value());
-    return new FullErrorMessage(List.of(ex.getMessage()), "Forbidden", HttpStatus.FORBIDDEN.value());
+  public ErrorResponse onForbiddenException(Exception ex) {
+    return new ErrorResponse(HttpStatus.FORBIDDEN.value(), "Forbidden",
+        ex.getMessage() != null ? ex.getMessage() : "Access denied");
   }
 
-  // custom exceptions
-  //------------------
+  // ── Custom domain exceptions ───────────────────────────────────
+
   @ResponseStatus(HttpStatus.BAD_REQUEST)
   @ExceptionHandler(BadRequestException.class)
   @ResponseBody
-  public ErrorMessage onBadRequestException(BadRequestException ex) {
-    if (ex.getMessage() == null) return new ShortErrorMessage("Bad Request", HttpStatus.BAD_REQUEST.value());
-    return new FullErrorMessage(List.of(ex.getMessage()),"Bad Request", HttpStatus.BAD_REQUEST.value());
+  public ErrorResponse onBadRequestException(BadRequestException ex) {
+    return new ErrorResponse(HttpStatus.BAD_REQUEST.value(), "Bad Request",
+        ex.getMessage() != null ? ex.getMessage() : "Bad request");
+  }
+
+  @ResponseStatus(HttpStatus.BAD_REQUEST)
+  @ExceptionHandler(ImportFileException.class)
+  @ResponseBody
+  public ErrorResponse onImportFileException(ImportFileException ex) {
+    return new ErrorResponse(HttpStatus.BAD_REQUEST.value(), "Import Error",
+        ex.getMessage() != null ? ex.getMessage() : "File import failed");
   }
 
   @ResponseStatus(HttpStatus.NOT_FOUND)
   @ExceptionHandler(NotFoundException.class)
   @ResponseBody
-  public ErrorMessage onNotFoundException(NotFoundException ex) {
-    if (ex.getMessage() == null) return  new ShortErrorMessage("Not Found", HttpStatus.NOT_FOUND.value());
-    return new FullErrorMessage(List.of(ex.getMessage()), "Not Found", HttpStatus.NOT_FOUND.value());
-  }
-
-  @ResponseStatus(HttpStatus.UNAUTHORIZED)
-  @ExceptionHandler({
-          UnauthorizedException.class,
-          BadCredentialsException.class,
-          DisabledException.class,
-          LockedException.class,
-          InternalAuthenticationServiceException.class
-  })
-  @ResponseBody
-  public ErrorMessage onUnauthorizedException(Exception ex) {
-    if (ex.getMessage() == null) return new ShortErrorMessage("Unauthorized", HttpStatus.UNAUTHORIZED.value());
-    return new FullErrorMessage(List.of(ex.getMessage()), "Unauthorized", HttpStatus.UNAUTHORIZED.value());
-  }
-
-  @ResponseStatus(HttpStatus.FORBIDDEN)
-  @ExceptionHandler(
-          ForbiddenException.class
-  )
-  @ResponseBody
-  public ErrorMessage onForbiddenException( ForbiddenException ex) {
-    if (ex.getMessage() == null) return new ShortErrorMessage("Forbidden", HttpStatus.FORBIDDEN.value());
-    return new FullErrorMessage(List.of(ex.getMessage()), "Forbidden", HttpStatus.FORBIDDEN.value());
+  public ErrorResponse onNotFoundException(NotFoundException ex) {
+    return new ErrorResponse(HttpStatus.NOT_FOUND.value(), "Not Found",
+        ex.getMessage() != null ? ex.getMessage() : "Resource not found");
   }
 
   @ResponseStatus(HttpStatus.CONFLICT)
   @ExceptionHandler(ConflictException.class)
   @ResponseBody
-  public ErrorMessage onConflictException(ConflictException ex) {
-    if (ex.getMessage() == null) return new ShortErrorMessage("Conflict", HttpStatus.CONFLICT.value());
-    return new FullErrorMessage(List.of(ex.getMessage()), "Conflict", HttpStatus.CONFLICT.value());
+  public ErrorResponse onConflictException(ConflictException ex) {
+    return new ErrorResponse(HttpStatus.CONFLICT.value(), "Conflict",
+        ex.getMessage() != null ? ex.getMessage() : "Resource conflict");
   }
 
   @ResponseStatus(HttpStatus.CONFLICT)
   @ExceptionHandler(InvalidStateTransitionException.class)
   @ResponseBody
-  public ErrorMessage onInvalidStateTransitionException(InvalidStateTransitionException ex) {
-    if (ex.getMessage() == null) return new ShortErrorMessage("Invalid State Transition", HttpStatus.CONFLICT.value());
-    return new FullErrorMessage(List.of(ex.getMessage()), "Invalid State Transition", HttpStatus.CONFLICT.value());
+  public ErrorResponse onInvalidStateTransitionException(InvalidStateTransitionException ex) {
+    return new ErrorResponse(HttpStatus.CONFLICT.value(), "Invalid State Transition",
+        ex.getMessage() != null ? ex.getMessage() : "State transition not allowed");
   }
 
   @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
   @ExceptionHandler(BusinessException.class)
   @ResponseBody
-  public ErrorMessage onBusinessException(BusinessException ex) {
-    if (ex.getMessage() == null) return new ShortErrorMessage("Business Rule Violation", HttpStatus.UNPROCESSABLE_ENTITY.value());
-    return new FullErrorMessage(List.of(ex.getMessage()), "Business Rule Violation", HttpStatus.UNPROCESSABLE_ENTITY.value());
+  public ErrorResponse onBusinessException(BusinessException ex) {
+    return new ErrorResponse(HttpStatus.UNPROCESSABLE_ENTITY.value(), "Business Rule Violation",
+        ex.getMessage() != null ? ex.getMessage() : "A business rule was violated");
   }
 
-  //error de feign client
+  // ── External service errors ────────────────────────────────────
+
   @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
   @ExceptionHandler(RetryableException.class)
   @ResponseBody
-  public ErrorMessage onRetryableException(RetryableException ex) {
-   return new ShortErrorMessage(ex.request().url() + " not available", HttpStatus.SERVICE_UNAVAILABLE.value());
+  public ErrorResponse onRetryableException(RetryableException ex) {
+    log.error("External service unavailable: {}", ex.request().url(), ex);
+    return new ErrorResponse(HttpStatus.SERVICE_UNAVAILABLE.value(), "Service Unavailable",
+        "An external service is temporarily unavailable");
   }
 
-  //Internal Server Error
+  // ── Catch-all ──────────────────────────────────────────────────
+
   @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
   @ExceptionHandler(Exception.class)
   @ResponseBody
-  public ErrorMessage onServerError(Exception ex){
-    return new FullErrorMessage(List.of(ex.getClass().getSimpleName()) ,"Internal Server Error", HttpStatus.INTERNAL_SERVER_ERROR.value());
+  public ErrorResponse onServerError(Exception ex) {
+    log.error("Unhandled exception", ex);
+    return new ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR.value(), "Internal Server Error",
+        "An unexpected error occurred");
   }
 
 }
