@@ -139,6 +139,8 @@ class BaseGenerator {
     if (this.context.features.includeDocker) {
       await this.generateFile('docker/docker-compose.yaml.ejs', 
         path.join(this.projectDir, 'docker-compose.yaml'));
+      await this.generateFile('docker/Dockerfile.ejs', 
+        path.join(this.projectDir, 'Dockerfile'));
     }
   }
 

@@ -229,15 +229,20 @@ async function detachCommand(moduleName, options) {
     // Step 3: Generate base project using BaseGenerator
     await generateDetachedProject(newProjectDir, detachedContext);
     
+    spinner.text = 'Copying Gradle wrapper...';
+    
+    // Step 4: Copy Gradle wrapper from parent project
+    await copyGradleWrapper(projectDir, newProjectDir);
+    
     spinner.text = 'Copying module files...';
     
-    // Step 4: Copy module directory
+    // Step 5: Copy module directory
     const newModuleDir = path.join(newProjectDir, 'src', 'main', 'java', packagePath, moduleName);
     await fs.copy(moduleDir, newModuleDir);
     
     spinner.text = 'Merging shared components...';
     
-    // Step 5: Merge shared/domain into module/domain
+    // Step 6: Merge shared/domain into module/domain (filtering modulith-only components)
     await mergeSharedComponents(
       sharedDir,
       newModuleDir,
@@ -247,7 +252,7 @@ async function detachCommand(moduleName, options) {
     
     spinner.text = 'Updating package references...';
     
-    // Step 6: Update all imports in module files
+    // Step 7: Update all imports in module files
     await updatePackageReferences(
       newModuleDir,
       packageName,
@@ -256,10 +261,10 @@ async function detachCommand(moduleName, options) {
     
     spinner.text = 'Cleaning up...';
     
-    // Step 7: Remove package-info.java files
+    // Step 8: Remove package-info.java files
     await removePackageInfoFiles(newModuleDir);
     
-    // Step 8: Copy test files if they exist
+    // Step 9: Copy test files if they exist
     const testModuleDir = path.join(projectDir, 'src', 'test', 'java', packagePath, moduleName);
     if (await fs.pathExists(testModuleDir)) {
       const newTestModuleDir = path.join(newProjectDir, 'src', 'test', 'java', packagePath, moduleName);
@@ -267,7 +272,7 @@ async function detachCommand(moduleName, options) {
       await updatePackageReferences(newTestModuleDir, packageName, moduleName);
     }
     
-    // Step 9: Create detached project configuration
+    // Step 10: Create detached project configuration
     const detachedConfigManager = new ConfigManager(newProjectDir);
     await detachedConfigManager.saveProjectConfig({
       ...detachedContext,
@@ -281,8 +286,11 @@ async function detachCommand(moduleName, options) {
     
     spinner.text = 'Copying environment configurations...';
     
-    // Step 10: Copy environment profile files from parent resources
-    await copyEnvironmentProfiles(projectDir, newProjectDir, packageName, moduleName);
+    // Step 11: Copy parameter files from parent (kafka.yaml, urls.yaml, etc.)
+    await copyParameterFiles(projectDir, newProjectDir, packageName, moduleName);
+    
+    // Step 12: Copy domain.yaml specification if it exists
+    await copyDomainYaml(projectDir, newProjectDir, moduleName);
     
     spinner.succeed(chalk.green('✅ Module detached successfully! ✨'));
     
@@ -373,74 +381,43 @@ function transformSharedFileContent(content, packageName, moduleName) {
 }
 
 /**
- * Merge shared components into module structure
+ * Directories that are specific to Spring Modulith (modular monolith)
+ * and should NOT be copied when detaching to a standalone microservice.
+ */
+const MODULITH_ONLY_DIRS = new Set([
+  'eventPublicationConfig',  // Spring Modulith event_publication table
+  'mockEvent',               // In-memory event surrogate for mock mode
+]);
+
+/**
+ * Files specific to Spring Modulith that should be skipped during merge.
+ */
+const MODULITH_ONLY_FILES = new Set([
+  'package-info.java',  // Contains @ApplicationModule(type = OPEN)
+]);
+
+/**
+ * Merge shared components into module structure, filtering out modulith-only components.
  */
 async function mergeSharedComponents(sharedDir, moduleDir, packageName, moduleName) {
-  // Merge shared/domain/* into module/domain/
-  const sharedDomainDir = path.join(sharedDir, 'domain');
-  if (await fs.pathExists(sharedDomainDir)) {
-    const domainEntries = await fs.readdir(sharedDomainDir);
-    for (const entry of domainEntries) {
-      const sourcePath = path.join(sharedDomainDir, entry);
+  const layers = ['domain', 'infrastructure', 'application'];
+
+  for (const layer of layers) {
+    const sharedLayerDir = path.join(sharedDir, layer);
+    if (!(await fs.pathExists(sharedLayerDir))) continue;
+
+    const entries = await fs.readdir(sharedLayerDir);
+    for (const entry of entries) {
+      const sourcePath = path.join(sharedLayerDir, entry);
       const stat = await fs.stat(sourcePath);
-      
+
       if (stat.isDirectory()) {
-        // Copy and transform subdirectories (annotations, interfaces, customExceptions, etc.)
-        const destPath = path.join(moduleDir, 'domain', entry);
+        if (MODULITH_ONLY_DIRS.has(entry)) continue;
+        const destPath = path.join(moduleDir, layer, entry);
         await copyAndTransformDirectory(sourcePath, destPath, packageName, moduleName);
       } else if (stat.isFile() && entry.endsWith('.java')) {
-        // Copy and transform individual .java files (AuditableEntity.java, etc.)
-        const destPath = path.join(moduleDir, 'domain', entry);
-        if (!(await fs.pathExists(destPath))) {
-          const content = await fs.readFile(sourcePath, 'utf-8');
-          const transformed = transformSharedFileContent(content, packageName, moduleName);
-          await fs.ensureDir(path.dirname(destPath));
-          await fs.writeFile(destPath, transformed, 'utf-8');
-        }
-      }
-    }
-  }
-  
-  // Merge shared/infrastructure/* into module/infrastructure/
-  const sharedInfraDir = path.join(sharedDir, 'infrastructure');
-  if (await fs.pathExists(sharedInfraDir)) {
-    const infraEntries = await fs.readdir(sharedInfraDir);
-    for (const entry of infraEntries) {
-      const sourcePath = path.join(sharedInfraDir, entry);
-      const stat = await fs.stat(sourcePath);
-      
-      if (stat.isDirectory()) {
-        // Copy and transform subdirectories
-        const destPath = path.join(moduleDir, 'infrastructure', entry);
-        await copyAndTransformDirectory(sourcePath, destPath, packageName, moduleName);
-      } else if (stat.isFile() && entry.endsWith('.java')) {
-        // Copy and transform individual .java files
-        const destPath = path.join(moduleDir, 'infrastructure', entry);
-        if (!(await fs.pathExists(destPath))) {
-          const content = await fs.readFile(sourcePath, 'utf-8');
-          const transformed = transformSharedFileContent(content, packageName, moduleName);
-          await fs.ensureDir(path.dirname(destPath));
-          await fs.writeFile(destPath, transformed, 'utf-8');
-        }
-      }
-    }
-  }
-  
-  // Merge shared/application/* into module/application/
-  const sharedApplicationDir = path.join(sharedDir, 'application');
-  if (await fs.pathExists(sharedApplicationDir)) {
-    const applicationEntries = await fs.readdir(sharedApplicationDir);
-    for (const entry of applicationEntries) {
-      const sourcePath = path.join(sharedApplicationDir, entry);
-      const stat = await fs.stat(sourcePath);
-      
-      if (stat.isDirectory()) {
-        // Copy and transform subdirectories (dtos, events)
-        const destPath = path.join(moduleDir, 'application', entry);
-        await copyAndTransformDirectory(sourcePath, destPath, packageName, moduleName);
-      } else if (stat.isFile() && entry.endsWith('.java')) {
-        // Copy and transform individual .java files
-        const destPath = path.join(moduleDir, 'application', entry);
+        if (MODULITH_ONLY_FILES.has(entry)) continue;
+        const destPath = path.join(moduleDir, layer, entry);
         if (!(await fs.pathExists(destPath))) {
           const content = await fs.readFile(sourcePath, 'utf-8');
           const transformed = transformSharedFileContent(content, packageName, moduleName);
@@ -606,55 +583,118 @@ async function findPackageInfoFiles(dir) {
 }
 
 /**
- * Copy environment profile files from parent to detached project
+ * Copy Gradle wrapper files from parent project to detached project.
+ * Includes gradlew, gradlew.bat, and gradle/wrapper/ directory.
  */
-async function copyEnvironmentProfiles(parentDir, newProjectDir, packageName, moduleName) {
-  const parentResourcesDir = path.join(parentDir, 'src', 'main', 'resources');
-  const newResourcesDir = path.join(newProjectDir, 'src', 'main', 'resources');
-  
-  // Copy environment profile files
-  const profileFiles = [
-    'application-develop.yaml',
-    'application-local.yaml',
-    'application-production.yaml',
-    'application-test.yaml'
-  ];
-  
-  for (const file of profileFiles) {
-    const sourcePath = path.join(parentResourcesDir, file);
-    if (await fs.pathExists(sourcePath)) {
-      await fs.copy(sourcePath, path.join(newResourcesDir, file));
+async function copyGradleWrapper(parentDir, newProjectDir) {
+  const wrapperFiles = ['gradlew', 'gradlew.bat'];
+  for (const file of wrapperFiles) {
+    const src = path.join(parentDir, file);
+    if (await fs.pathExists(src)) {
+      await fs.copy(src, path.join(newProjectDir, file));
     }
   }
-  
-  // Copy parameters folder if it exists
-  const parametersDir = path.join(parentResourcesDir, 'parameters');
-  if (await fs.pathExists(parametersDir)) {
-    await fs.copy(parametersDir, path.join(newResourcesDir, 'parameters'));
-    
-    // Update package references in kafka.yaml files
-    await updateKafkaConfigReferences(newResourcesDir, packageName, moduleName);
+
+  const wrapperDir = path.join(parentDir, 'gradle', 'wrapper');
+  if (await fs.pathExists(wrapperDir)) {
+    await fs.copy(wrapperDir, path.join(newProjectDir, 'gradle', 'wrapper'));
   }
 }
 
 /**
- * Update package references in kafka.yaml files
+ * Copy parameter files (kafka.yaml, urls.yaml, etc.) from parent to detached project.
+ * Updates package references from shared to module name.
+ * Adds missing imports to application-{env}.yaml files.
  */
-async function updateKafkaConfigReferences(resourcesDir, packageName, moduleName) {
+async function copyParameterFiles(parentDir, newProjectDir, packageName, moduleName) {
+  const parentParametersDir = path.join(parentDir, 'src', 'main', 'resources', 'parameters');
+  const newParametersDir = path.join(newProjectDir, 'src', 'main', 'resources', 'parameters');
+
+  if (!(await fs.pathExists(parentParametersDir))) return;
+
+  await fs.copy(parentParametersDir, newParametersDir);
+
+  // Update package references in yaml config files (kafka.yaml, urls.yaml, etc.)
   const environments = ['local', 'develop', 'test', 'production'];
-  
+  const sharedPattern = new RegExp(
+    `${packageName.replace(/\./g, '\\.')}\\.shared\\.infrastructure\\.`,
+    'g'
+  );
+
+  // Base config files that BaseGenerator already imports (db.yaml, cors.yaml)
+  const baseImports = new Set(['db.yaml', 'cors.yaml']);
+
   for (const env of environments) {
-    const kafkaYmlPath = path.join(resourcesDir, 'parameters', env, 'kafka.yaml');
-    
-    if (await fs.pathExists(kafkaYmlPath)) {
-      let content = await fs.readFile(kafkaYmlPath, 'utf-8');
-      
-      // Replace .shared.infrastructure. with .{moduleName}.infrastructure.
-      const pattern = new RegExp(`${packageName}\\.shared\\.infrastructure\\.`, 'g');
-      content = content.replace(pattern, `${packageName}.${moduleName}.infrastructure.`);
-      
-      await fs.writeFile(kafkaYmlPath, content, 'utf-8');
+    const envDir = path.join(newParametersDir, env);
+    if (!(await fs.pathExists(envDir))) continue;
+
+    const files = await fs.readdir(envDir);
+    const extraImports = [];
+
+    for (const file of files) {
+      if (!file.endsWith('.yaml') && !file.endsWith('.yml')) continue;
+
+      // Update package references
+      const filePath = path.join(envDir, file);
+      let content = await fs.readFile(filePath, 'utf-8');
+      if (sharedPattern.test(content)) {
+        content = content.replace(sharedPattern, `${packageName}.${moduleName}.infrastructure.`);
+        await fs.writeFile(filePath, content, 'utf-8');
+      }
+      sharedPattern.lastIndex = 0;
+
+      // Collect extra parameter files that need imports
+      if (!baseImports.has(file)) {
+        extraImports.push(`classpath:parameters/${env}/${file}`);
+      }
     }
+
+    // Add missing imports to application-{env}.yaml
+    if (extraImports.length > 0) {
+      await addMissingImports(newProjectDir, env, extraImports);
+    }
+  }
+}
+
+/**
+ * Add missing classpath imports to an application-{env}.yaml file.
+ */
+async function addMissingImports(projectDir, env, imports) {
+  const appYmlPath = path.join(projectDir, 'src', 'main', 'resources', `application-${env}.yaml`);
+  if (!(await fs.pathExists(appYmlPath))) return;
+
+  let content = await fs.readFile(appYmlPath, 'utf-8');
+
+  const linesToAdd = imports.filter(imp => !content.includes(imp));
+  if (linesToAdd.length === 0) return;
+
+  // Append after existing import entries
+  const importPattern = /(spring:\s*\n\s*config:\s*\n\s*import:\s*\n(?:\s*-\s*"[^"]+"\s*\n)*)/;
+  if (importPattern.test(content)) {
+    const suffix = linesToAdd.map(imp => `      - "${imp}"`).join('\n') + '\n';
+    content = content.replace(importPattern, `$1${suffix}`);
+  }
+
+  await fs.writeFile(appYmlPath, content, 'utf-8');
+}
+
+/**
+ * Copy domain.yaml specification for the module if it exists.
+ * Looks in system/{moduleName}.yaml and domain.yaml at project root.
+ */
+async function copyDomainYaml(parentDir, newProjectDir, moduleName) {
+  // Try system/{moduleName}.yaml first (multi-module system layout)
+  const systemYaml = path.join(parentDir, 'system', `${moduleName}.yaml`);
+  if (await fs.pathExists(systemYaml)) {
+    await fs.ensureDir(path.join(newProjectDir, 'system'));
+    await fs.copy(systemYaml, path.join(newProjectDir, 'system', `${moduleName}.yaml`));
+    return;
+  }
+
+  // Fallback: domain.yaml at project root (single-module layout)
+  const domainYaml = path.join(parentDir, 'domain.yaml');
+  if (await fs.pathExists(domainYaml)) {
+    await fs.copy(domainYaml, path.join(newProjectDir, 'domain.yaml'));
   }
 }
 
