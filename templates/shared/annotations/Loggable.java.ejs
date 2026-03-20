@@ -7,6 +7,11 @@ import java.lang.annotation.Target;
 
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
-public @interface LogTimer {
+public @interface Loggable {
+    boolean before() default true;
+    boolean after() default true;
+    boolean exceptions() default true;
+    boolean timer() default false;
     LogLevel level() default LogLevel.INFO;
+    String[] excludeArgs() default {};
 }

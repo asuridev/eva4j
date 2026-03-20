@@ -1452,6 +1452,149 @@ resources/parameters/
 
 ---
 
+## 📋 Centralized Logging (AOP)
+
+eva4j generates a **cross-cutting logging system** based on Spring AOP. Instead of scattering log statements across your codebase, you annotate methods with the desired logging behavior. All logging logic lives in a single aspect (`HandlerLogs`), keeping your business code clean.
+
+### Generated Artifacts
+
+```
+shared/
+├── domain/annotations/
+│   ├── LogBefore.java      # Log before method execution
+│   ├── LogAfter.java       # Log after successful execution (includes return value)
+│   ├── LogExceptions.java  # Log on exception (includes error message)
+│   ├── LogTimer.java       # Measure execution time
+│   ├── Loggable.java       # Unified annotation (combines all of the above)
+│   └── LogLevel.java       # Enum: TRACE, DEBUG, INFO, WARN
+└── infrastructure/configurations/loggerConfig/
+    └── HandlerLogs.java    # Single aspect that handles all log annotations
+```
+
+### Individual Annotations
+
+#### `@LogBefore` — Log method entry
+
+```java
+@LogBefore
+public User createUser(String username, String email) {
+    return new User(username, email);
+}
+```
+```
+INFO  ▶ Entering createUser with args: [username=john, email=john@mail.com]
+```
+
+#### `@LogAfter` — Log successful completion with return value
+
+```java
+@LogAfter
+public Order findOrder(String orderId) {
+    return orderRepository.findById(orderId).orElseThrow();
+}
+```
+```
+INFO  ◀ Completed findOrder with args: [orderId=ORD-123] | return: Order{id=ORD-123, status=CONFIRMED}
+```
+
+#### `@LogExceptions` — Log failures with exception details
+
+```java
+@LogExceptions
+public void processPayment(String orderId, BigDecimal amount) {
+    // throws InsufficientFundsException
+}
+```
+```
+WARN  ✖ Method processPayment failed with args: [orderId=ORD-123, amount=500.00] | exception: InsufficientFundsException | message: Balance insuficiente para procesar el pago
+```
+
+#### `@LogTimer` — Measure execution time
+
+```java
+@LogTimer
+public List<Product> searchProducts(String query) {
+    return productRepository.fullTextSearch(query);
+}
+```
+```
+INFO  ⏱ Method searchProducts executed in 342 ms
+```
+
+### Protecting Sensitive Data with `excludeArgs`
+
+All annotations (except `@LogTimer`) support `excludeArgs` to mask sensitive parameters. **By default all arguments are shown** — you only specify which ones to hide:
+
+```java
+@LogBefore(excludeArgs = {"password", "token"})
+public void register(String username, String password, String token) {
+    // ...
+}
+```
+```
+INFO  ▶ Entering register with args: [username=john, password=[PROTECTED], token=[PROTECTED]]
+```
+
+### Configurable Log Level
+
+All annotations default to `INFO` (except `@LogExceptions` which defaults to `WARN`). Override with the `level` attribute:
+
+```java
+@LogBefore(level = LogLevel.DEBUG)
+public void syncInventory(String warehouseId) {
+    // frequent operation you don't want at INFO in production
+}
+```
+```
+DEBUG ▶ Entering syncInventory with args: [warehouseId=WH-001]
+```
+
+### `@Loggable` — Unified Annotation
+
+When you need multiple logging behaviors on a single method, use `@Loggable` instead of stacking individual annotations:
+
+```java
+@Loggable(timer = true, excludeArgs = {"creditCard"})
+public PaymentResult checkout(String orderId, String creditCard) {
+    return new PaymentResult("PAY-789", "APPROVED");
+}
+```
+
+**Successful execution:**
+```
+INFO  ▶ Entering checkout with args: [orderId=ORD-123, creditCard=[PROTECTED]]
+INFO  ◀ Completed checkout with args: [orderId=ORD-123, creditCard=[PROTECTED]] | return: PaymentResult{id=PAY-789, status=APPROVED}
+INFO  ⏱ Method checkout executed in 1205 ms
+```
+
+**On failure:**
+```
+INFO  ▶ Entering checkout with args: [orderId=ORD-123, creditCard=[PROTECTED]]
+WARN  ✖ Method checkout failed with args: [orderId=ORD-123, creditCard=[PROTECTED]] | exception: PaymentDeclinedException | message: Card declined by issuer
+```
+
+`@Loggable` attributes and their defaults:
+
+| Attribute | Default | Description |
+|-----------|---------|-------------|
+| `before` | `true` | Log method entry |
+| `after` | `true` | Log successful return |
+| `exceptions` | `true` | Log on exception |
+| `timer` | `false` | Measure execution time |
+| `level` | `INFO` | Log level for before/after/timer |
+| `excludeArgs` | `{}` | Parameter names to mask as `[PROTECTED]` |
+
+**Silent mode — only log failures and duration:**
+
+```java
+@Loggable(before = false, after = false, exceptions = true, timer = true)
+public void importBulkData(List<String> records) {
+    // silent batch process: only logs on failure or to measure duration
+}
+```
+
+---
+
 ## 🧪 Testing
 
 ```bash

@@ -8,4 +8,6 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface LogBefore {
+    LogLevel level() default LogLevel.INFO;
+    String[] excludeArgs() default {};
 }

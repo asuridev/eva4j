@@ -136,7 +136,7 @@ class SharedGenerator {
 
   async generateAnnotations(basePath) {
     const annotationsPath = path.join(basePath, 'domain', 'annotations');
-    const files = ['ApplicationComponent', 'DomainComponent', 'LogAfter', 'LogBefore', 'LogExceptions', 'LogTimer'];
+    const files = ['ApplicationComponent', 'DomainComponent', 'Loggable', 'LogAfter', 'LogBefore', 'LogExceptions', 'LogLevel', 'LogTimer'];
     
     for (const file of files) {
       await this.generateFile(`annotations/${file}.java.ejs`, 
