@@ -135,6 +135,7 @@ class BaseGenerator {
     await this.generateFile('root/system.yaml.ejs', 
       path.join(this.projectDir, 'system.yaml'));
     await this.copySkills();
+    await this.copyAgents();
     
     if (this.context.features.includeDocker) {
       await this.generateFile('docker/docker-compose.yaml.ejs', 
@@ -155,6 +156,12 @@ class BaseGenerator {
     const srcSkillsDir = path.join(__dirname, '../skills');
     const destSkillsDir = path.join(this.projectDir, '.agents', 'skills');
     await fs.copy(srcSkillsDir, destSkillsDir);
+  }
+
+  async copyAgents() {
+    const srcAgentsDir = path.join(__dirname, '../agents');
+    const destAgentsDir = path.join(this.projectDir, '.github', 'agents');
+    await fs.copy(srcAgentsDir, destAgentsDir);
   }
 
   async generateFile(templateRelPath, destPath) {

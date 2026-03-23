@@ -20,6 +20,7 @@ const buildCommand = require('../src/commands/build');
 const evaluateSystemCommand = require('../src/commands/evaluate-system');
 const infoCommand = require('../src/commands/info');
 const detachCommand = require('../src/commands/detach');
+const exportDiagramCommand = require('../src/commands/export-diagram');
 
 const program = new Command();
 
@@ -331,6 +332,19 @@ program
   .action(async (moduleName, options) => {
     try {
       await detachCommand(moduleName, options);
+    } catch (error) {
+      console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Export command
+program
+  .command('export <type>')
+  .description('Export system artifacts. type: diagram (generates .drawio from C4 .mmd files)')
+  .action(async (type, options) => {
+    try {
+      await exportDiagramCommand(type, options);
     } catch (error) {
       console.error(chalk.red('Error:'), error.message);
       process.exit(1);
