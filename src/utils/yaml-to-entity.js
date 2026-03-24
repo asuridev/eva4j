@@ -49,12 +49,16 @@ async function parseDomainYaml(yamlPath, packageName = '', moduleName = '') {
     );
   }
 
+  const ports = parsePorts(domainData, moduleName);
+  const readModels = parseReadModels(domainData, moduleName, ports);
+
   return {
     aggregates,
     allEnums: extractAllEnums(domainData.aggregates),
     endpoints,
     listeners,
-    ports: parsePorts(domainData, moduleName)
+    ports,
+    readModels
   };
 }
 
@@ -1253,6 +1257,160 @@ function parsePorts(domainData, moduleName = '') {
   });
 }
 
+/**
+ * Derive a Kafka topic name from an event class name.
+ * Strips trailing 'Event' suffix, then converts to SCREAMING_SNAKE_CASE.
+ * e.g. 'ProductCreatedEvent' → 'PRODUCT_CREATED'
+ *      'OrderCancelled'      → 'ORDER_CANCELLED'
+ * @param {string} eventName - PascalCase event name
+ * @returns {string} SCREAMING_SNAKE_CASE topic name
+ */
+function deriveTopicFromEventName(eventName) {
+  const base = eventName.endsWith('Event') ? eventName.slice(0, -5) : eventName;
+  // PascalCase → SCREAMING_SNAKE_CASE
+  return base
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    .toUpperCase();
+}
+
+/**
+ * Parse the optional readModels section from domain.yaml.
+ * Declares local read model projections maintained via domain events
+ * from external bounded contexts.
+ * @param {Object} domainData - Raw parsed YAML data
+ * @param {string} moduleName - Current module name
+ * @param {Array} ports - Parsed ports (for RM-009 warning)
+ * @returns {Array} Parsed read models array (empty if not declared)
+ */
+function parseReadModels(domainData, moduleName = '', ports = []) {
+  if (!domainData.readModels || !Array.isArray(domainData.readModels)) return [];
+
+  const validActions = ['UPSERT', 'DELETE', 'SOFT_DELETE'];
+
+  return domainData.readModels.map(rm => {
+    const name = toPascalCase(rm.name);
+
+    // RM-001: name must end with 'ReadModel'
+    if (!name.endsWith('ReadModel')) {
+      throw new Error(
+        `[RM-001] Read model "${name}": name must end with "ReadModel" suffix. ` +
+        `Rename to "${name}ReadModel".`
+      );
+    }
+
+    // RM-002: tableName must start with 'rm_'
+    if (!rm.tableName || !rm.tableName.startsWith('rm_')) {
+      throw new Error(
+        `[RM-002] Read model "${name}": tableName must start with "rm_" prefix. ` +
+        `Got: "${rm.tableName || '(empty)'}".`
+      );
+    }
+
+    // Source is required
+    if (!rm.source || !rm.source.module || !rm.source.aggregate) {
+      throw new Error(
+        `[RM-010] Read model "${name}": source.module and source.aggregate are required.`
+      );
+    }
+
+    // RM-010: source.module must differ from current module
+    if (rm.source.module === moduleName || toKebabCase(rm.source.module) === toKebabCase(moduleName)) {
+      throw new Error(
+        `[RM-010] Read model "${name}": source.module ("${rm.source.module}") is the same as the current module. ` +
+        `Read models are for cross-module projections only.`
+      );
+    }
+
+    // Parse fields
+    const fields = (rm.fields || []).map(f => ({
+      name: toCamelCase(f.name),
+      javaType: f.type
+    }));
+
+    // RM-004: fields must include an 'id' field
+    if (!fields.some(f => f.name === 'id')) {
+      throw new Error(
+        `[RM-004] Read model "${name}": fields must include an "id" field.`
+      );
+    }
+
+    // Parse syncedBy
+    const syncedBy = rm.syncedBy || [];
+
+    // RM-005: syncedBy must have at least one entry
+    if (syncedBy.length === 0) {
+      throw new Error(
+        `[RM-005] Read model "${name}": syncedBy must have at least one entry.`
+      );
+    }
+
+    const parsedSyncedBy = syncedBy.map(sync => {
+      const eventName = toPascalCase(sync.event);
+      const action = (sync.action || '').toUpperCase();
+
+      // RM-006: action must be valid
+      if (!validActions.includes(action)) {
+        throw new Error(
+          `[RM-006] Read model "${name}", event "${eventName}": ` +
+          `syncedBy action must be one of ${validActions.join(', ')}. Got: "${action}".`
+        );
+      }
+
+      const baseName = eventName.endsWith('Event') ? eventName.slice(0, -5) : eventName;
+      const topic = sync.topic || deriveTopicFromEventName(eventName);
+      const topicKey = topic.toLowerCase().replace(/_/g, '-');
+
+      return {
+        event: eventName,
+        eventBaseName: baseName,
+        action,
+        integrationEventClassName: `${baseName}IntegrationEvent`,
+        listenerClassName: `${baseName}ReadModelListener`,
+        topicConstant: topic,
+        topicKey,
+        topicSpringProperty: `\${topics.${topicKey}}`,
+        topicVariableName: toCamelCase(topicKey.replace(/-/g, '_')),
+        fields // pass readModel fields to each sync entry for the listener templates
+      };
+    });
+
+    const hasSoftDelete = parsedSyncedBy.some(s => s.action === 'SOFT_DELETE');
+    const sourceName = toPascalCase(rm.source.aggregate);
+    const sourceModule = rm.source.module;
+
+    // RM-009: warn if ports still has sync calls to the same source module
+    const conflictingPorts = ports.filter(p =>
+      p.target && (p.target === sourceModule || toKebabCase(p.target) === toKebabCase(sourceModule))
+    );
+    if (conflictingPorts.length > 0) {
+      const serviceNames = conflictingPorts.map(p => p.serviceName).join(', ');
+      console.warn(
+        `⚠️  [RM-009] Read model "${name}": ports: section still contains sync calls ` +
+        `to module "${sourceModule}" (services: ${serviceNames}). Consider removing them ` +
+        `since the read model provides local access to that data.`
+      );
+    }
+
+    return {
+      name,
+      sourceName,
+      sourceModule,
+      tableName: rm.tableName,
+      fields,
+      syncedBy: parsedSyncedBy,
+      hasSoftDelete,
+      // Derived class names
+      domainClassName: name,
+      jpaEntityName: `${name}Jpa`,
+      jpaRepositoryName: `${name}JpaRepository`,
+      repositoryName: `${name}Repository`,
+      repositoryImplName: `${name}RepositoryImpl`,
+      syncHandlerName: `Sync${sourceName}ReadModelHandler`
+    };
+  });
+}
+
 module.exports = {
   parseDomainYaml,
   parseAggregate,
@@ -1263,5 +1421,6 @@ module.exports = {
   generateValidationImports,
   generateAggregateMethodImports,
   parseListeners,
-  parsePorts
+  parsePorts,
+  parseReadModels
 };

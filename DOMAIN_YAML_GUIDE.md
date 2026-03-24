@@ -147,6 +147,18 @@ listeners:
     topic: TOPIC_NAME              # Topic Kafka (obligatorio en módulos standalone)
     useCase: HandleExternalEvent   # Caso de uso que maneja el evento
     fields: []                     # Payload del Integration Event recibido
+
+# readModels: — proyecciones locales de datos de otro módulo (nivel raíz)
+readModels:
+  - name: ProductReadModel         # PascalCase + sufijo ReadModel
+    source:
+      module: products             # Módulo fuente
+      aggregate: Product           # Agregado fuente
+    tableName: rm_products         # Tabla SQL (prefijo rm_)
+    fields: []                     # Campos proyectados
+    syncedBy:                      # Eventos que sincronizan la tabla
+      - event: ProductCreatedEvent
+        action: UPSERT             # UPSERT | DELETE | SOFT_DELETE
 ```
 
 ### Ubicación del archivo
@@ -1946,7 +1958,9 @@ domain.yaml
 │
 ├── listeners:           → Integration Events que CONSUME (infrastructure/kafkaListener/)
 │
-└── ports:               → Servicios HTTP que LLAMA    (infrastructure/adapters/{service}/)
+├── ports:               → Servicios HTTP que LLAMA    (infrastructure/adapters/{service}/)
+│
+└── readModels:          → Proyecciones locales mantenidas por eventos (infrastructure/kafkaListener/)
 ```
 
 ---
@@ -2079,6 +2093,122 @@ ports:
 ### Referencia
 
 Ver ejemplo completo en [`examples/domain-ports.yaml`](examples/domain-ports.yaml).
+
+---
+
+## Sección readModels
+
+`readModels:` es una sección de nivel raíz (sibling de `aggregates:`, `listeners:` y `ports:`) que declara **proyecciones locales de datos de otro bounded context**, mantenidas mediante eventos de dominio. Elimina dependencias síncronas (HTTP) entre módulos.
+
+### Estructura completa
+
+```yaml
+readModels:
+  - name: ProductReadModel               # PascalCase + sufijo "ReadModel" (OBLIGATORIO)
+    source:                              # Trazabilidad al módulo fuente (OBLIGATORIO)
+      module: products                   # Módulo fuente (kebab-case)
+      aggregate: Product                 # Agregado fuente (PascalCase)
+    tableName: rm_products               # Tabla en BD (OBLIGATORIO, prefijo rm_)
+    fields:                              # Campos proyectados (OBLIGATORIO, debe incluir id)
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+      - name: status
+        type: String
+    syncedBy:                            # Eventos que mantienen la tabla (OBLIGATORIO, min 1)
+      - event: ProductCreatedEvent       # Nombre del evento (PascalCase)
+        action: UPSERT                   # UPSERT | DELETE | SOFT_DELETE
+      - event: ProductUpdatedEvent
+        action: UPSERT
+      - event: ProductDeactivatedEvent
+        action: SOFT_DELETE
+```
+
+### Propiedades
+
+| Propiedad | Tipo | Obligatorio | Descripción |
+|---|---|---|---|
+| `name` | String | SÍ | Nombre del read model. **DEBE** terminar con `ReadModel`. PascalCase. |
+| `source` | Object | SÍ | Trazabilidad al módulo y agregado fuente. |
+| `source.module` | String | SÍ | Módulo que posee los datos. Kebab-case. |
+| `source.aggregate` | String | SÍ | Agregado fuente. PascalCase. |
+| `tableName` | String | SÍ | Nombre de tabla SQL. **DEBE** empezar con `rm_`. |
+| `fields` | Array | SÍ | Campos a proyectar. Debe incluir `id`. |
+| `syncedBy` | Array | SÍ | Eventos que sincronizan esta tabla. Mínimo 1. |
+| `syncedBy[].event` | String | SÍ | Nombre del evento. PascalCase. |
+| `syncedBy[].action` | String | SÍ | Uno de: `UPSERT`, `DELETE`, `SOFT_DELETE`. |
+| `syncedBy[].topic` | String | NO | Override del topic Kafka. Por defecto se auto-deriva del nombre del evento. |
+
+### Acciones de sincronización
+
+| Acción | Significado | Cuándo usarla |
+|---|---|---|
+| `UPSERT` | Insertar si no existe, actualizar si existe | Creaciones, actualizaciones, cambios de estado |
+| `DELETE` | Eliminar permanentemente | Hard deletes en el módulo fuente |
+| `SOFT_DELETE` | Marcar como inactivo con timestamp | Cuando el fuente usa soft delete |
+
+### Derivación automática de topics
+
+El topic se deriva del nombre del evento: se elimina el sufijo `Event` y se convierte a SCREAMING_SNAKE_CASE:
+
+- `ProductCreatedEvent` → `PRODUCT_CREATED`
+- `CustomerUpdatedEvent` → `CUSTOMER_UPDATED`
+- `OrderCancelled` → `ORDER_CANCELLED`
+
+Para sobrescribir, usar `topic:` explícito en la entrada de `syncedBy`.
+
+### Artefactos generados
+
+**Por cada read model (6 archivos):**
+
+| Archivo | Descripción |
+|---|---|
+| `domain/models/readmodels/{Name}.java` | Clase de dominio inmutable (sin setters, sin auditoría) |
+| `infrastructure/database/entities/{Name}Jpa.java` | Entidad JPA con Lombok. `@Id` no auto-generado |
+| `infrastructure/database/repositories/{Name}JpaRepository.java` | Spring Data JPA interface |
+| `domain/repositories/{Name}Repository.java` | Interfaz de repositorio (puerto) |
+| `infrastructure/database/repositories/{Name}RepositoryImpl.java` | Implementación del repositorio |
+| `application/usecases/Sync{Source}ReadModelHandler.java` | Handler con un método por evento |
+
+**Por cada entrada en `syncedBy` (hasta 3 archivos):**
+
+| Archivo | Descripción |
+|---|---|
+| `application/events/{EventBase}IntegrationEvent.java` | Integration Event (reutilizado si ya existe) |
+| `infrastructure/kafkaListener/{EventBase}ReadModelListener.java` | Kafka listener que delega al sync handler |
+| `parameters/*/kafka.yaml` | Registro del topic |
+
+### Validaciones
+
+| Código | Severidad | Regla |
+|---|---|---|
+| RM-001 | ERROR | `name` debe terminar con `ReadModel` |
+| RM-002 | ERROR | `tableName` debe empezar con `rm_` |
+| RM-004 | ERROR | `fields` debe incluir un campo `id` |
+| RM-005 | ERROR | `syncedBy` debe tener al menos una entrada |
+| RM-006 | ERROR | `syncedBy[].action` debe ser `UPSERT`, `DELETE` o `SOFT_DELETE` |
+| RM-009 | WARNING | `ports:` tiene llamadas sync al mismo `source.module` — considerar eliminarlas |
+| RM-010 | ERROR | `source.module` es el mismo módulo actual |
+
+### Diferencias con agregados
+
+| Característica | Aggregate | Read Model |
+|---|---|---|
+| Sección YAML | `aggregates:` | `readModels:` |
+| Prefijo de tabla | Ninguno | `rm_` |
+| Lógica de negocio | Sí | No |
+| Emite eventos | Sí | Nunca |
+| Endpoints REST | Opcional | Nunca |
+| Clase de dominio | Entidad rica | Clase inmutable |
+| Campos de auditoría | Opcionales | Nunca |
+| `source:` requerido | No | Sí |
+
+### Referencia
+
+Ver ejemplo completo en [`examples/domain-read-models.yaml`](examples/domain-read-models.yaml).
 
 ---
 

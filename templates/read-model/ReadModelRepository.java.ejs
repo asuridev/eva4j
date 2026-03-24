@@ -1,0 +1,38 @@
+package <%= packageName %>.<%= moduleName %>.domain.repositories;
+<% const needsBigDecimal = fields && fields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = fields && fields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
+<% const needsInstant    = fields && fields.some(f => f.javaType === 'Instant'); %>
+<% const needsUUID       = fields && fields.some(f => f.javaType === 'UUID'); %>
+<% if (needsBigDecimal) { %>
+import java.math.BigDecimal;
+<% } %>
+<% if (needsLocalDate) { %>
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+<% } %>
+<% if (needsInstant) { %>
+import java.time.Instant;
+<% } %>
+<% if (needsUUID) { %>
+import java.util.UUID;
+<% } %>
+
+import <%= packageName %>.<%= moduleName %>.domain.models.readmodels.<%= domainClassName %>;
+
+import java.util.Optional;
+
+/**
+ * Repository interface for the <%= domainClassName %> read model.
+ * Provides read-only access and upsert/delete for event-driven sync.
+ */
+public interface <%= repositoryName %> {
+
+    void upsert(<%= domainClassName %> readModel);
+
+    void deleteById(String id);
+
+    Optional<<%= domainClassName %>> findById(String id);
+
+    boolean existsById(String id);
+}

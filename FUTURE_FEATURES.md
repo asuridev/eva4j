@@ -459,66 +459,47 @@ public ResponseEntity<ErrorDto> handleOptimisticLock(ObjectOptimisticLockingFail
 
 ---
 
-## 6. Read Models Separados (Proyecciones)
+## 6. Read Models Separados (Proyecciones) ✅
+
+> **Implementado en v1.0.15** — Sección `readModels:` en `domain.yaml` con generación automática de proyecciones locales mantenidas por eventos Kafka. Ver [`DOMAIN_YAML_GUIDE.md`](DOMAIN_YAML_GUIDE.md#sección-readmodels) y [`read-model-spec.md`](read-model-spec.md).
 
 ### Descripción
 
-En CQRS puro, el lado de lectura puede tener su propio modelo optimizado para consultas, independiente del modelo de escritura. Los `*ResponseDto` actuales son transformaciones directas del dominio, suficiente para casos simples pero insuficientes para reportes o vistas que joinean múltiples agregados.
+Proyecciones locales de datos de otro bounded context, mantenidas mediante eventos de dominio. Elimina dependencias síncronas (HTTP) entre módulos.
 
-### Sintaxis Propuesta
+### Sintaxis Implementada
 
 ```yaml
-aggregates:
-  - name: Order
-    readModels:
-      - name: OrderSummary
-        description: "Vista desnormalizada para listados"
-        fields:
-          - name: id
-            type: String
-          - name: orderNumber
-            type: String
-          - name: customerName
-            type: String
-          - name: totalAmount
-            type: BigDecimal
-          - name: itemCount
-            type: Integer
-          - name: status
-            type: OrderStatus
-        source: native_query
+readModels:
+  - name: ProductReadModel
+    source:
+      module: products
+      aggregate: Product
+    tableName: rm_products
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+    syncedBy:
+      - event: ProductCreatedEvent
+        action: UPSERT
+      - event: ProductUpdatedEvent
+        action: UPSERT
+      - event: ProductDeactivatedEvent
+        action: SOFT_DELETE
 ```
 
-### Código Generado
+### Artefactos Generados
 
-```java
-public interface OrderSummaryProjection {
-    String getId();
-    String getOrderNumber();
-    String getCustomerName();
-    BigDecimal getTotalAmount();
-    Integer getItemCount();
-    OrderStatus getStatus();
-}
-```
-
-```java
-@Query(value = """
-    SELECT
-        o.id,
-        o.order_number     AS orderNumber,
-        c.name             AS customerName,
-        o.total_amount     AS totalAmount,
-        COUNT(i.id)        AS itemCount,
-        o.status
-    FROM orders o
-    JOIN customers c ON c.id = o.customer_id
-    LEFT JOIN order_items i ON i.order_id = o.id
-    WHERE o.deleted = false
-    GROUP BY o.id, c.name
-    """, nativeQuery = true)
-Page<OrderSummaryProjection> findOrderSummaries(Pageable pageable);
-```
+- Clase de dominio inmutable (`domain/models/readmodels/`)
+- Entidad JPA sin auditoría (`infrastructure/database/entities/`)
+- Repositorio (interfaz + impl)
+- Sync handler con un método por evento
+- Kafka listeners (uno por entry en `syncedBy`)
+- Integration Events (reutilizados si ya existen)
 
 ---
 
@@ -1607,7 +1588,7 @@ Sin DataFaker, el seeder genera datos con patrones simples (`"User 0"`, `"user0@
 | 3 | Soft Delete Completo | Alta | Baja | ✅ Implementado |
 | 4 | Paginación en Queries | Impl. | -- | ✅ Implementado |
 | 5 | Optimistic Locking | Media | Baja | Pendiente |
-| 6 | Read Models / Proyecciones | Media | Alta | Pendiente |
+| 6 | Read Models / Proyecciones | Media | Alta | ✅ Implementado |
 | 7 | Enums con Transiciones | Impl. | -- | ✅ Implementado |
 | 8 | Specifications Pattern | Media | Media | Pendiente |
 | 9 | JSON Schema para domain.yaml | Tooling | Media | Pendiente |

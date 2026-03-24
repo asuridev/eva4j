@@ -821,7 +821,91 @@ aggregates:
   └── events:     → Domain Events que PRODUCE  (async, broker)
 listeners:          → Integration Events que CONSUME (async, broker)
 ports:              → Servicios HTTP que LLAMA    (sync, Feign)
+readModels:         → Proyecciones locales mantenidas por eventos (async, broker)
 ```
+
+### Proyecciones Locales (`readModels[]`)
+
+Un Read Model es una **proyección local de datos de otro bounded context**, mantenida mediante eventos de dominio. Elimina dependencias síncronas (HTTP) entre módulos, mejorando autonomía, resiliencia y rendimiento.
+
+```yaml
+# Nivel raíz, sibling de aggregates:, listeners:, ports:
+readModels:
+  - name: ProductReadModel               # PascalCase + sufijo "ReadModel" (OBLIGATORIO)
+    source:                              # Trazabilidad al módulo fuente (OBLIGATORIO)
+      module: products                   # Módulo fuente (kebab-case)
+      aggregate: Product                 # Agregado fuente (PascalCase)
+    tableName: rm_products               # Tabla en BD (OBLIGATORIO, prefijo rm_)
+    fields:                              # Campos proyectados — subconjunto del fuente
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+      - name: status
+        type: String
+    syncedBy:                            # Eventos que mantienen esta tabla (min 1)
+      - event: ProductCreatedEvent       # Nombre del evento (PascalCase + sufijo Event)
+        action: UPSERT                   # Acción: UPSERT | DELETE | SOFT_DELETE
+      - event: ProductUpdatedEvent
+        action: UPSERT
+      - event: ProductDeactivatedEvent
+        action: SOFT_DELETE
+```
+
+### Artefactos generados por `readModels[]`
+
+Por cada read model:
+
+| Archivo generado | Descripción |
+|---|---|
+| `domain/models/readmodels/{Name}.java` | Clase de dominio (inmutable, sin setters, sin auditoría) |
+| `infrastructure/database/entities/{Name}Jpa.java` | Entidad JPA (Lombok, `@Id` NO auto-generado) |
+| `infrastructure/database/repositories/{Name}JpaRepository.java` | Spring Data JPA interface |
+| `domain/repositories/{Name}Repository.java` | Interfaz de repositorio (puerto) |
+| `infrastructure/database/repositories/{Name}RepositoryImpl.java` | Implementación del repositorio |
+| `application/usecases/Sync{Source}ReadModelHandler.java` | Handler de sincronización (un método por evento) |
+
+Por cada entrada en `syncedBy`:
+
+| Archivo generado | Descripción |
+|---|---|
+| `application/events/{EventBase}IntegrationEvent.java` | Integration Event (reutilizado si ya existe) |
+| `infrastructure/kafkaListener/{EventBase}ReadModelListener.java` | Kafka listener que delega al sync handler |
+| `parameters/*/kafka.yaml` | Registro del topic (actualizado) |
+
+### Acciones de sincronización
+
+| Acción | Significado | Uso |
+|---|---|---|
+| `UPSERT` | Insertar si es nuevo, actualizar si existe | Creaciones, actualizaciones, cambios de estado |
+| `DELETE` | Eliminar el registro permanentemente | Hard deletes en el módulo fuente |
+| `SOFT_DELETE` | Marcar como inactivo con timestamp | Cuando el fuente usa soft delete |
+
+### Reglas de `readModels[]`
+
+- **`name:`** — PascalCase, **DEBE** terminar con `ReadModel`
+- **`tableName:`** — **DEBE** empezar con `rm_` (identificación visual en BD)
+- **`fields:`** — **DEBE** incluir un campo `id`
+- **`syncedBy:`** — **DEBE** tener al menos una entrada
+- **`source.module:`** — **NO PUEDE** ser el mismo módulo actual (readModels son para proyecciones cross-module)
+- **Topic derivado automáticamente** — Se deriva del nombre del evento: strip sufijo `Event` → SCREAMING_SNAKE_CASE. Override opcional con `topic:` explícito
+- **Sin auditoría** — Los readModels **nunca** tienen campos de auditoría
+- **Sin endpoints REST** — Los readModels **nunca** exponen endpoints REST
+- **Sin lógica de negocio** — La clase de dominio es inmutable (solo getters)
+
+### Validaciones
+
+| Código | Severidad | Regla |
+|---|---|---|
+| RM-001 | ERROR | `name` debe terminar con `ReadModel` |
+| RM-002 | ERROR | `tableName` debe empezar con `rm_` |
+| RM-004 | ERROR | `fields` debe incluir un campo `id` |
+| RM-005 | ERROR | `syncedBy` debe tener al menos una entrada |
+| RM-006 | ERROR | `syncedBy[].action` debe ser `UPSERT`, `DELETE` o `SOFT_DELETE` |
+| RM-009 | WARNING | `ports:` todavía tiene llamadas sync al mismo `source.module` — considerar removerlas |
+| RM-010 | ERROR | `source.module` es el mismo módulo actual |
 
 Cuando una entidad tiene `hasSoftDelete: true`, eva4j genera eliminación lógica en lugar de física.
 
@@ -1493,9 +1577,15 @@ Al generar o modificar código, verificar:
 - [ ] Métodos con cuerpo (POST/PUT/PATCH) → incluir `body:`; campos de tipo objeto en `nestedTypes:`
 - [ ] Tipo de dominio auto-derivado del nombre del método — usar `domainType:` para sobrescribir si es necesario
 - [ ] Cada `service:` en `ports[]` genera: interfaz (devuelve modelos de dominio), FeignClient (devuelve DTOs infra), FeignAdapter (mapea ACL), FeignConfig + `urls.yaml`
+- [ ] Read models → declarar en `readModels[]` (nivel raíz); `name` debe terminar con `ReadModel`, `tableName` debe empezar con `rm_`
+- [ ] Read models nunca tienen auditoría, endpoints REST, ni lógica de negocio
+- [ ] Cada read model genera: clase de dominio inmutable, JPA entity (sin audit), repositorio (interface + impl), sync handler
+- [ ] Cada `syncedBy` entry genera: IntegrationEvent (reutilizado si ya existe), KafkaListener, registro de topic
+- [ ] `source.module` nunca puede ser el mismo módulo (RM-010) — readModels son exclusivamente cross-module
+- [ ] Topics de readModels se derivan automáticamente del nombre del evento (strip `Event` → SCREAMING_SNAKE_CASE)
 
 ---
 
-**Última actualización:** 2026-03-12  
-**Versión de eva4j:** 1.0.14  
+**Última actualización:** 2026-03-24  
+**Versión de eva4j:** 1.0.15  
 **Estado:** Documento de referencia para agentes IA

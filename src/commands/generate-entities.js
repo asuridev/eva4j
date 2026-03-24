@@ -244,7 +244,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
   try {
     // Parse domain.yaml
-    const { aggregates, allEnums, endpoints, listeners, ports } = await parseDomainYaml(domainYamlPath, packageName, moduleName);
+    const { aggregates, allEnums, endpoints, listeners, ports, readModels } = await parseDomainYaml(domainYamlPath, packageName, moduleName);
     
     spinner.succeed(chalk.green(`Found ${aggregates.length} aggregate(s) and ${allEnums.length} enum(s)`));
     
@@ -273,7 +273,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
     }
 
     // Detect installed message broker for auto-wiring integration events
-    const installedBroker = (hasDomainEventsInModule || (listeners && listeners.length > 0))
+    const installedBroker = (hasDomainEventsInModule || (listeners && listeners.length > 0) || (readModels && readModels.length > 0))
       ? await getInstalledBroker(configManager)
       : null;
     // When brokerMode:'mock' is requested AND a broker is installed, use mock Spring-Events adapter
@@ -1070,6 +1070,189 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       await ensureUrlsImport(projectDir);
 
       spinner.succeed(chalk.green(`HTTP ports generated! ✨`));
+    }
+
+    // ── Generate Read Models (local projections of external data) ────────────
+    if (readModels && readModels.length > 0) {
+      if (broker === 'kafka' || broker === 'mock') {
+        spinner.start(`Generating ${readModels.length} read model(s)...`);
+
+        const readModelTemplatesDir = path.join(__dirname, '..', '..', 'templates', 'read-model');
+
+        for (const rm of readModels) {
+          const rmContext = {
+            packageName,
+            moduleName,
+            ...rm
+          };
+
+          // 1. Domain read model class
+          const domainPath = path.join(
+            moduleBasePath, 'domain', 'models', 'readmodels',
+            `${rm.domainClassName}.java`
+          );
+          await renderAndWrite(
+            path.join(readModelTemplatesDir, 'ReadModelDomain.java.ejs'),
+            domainPath,
+            rmContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Read Model',
+            name: rm.domainClassName,
+            path: `${moduleName}/domain/models/readmodels/${rm.domainClassName}.java`
+          });
+
+          // 2. JPA entity
+          const jpaPath = path.join(
+            moduleBasePath, 'infrastructure', 'database', 'entities',
+            `${rm.jpaEntityName}.java`
+          );
+          await renderAndWrite(
+            path.join(readModelTemplatesDir, 'ReadModelJpa.java.ejs'),
+            jpaPath,
+            rmContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Read Model',
+            name: rm.jpaEntityName,
+            path: `${moduleName}/infrastructure/database/entities/${rm.jpaEntityName}.java`
+          });
+
+          // 3. JPA repository
+          const jpaRepoPath = path.join(
+            moduleBasePath, 'infrastructure', 'database', 'repositories',
+            `${rm.jpaRepositoryName}.java`
+          );
+          await renderAndWrite(
+            path.join(readModelTemplatesDir, 'ReadModelJpaRepository.java.ejs'),
+            jpaRepoPath,
+            rmContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Read Model',
+            name: rm.jpaRepositoryName,
+            path: `${moduleName}/infrastructure/database/repositories/${rm.jpaRepositoryName}.java`
+          });
+
+          // 4. Domain repository interface
+          const repoPath = path.join(
+            moduleBasePath, 'domain', 'repositories',
+            `${rm.repositoryName}.java`
+          );
+          await renderAndWrite(
+            path.join(readModelTemplatesDir, 'ReadModelRepository.java.ejs'),
+            repoPath,
+            rmContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Read Model',
+            name: rm.repositoryName,
+            path: `${moduleName}/domain/repositories/${rm.repositoryName}.java`
+          });
+
+          // 5. Repository implementation
+          const repoImplPath = path.join(
+            moduleBasePath, 'infrastructure', 'database', 'repositories',
+            `${rm.repositoryImplName}.java`
+          );
+          await renderAndWrite(
+            path.join(readModelTemplatesDir, 'ReadModelRepositoryImpl.java.ejs'),
+            repoImplPath,
+            rmContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Read Model',
+            name: rm.repositoryImplName,
+            path: `${moduleName}/infrastructure/database/repositories/${rm.repositoryImplName}.java`
+          });
+
+          // 6. Sync handler
+          const handlerPath = path.join(
+            moduleBasePath, 'application', 'usecases',
+            `${rm.syncHandlerName}.java`
+          );
+          await renderAndWrite(
+            path.join(readModelTemplatesDir, 'ReadModelSyncHandler.java.ejs'),
+            handlerPath,
+            rmContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Read Model',
+            name: rm.syncHandlerName,
+            path: `${moduleName}/application/usecases/${rm.syncHandlerName}.java`
+          });
+
+          // 7. Per syncedBy event: integration event + Kafka listener + topic registration
+          for (const sync of rm.syncedBy) {
+            const listenerContext = {
+              packageName,
+              moduleName,
+              ...sync,
+              syncHandlerName: rm.syncHandlerName,
+              domainClassName: rm.domainClassName,
+              repositoryName: rm.repositoryName
+            };
+
+            // Integration event (reuse if already exists from listeners: section)
+            const integrationEventPath = path.join(
+              moduleBasePath, 'application', 'events',
+              `${sync.integrationEventClassName}.java`
+            );
+            if (!(await fs.pathExists(integrationEventPath))) {
+              await renderAndWrite(
+                path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerIntegrationEvent.java.ejs'),
+                integrationEventPath,
+                {
+                  packageName,
+                  moduleName,
+                  integrationEventClassName: sync.integrationEventClassName,
+                  topicConstant: sync.topicConstant,
+                  producer: rm.sourceModule,
+                  fields: sync.fields
+                },
+                writeOptions
+              );
+              generatedFiles.push({
+                type: 'Read Model Integration Event',
+                name: sync.integrationEventClassName,
+                path: `${moduleName}/application/events/${sync.integrationEventClassName}.java`
+              });
+            }
+
+            // Kafka listener
+            if (broker === 'kafka') {
+              const kafkaListenerPath = path.join(
+                moduleBasePath, 'infrastructure', 'kafkaListener',
+                `${sync.listenerClassName}.java`
+              );
+              await renderAndWrite(
+                path.join(readModelTemplatesDir, 'ReadModelKafkaListener.java.ejs'),
+                kafkaListenerPath,
+                listenerContext,
+                writeOptions
+              );
+              generatedFiles.push({
+                type: 'Read Model Kafka Listener',
+                name: sync.listenerClassName,
+                path: `${moduleName}/infrastructure/kafkaListener/${sync.listenerClassName}.java`
+              });
+
+              // Register topic in kafka.yaml
+              await updateKafkaYml(projectDir, sync.topicKey, sync.topicConstant);
+            }
+          }
+        }
+
+        spinner.succeed(chalk.green(`Read models generated! ✨`));
+      } else if (readModels.length > 0) {
+        console.log(chalk.yellow(`⚠ readModels: section found but no broker is installed. Run 'eva add kafka-client' to generate listener classes.`));
+      }
     }
 
     console.log(chalk.blue('\n📦 Generated files:'));

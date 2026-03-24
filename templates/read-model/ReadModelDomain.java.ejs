@@ -1,0 +1,46 @@
+package <%= packageName %>.<%= moduleName %>.domain.models.readmodels;
+<% const needsBigDecimal = fields && fields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = fields && fields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
+<% const needsInstant    = fields && fields.some(f => f.javaType === 'Instant'); %>
+<% const needsUUID       = fields && fields.some(f => f.javaType === 'UUID'); %>
+<% if (needsBigDecimal) { %>
+import java.math.BigDecimal;
+<% } %>
+<% if (needsLocalDate) { %>
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+<% } %>
+<% if (needsInstant) { %>
+import java.time.Instant;
+<% } %>
+<% if (needsUUID) { %>
+import java.util.UUID;
+<% } %>
+
+/**
+ * Local Read Model — projection of data from <%= sourceModule %>/<%= sourceName %>.
+ * <p>
+ * This class is read-only from this module's perspective.
+ * The source module owns mutations; this projection is maintained
+ * via domain events (see syncedBy configuration in domain.yaml).
+ * <p>
+ * No business logic, no setters, no empty constructor.
+ */
+public class <%= domainClassName %> {
+<% fields.forEach(field => { %>
+    private final <%- field.javaType %> <%= field.name %>;
+<% }); %>
+
+    public <%= domainClassName %>(<%= fields.map(f => f.javaType + ' ' + f.name).join(', ') %>) {
+<% fields.forEach(field => { %>
+        this.<%= field.name %> = <%= field.name %>;
+<% }); %>
+    }
+<% fields.forEach(field => { %>
+
+    public <%- field.javaType %> get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>() {
+        return this.<%= field.name %>;
+    }
+<% }); %>
+}

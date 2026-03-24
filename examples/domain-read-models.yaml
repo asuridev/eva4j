@@ -1,0 +1,86 @@
+# Example: Read Models (Local Projections)
+#
+# This example shows an "orders" module that uses readModels to maintain
+# local projections of data from "products" and "customers" modules,
+# eliminating synchronous HTTP dependencies.
+
+aggregates:
+  - name: Order
+    entities:
+      - name: Order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+          - name: customerId
+            type: String
+            reference:
+              aggregate: Customer
+              module: customers
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+            defaultValue: "0.00"
+    enums:
+      - name: OrderStatus
+        initialValue: DRAFT
+        values: [DRAFT, PLACED, CONFIRMED, CANCELLED]
+        transitions:
+          - from: DRAFT
+            to: PLACED
+            method: place
+          - from: PLACED
+            to: CONFIRMED
+            method: confirm
+          - from: [DRAFT, PLACED]
+            to: CANCELLED
+            method: cancel
+
+readModels:
+  - name: ProductReadModel
+    source:
+      module: products
+      aggregate: Product
+    tableName: rm_products
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+      - name: status
+        type: String
+    syncedBy:
+      - event: ProductCreatedEvent
+        action: UPSERT
+      - event: ProductUpdatedEvent
+        action: UPSERT
+      - event: ProductDeactivatedEvent
+        action: UPSERT
+
+  - name: CustomerReadModel
+    source:
+      module: customers
+      aggregate: Customer
+    tableName: rm_customers
+    fields:
+      - name: id
+        type: String
+      - name: fullName
+        type: String
+      - name: email
+        type: String
+    syncedBy:
+      - event: CustomerRegisteredEvent
+        action: UPSERT
+      - event: CustomerUpdatedEvent
+        action: UPSERT
+      - event: CustomerDeletedEvent
+        action: DELETE

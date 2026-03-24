@@ -1,0 +1,54 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.kafkaListener;
+
+import <%= packageName %>.<%= moduleName %>.application.events.<%= integrationEventClassName %>;
+import <%= packageName %>.<%= moduleName %>.application.usecases.<%= syncHandlerName %>;
+import <%= packageName %>.shared.infrastructure.eventEnvelope.EventEnvelope;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.stereotype.Component;
+
+import java.util.Map;
+<% const needsBigDecimal = fields && fields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = fields && fields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
+<% const needsInstant    = fields && fields.some(f => f.javaType === 'Instant'); %>
+<% const needsUUID       = fields && fields.some(f => f.javaType === 'UUID'); %>
+<% if (needsBigDecimal) { %>import java.math.BigDecimal;
+<% } %><% if (needsLocalDate) { %>import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+<% } %><% if (needsInstant) { %>import java.time.Instant;
+<% } %><% if (needsUUID) { %>import java.util.UUID;
+<% } %>
+
+/**
+ * Kafka listener for read model sync — topic: <%= topicConstant %>.
+ * Delegates to <%= syncHandlerName %>.on<%= eventBaseName %>().
+ */
+@Component("<%= moduleName %>.<%= listenerClassName %>")
+public class <%= listenerClassName %> {
+
+    private final <%= syncHandlerName %> syncHandler;
+    private final ObjectMapper objectMapper;
+
+    public <%= listenerClassName %>(<%= syncHandlerName %> syncHandler, ObjectMapper objectMapper) {
+        this.syncHandler = syncHandler;
+        this.objectMapper = objectMapper;
+    }
+
+    @KafkaListener(topics = "<%= topicSpringProperty %>", groupId = "${spring.application.name}-<%= moduleName %>-group")
+    public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+<% (fields || []).forEach(f => { %>
+        <%- f.javaType %> <%= f.name %> = objectMapper.convertValue(event.data().get("<%= f.name %>"), <%- f.javaType %>.class);
+<% }); %>
+
+        syncHandler.on<%= eventBaseName %>(new <%= integrationEventClassName %>(
+<% (fields || []).forEach((f, i) => { %>
+                <%= f.name %><%= i < fields.length - 1 ? ',' : '' %>
+<% }); %>
+        ));
+
+        ack.acknowledge();
+    }
+}

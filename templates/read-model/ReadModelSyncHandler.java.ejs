@@ -1,0 +1,50 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+<% const allIntegrationImports = syncedBy.map(s => s.integrationEventClassName); %>
+<% const uniqueImports = [...new Set(allIntegrationImports)]; %>
+<% uniqueImports.forEach(cls => { %>
+import <%= packageName %>.<%= moduleName %>.application.events.<%= cls %>;
+<% }); %>
+import <%= packageName %>.<%= moduleName %>.domain.models.readmodels.<%= domainClassName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= repositoryName %>;
+import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
+import <%= packageName %>.shared.domain.annotations.LogExceptions;
+
+/**
+ * Sync handler for the <%= domainClassName %> read model.
+ * Maintains the local projection by processing events from <%= sourceModule %>/<%= sourceName %>.
+ * <p>
+ * One method per syncedBy event — Kafka listeners delegate directly to these methods.
+ */
+@ApplicationComponent
+public class <%= syncHandlerName %> {
+
+    private final <%= repositoryName %> repository;
+
+    public <%= syncHandlerName %>(<%= repositoryName %> repository) {
+        this.repository = repository;
+    }
+<% syncedBy.forEach(sync => { %>
+
+    @LogExceptions
+    public void on<%= sync.eventBaseName %>(<%= sync.integrationEventClassName %> event) {
+<% if (sync.action === 'UPSERT') { %>
+        <%= domainClassName %> model = new <%= domainClassName %>(
+<% fields.forEach((field, idx) => { %>
+                event.<%= field.name %>()<%= idx < fields.length - 1 ? ',' : '' %>
+<% }); %>
+        );
+        repository.upsert(model);
+<% } else if (sync.action === 'DELETE') { %>
+        repository.deleteById(event.id());
+<% } else if (sync.action === 'SOFT_DELETE') { %>
+        // SOFT_DELETE: mark record as inactive rather than removing it
+        <%= domainClassName %> model = new <%= domainClassName %>(
+<% fields.forEach((field, idx) => { %>
+                event.<%= field.name %>()<%= idx < fields.length - 1 ? ',' : '' %>
+<% }); %>
+        );
+        repository.upsert(model);
+<% } %>
+    }
+<% }); %>
+}

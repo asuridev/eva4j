@@ -1,0 +1,80 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.database.repositories;
+<% const needsBigDecimal = fields && fields.some(f => f.javaType === 'BigDecimal'); %>
+<% const needsLocalDate  = fields && fields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
+<% const needsInstant    = fields && fields.some(f => f.javaType === 'Instant'); %>
+<% const needsUUID       = fields && fields.some(f => f.javaType === 'UUID'); %>
+<% if (needsBigDecimal) { %>
+import java.math.BigDecimal;
+<% } %>
+<% if (needsLocalDate || hasSoftDelete) { %>
+import java.time.LocalDateTime;
+<% } %>
+<% if (needsInstant) { %>
+import java.time.Instant;
+<% } %>
+<% if (needsUUID) { %>
+import java.util.UUID;
+<% } %>
+
+import <%= packageName %>.<%= moduleName %>.domain.models.readmodels.<%= domainClassName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= repositoryName %>;
+import <%= packageName %>.<%= moduleName %>.infrastructure.database.entities.<%= jpaEntityName %>;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+/**
+ * Repository implementation for the <%= domainClassName %> read model.
+ * Maps between domain read model and JPA entity.
+ */
+@Repository
+public class <%= repositoryImplName %> implements <%= repositoryName %> {
+
+    private final <%= jpaRepositoryName %> jpaRepository;
+
+    public <%= repositoryImplName %>(<%= jpaRepositoryName %> jpaRepository) {
+        this.jpaRepository = jpaRepository;
+    }
+
+    @Override
+    public void upsert(<%= domainClassName %> readModel) {
+        <%= jpaEntityName %> entity = <%= jpaEntityName %>.builder()
+<% fields.forEach(field => { %>
+                .<%= field.name %>(readModel.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
+<% }); %>
+                .build();
+        jpaRepository.save(entity);
+    }
+
+    @Override
+    public void deleteById(String id) {
+        jpaRepository.deleteById(id);
+    }
+
+    @Override
+    public Optional<<%= domainClassName %>> findById(String id) {
+        return jpaRepository.findById(id).map(this::toDomain);
+    }
+
+    @Override
+    public boolean existsById(String id) {
+        return jpaRepository.existsById(id);
+    }
+<% if (hasSoftDelete) { %>
+
+    public void softDelete(String id) {
+        jpaRepository.findById(id).ifPresent(entity -> {
+            entity.setDeletedAt(LocalDateTime.now());
+            jpaRepository.save(entity);
+        });
+    }
+<% } %>
+
+    private <%= domainClassName %> toDomain(<%= jpaEntityName %> entity) {
+        return new <%= domainClassName %>(
+<% fields.forEach((field, idx) => { %>
+                entity.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>()<%= idx < fields.length - 1 ? ',' : '' %>
+<% }); %>
+        );
+    }
+}
