@@ -123,6 +123,13 @@ Commands for transitioning from monolith to microservices.
   - Interactive HTML report with flow simulator + network diagram
   - Domain-agnostic: works for any microservices design
 
+- **[export diagram](./EXPORT_DIAGRAM.md)** - Convert Mermaid C4 diagrams to Draw.io files
+  - Converts `system/c4-container.mmd` and `system/c4-context.mmd`
+  - Generates fully styled `.drawio` files (C4 color conventions)
+  - Auto-layout: persons → containers → DBs → brokers → externals
+  - Colored relationship arrows (green / blue / orange by type)
+  - Runs entirely locally — no external tools or internet required
+
 - **info** - Display project information
   - *Documentation coming soon*
   - List modules
