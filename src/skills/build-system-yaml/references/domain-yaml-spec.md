@@ -32,6 +32,10 @@ Propón campos necesarios no mencionados, Value Objects expresivos, invariantes 
 11. ❌ **Todo en inglés**
 12. ❌ **No transiciones sin evidencia de activación** — toda transición activada por `ports:` o scheduler necesita un domain event con `triggers`
 13. ❌ **No reutilizar `service:` en `ports[]` entre módulos** — nombres propios del bounded context
+14. ❌ **No `readModels[].source.module` igual al módulo actual** — readModels son cross-module exclusivamente
+15. ❌ **No auditoría, endpoints REST ni lógica de negocio en `readModels:`** — son proyecciones inmutables
+16. ❌ **No `readModels[].name` sin sufijo `ReadModel`** — siempre `PascalCase + ReadModel`
+17. ❌ **No `readModels[].tableName` sin prefijo `rm_`** — identificación visual obligatoria
 
 ---
 
@@ -41,7 +45,8 @@ Propón campos necesarios no mencionados, Value Objects expresivos, invariantes 
 |---|---|
 | `modules[x].exposes[]` | `endpoints:` con `basePath` + `versions[].operations[]` |
 | `integrations.async[]` donde `producer = módulo` | `events:` |
-| `integrations.async[].consumers[]` donde `module = módulo` | `listeners:` (con `useCase`) |
+| `integrations.async[].consumers[]` donde `module = módulo` y tiene `useCase` | `listeners:` (con `useCase`) |
+| `integrations.async[].consumers[]` donde `module = módulo` y tiene `readModel` | `readModels:` (con `syncedBy`) |
 | `integrations.sync[]` donde `caller = módulo` | `ports:` (con `service`, `http`) |
 
 ### Formato correcto de endpoints
@@ -289,33 +294,78 @@ Anotaciones: `NotNull`, `NotBlank`, `NotEmpty`, `Email`, `Size`, `Min`, `Max`, `
 
 ---
 
-## Proyecciones locales (read models)
+## Proyecciones locales (`readModels:`)
 
-Agregados sincronizados por listeners Kafka. Señales:
-- Campos coinciden con `listeners[].fields`
-- useCase: `Register*InLocalCatalog`, `Sync*`, `Update*FromEvent`
-- Sin endpoints de escritura
-- Existe para evitar llamadas síncronas en tiempo real
+Cuando un módulo necesita datos de otro bounded context para validar precondiciones o enriquecer entidades, usar `readModels:` en vez de `ports:` (sync HTTP). Esto elimina dependencias síncronas y mejora autonomía, resiliencia y rendimiento.
 
-**Auditoría:** `audit.enabled: true`, `trackUser: false` (cambios vienen de eventos, no de usuarios).
+### Cuándo usar readModels vs ports
+
+| Criterio | `readModels:` (async) | `ports:` (sync) |
+|---|---|---|
+| Consistencia eventual aceptable | ✅ | — |
+| Se necesita consistencia fuerte | — | ✅ |
+| Datos se consultan frecuentemente | ✅ | — |
+| Llamada infrecuente y simple | — | ✅ |
+| Preparación para microservicios | ✅ | — |
+
+### Estructura
 
 ```yaml
-- name: BikeCatalog
-  entities:
-    - name: bikeCatalogEntry
-      isRoot: true
-      tableName: bike_catalog_entries
-      audit:
-        enabled: true
-        trackUser: false
-      fields:
-        - name: id
-          type: String
-        - name: isAvailable
-          type: Boolean
-          readOnly: true
-          defaultValue: true
+# Nivel raíz, sibling de aggregates:, listeners:, ports:
+readModels:
+  - name: ProductReadModel               # PascalCase + sufijo "ReadModel" (OBLIGATORIO)
+    source:                              # Trazabilidad al módulo fuente (OBLIGATORIO)
+      module: products                   # Módulo fuente (kebab-case)
+      aggregate: Product                 # Agregado fuente (PascalCase)
+    tableName: rm_products               # Tabla en BD (OBLIGATORIO, prefijo rm_)
+    fields:                              # Campos proyectados — subconjunto del fuente
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+      - name: status
+        type: String
+    syncedBy:                            # Eventos que mantienen esta tabla (min 1)
+      - event: ProductCreatedEvent       # Nombre del evento (PascalCase + sufijo Event)
+        action: UPSERT                   # Acción: UPSERT | DELETE | SOFT_DELETE
+      - event: ProductUpdatedEvent
+        action: UPSERT
+      - event: ProductDeactivatedEvent
+        action: SOFT_DELETE
 ```
+
+### Reglas
+
+- **`name:`** — PascalCase, **DEBE** terminar con `ReadModel`
+- **`tableName:`** — **DEBE** empezar con `rm_` (identificación visual en BD)
+- **`fields:`** — **DEBE** incluir un campo `id`
+- **`syncedBy:`** — **DEBE** tener al menos una entrada
+- **`source.module:`** — **NO PUEDE** ser el mismo módulo actual (cross-module exclusivamente)
+- **Sin auditoría** — Los readModels **nunca** tienen campos de auditoría
+- **Sin endpoints REST** — Los readModels **nunca** exponen endpoints
+- **Sin lógica de negocio** — La clase de dominio es inmutable (solo getters)
+
+### Acciones de sincronización
+
+| Acción | Significado | Uso |
+|---|---|---|
+| `UPSERT` | Insertar si es nuevo, actualizar si existe | Creaciones, actualizaciones, cambios de estado |
+| `DELETE` | Eliminar el registro permanentemente | Hard deletes en el módulo fuente |
+| `SOFT_DELETE` | Marcar como inactivo con timestamp | Cuando el fuente usa soft delete |
+
+### Inferencia desde system.yaml
+
+| Fuente en system.yaml | Destino en domain.yaml |
+|---|---|
+| `consumers[].readModel: ProductReadModel` | `readModels:` entry con ese nombre |
+| `integrations.async[].producer` | `readModels[].source.module` |
+| `integrations.async[].topic` | Topic derivado automáticamente del nombre del evento |
+
+### Impacto en el módulo fuente
+
+El módulo fuente **debe** emitir los eventos referenciados en `syncedBy`. Asegurar que los `events:` del fuente incluyan todos los campos declarados en `readModels[].fields` (el payload es la fuente de verdad para la proyección).
 
 ---
 
@@ -406,5 +456,10 @@ Si un valor no es trazable → falta un endpoint o listener en el diseño.
 - [ ] `nestedTypes[]` para campos de tipo objeto en listeners/ports
 - [ ] Transiciones por `ports:` tienen domain event con `triggers`
 - [ ] Cada enum `*Type` valor trazable a listener/endpoint/event
-- [ ] Proyecciones: `audit.enabled: true`, `trackUser: false`
+- [ ] Proyecciones cross-module: usar `readModels:` con `source`, `tableName` (prefijo `rm_`), `fields` (incluye `id`), `syncedBy`
+- [ ] `readModels[].name` termina con `ReadModel` (PascalCase)
+- [ ] `readModels[].source.module` ≠ módulo actual
+- [ ] `readModels[].syncedBy` → al menos una entrada con `action` válida (UPSERT, DELETE, SOFT_DELETE)
+- [ ] Eventos en `syncedBy` deben existir como `events:` en el módulo fuente
+- [ ] Si `readModels:` reemplaza un `ports:`, eliminar la entrada sync correspondiente
 - [ ] Todo en inglés

@@ -58,6 +58,14 @@ integrations:
         - module: notifications
           useCase: NotifyOrderPlaced   # acción que notifications ejecuta
 
+    # Read Model sync — consumer usa readModel: en vez de useCase:
+    - event: ProductCreatedEvent
+      producer: products
+      topic: PRODUCT_CREATED
+      consumers:
+        - module: orders
+          readModel: ProductReadModel  # ← indica sync de read model, no lógica de negocio
+
   sync:
     - caller: orders               # módulo que hace la llamada
       calls: customers             # módulo destino
@@ -78,6 +86,7 @@ integrations:
 | Port names | PascalCase + sufijo `Service` — **único por módulo** | `OrderCustomerService` | `CustomerService` (compartido) |
 | useCases | PascalCase, verbo + sustantivo | `CreateOrder`, `FindAllOrders` | `createOrder`, `orders` |
 | `consumers[].useCase` | PascalCase, verbo + sustantivo | `HandleOrderPlaced` | `orderPlaced` |
+| `consumers[].readModel` | PascalCase + `ReadModel` | `ProductReadModel` | `productReadModel` |
 
 ---
 
@@ -91,6 +100,31 @@ integrations:
 - ✅ `consumers[].module` debe existir en `modules:`
 - ✅ Módulos pasivos (notificaciones, auditoría) son **consumidores**, nunca `caller`
 - ℹ️ Varios módulos pueden consumir el mismo evento sin riesgo de colisión de beans
+- ℹ️ `consumers[]` puede usar `readModel:` en vez de `useCase:` para indicar sync de Read Model local (proyección de datos cross-module mantenida por eventos)
+
+---
+
+## Consumers: useCase vs readModel
+
+Cada entrada en `consumers[]` debe declarar **exactamente uno** de:
+
+| Campo | Cuándo usar | Qué genera en domain.yaml |
+|---|---|---|
+| `useCase:` | Lógica de negocio (handler + command) | `listeners:` entry |
+| `readModel:` | Proyección local de datos (sync handler) | `readModels:` entry con `syncedBy` |
+
+```yaml
+consumers:
+  - module: payments
+    useCase: HandleOrderPlaced       # → listeners: en payments.yaml
+  - module: orders
+    readModel: ProductReadModel      # → readModels: en orders.yaml
+```
+
+**Reglas de `readModel:`:**
+- PascalCase, sufijo `ReadModel`
+- El module consumidor declara `readModels:` en su `domain.yaml` con `source.module` apuntando al producer
+- Al reemplazar un port sync por un readModel, eliminar la entrada de `integrations.sync[]`
 
 ---
 
@@ -170,6 +204,8 @@ consumers:
 - [ ] Sin dependencias circulares síncronas
 - [ ] Todos los `consumers[].module` existen en `modules:`
 - [ ] Todos los `consumers[].useCase` presentes y en PascalCase
+- [ ] `consumers[]` con `readModel:` usan PascalCase + sufijo `ReadModel`
+- [ ] Cada consumer tiene exactamente uno de `useCase:` o `readModel:` (nunca ambos)
 - [ ] Todos los `calls.using:` existen en `exposes:` del destino
 - [ ] Módulos pasivos no son `caller`
 - [ ] `useCases` en PascalCase

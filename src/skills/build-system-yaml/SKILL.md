@@ -62,10 +62,31 @@ Si el usuario no proveyó todos los datos, **pregunta** antes de generar:
 3. **Endpoints REST** por módulo (método + path + caso de uso)
 4. **Flujos async**: evento → productor → consumidores + `useCase` de cada consumidor
 5. **Llamadas sync**: caller → destino → endpoints usados
+6. **Dependencias de datos cross-module**: ¿algún módulo necesita datos de otro para validar o enriquecer? → candidato a **Read Model** (proyección local mantenida por eventos) en vez de llamada sync
 
 > Si `system/system.yaml` ya existe, léelo y pregunta solo por cambios.
 
 Aplica el rol funcional: sugiere módulos necesarios no mencionados, propone flujos async coherentes, anticipa invariantes. Confirma antes de agregar elementos no solicitados.
+
+### Read Models — decisión de diseño
+
+Cuando un módulo necesita datos de otro módulo, evalúa antes de decidir entre `ports:` (sync HTTP) y `readModels:` (async, proyección local):
+
+| Pregunta | Si la respuesta es SÍ → |
+|---|---|
+| ¿El dato se consulta en cada request o en operaciones frecuentes? | `readModels:` |
+| ¿Se tolera consistencia eventual (ms de delay)? | `readModels:` |
+| ¿Se prepara el sistema para microservicios (`eva detach`)? | `readModels:` |
+| ¿Se necesita consistencia fuerte (ej: saldo financiero)? | `ports:` |
+| ¿Es una llamada infrecuente y simple (ej: lookup puntual)? | `ports:` |
+
+**Patrón típico:** Si un módulo ya consume eventos de otro módulo (`listeners:`) y además llama sync para obtener datos del mismo módulo (`ports:`), es candidato fuerte a reemplazar el port por un readModel.
+
+Si decides usar readModel:
+1. En `system.yaml`: declarar eventos con `consumers[].readModel:` en vez de `useCase:`
+2. En `{module}.yaml`: declarar `readModels:` con `source`, `tableName`, `fields`, `syncedBy`
+3. Eliminar la entrada `integrations.sync[]` que reemplaza
+4. Asegurar que el módulo fuente emita los eventos necesarios en sus `events:`
 
 ---
 
@@ -108,6 +129,13 @@ integrations:
       consumers:
         - module: payments
           useCase: HandleOrderPlaced
+    # Read Model sync — usa readModel: en vez de useCase:
+    - event: ProductCreatedEvent
+      producer: products
+      topic: PRODUCT_CREATED
+      consumers:
+        - module: orders
+          readModel: ProductReadModel    # proyección local de datos cross-module
   sync:
     - caller: orders
       calls: customers
@@ -134,6 +162,8 @@ integrations:
 - Sin port names genéricos compartidos entre módulos
 - `consumers[].useCase` siempre presente y en PascalCase
 - `calls.using:` solo referencia endpoints de `exposes:` del destino
+- Cada consumer declara exactamente `useCase:` (lógica de negocio) o `readModel:` (proyección local), nunca ambos
+- `readModel:` PascalCase + sufijo `ReadModel` — su módulo consumidor declara `readModels:` en domain.yaml
 
 ---
 
@@ -146,6 +176,8 @@ Antes de proponer el `system.yaml`, verifica:
 - [ ] Sin dependencias circulares síncronas
 - [ ] Todos los `consumers[].module` existen en `modules:`
 - [ ] Todos los `consumers[].useCase` presentes y en PascalCase
+- [ ] `consumers[]` con `readModel:` en PascalCase + sufijo `ReadModel`
+- [ ] Cada consumer tiene exactamente `useCase:` o `readModel:`, nunca ambos
 - [ ] Todos los `calls.using:` existen en `exposes:` del destino
 - [ ] Módulos pasivos no son `caller`
 - [ ] Todo en inglés
@@ -257,6 +289,7 @@ C4Container
 - `ContainerQueue()` para el broker — solo si `messaging.enabled: true`; usar el tipo de `messaging.broker`
 - `System_Ext()` fuera del boundary para servicios externos
 - **Flechas async siempre pasan por el broker**: `producer → broker` y `broker → consumer`, nunca directo
+- **Read Model sync también pasa por el broker**: `Rel(source, broker, "ProductCreatedEvent", "Kafka")` + `Rel(broker, consumer, "Sync ProductReadModel", "Kafka")` — no usar flecha directa
 - **Flechas sync** directas entre containers: de caller a callee con label del port name
 - Los `Rel()` de eventos incluyen el nombre del evento en el campo `technology`/label
 - Derivar actores `Person()` de quienes consumen los `exposes[]`
@@ -302,7 +335,18 @@ Antes de guardar, verifica:
 
 Lee `references/domain-yaml-spec.md` para la especificación completa de estructura, reglas, restricciones y checklist del `system/{module}.yaml`.
 
-Para cada módulo en `modules:`, genera `system/{nombre-del-modulo}.yaml` con: aggregates, entities, valueObjects, enums (con transitions si aplica), events, endpoints, listeners y ports — todo inferido del `system.yaml`.
+Para cada módulo en `modules:`, genera `system/{nombre-del-modulo}.yaml` con: aggregates, entities, valueObjects, enums (con transitions si aplica), events, endpoints, listeners, ports y **readModels** — todo inferido del `system.yaml`.
+
+### Inferencia de readModels desde system.yaml
+
+Cuando `integrations.async[].consumers[]` tiene `readModel:` y el `module` es el módulo actual:
+1. Agrupar todos los eventos del mismo `readModel:` → una entrada `readModels:` con múltiples `syncedBy`
+2. `source.module` = el `producer` de esas integraciones async
+3. `source.aggregate` = derivar del nombre del readModel (ej: `ProductReadModel` → `Product`)
+4. `tableName` = `rm_` + snake_case del source module (ej: `rm_products`)
+5. `fields` = inferir del payload del evento fuente (incluir siempre `id`)
+6. `syncedBy[].action` = `UPSERT` para Created/Updated, `SOFT_DELETE` para Deactivated, `DELETE` para Deleted
+7. Si había una entrada `integrations.sync[]` al mismo módulo fuente → **no generar `ports:`** para esa llamada (el readModel la reemplaza)
 
 ---
 

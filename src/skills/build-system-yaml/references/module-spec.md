@@ -61,6 +61,17 @@ Especificación técnica narrativa del sistema completo. Una sección `##` por c
 **When called:** [in which use case and under what condition]
 **Endpoints used:** [METHOD /path list]
 **Data obtained and how it's used:** [detailed description]
+
+### Read Models (local projections)
+[Only if module has readModels: in its domain.yaml]
+
+#### {ReadModelName} ← {source-module}
+**Purpose:** [why this projection exists — what data it provides and why sync HTTP was replaced]
+**Source aggregate:** [{Aggregate} in {source-module}]
+**Table:** [{tableName}]
+**Projected fields:** [field list with types]
+**Synced by:** [event names and actions (UPSERT/DELETE/SOFT_DELETE)]
+**Consistency model:** Eventual — acceptable delay: [specify, e.g. "milliseconds"]
 ```
 
 ### Reglas del system.md
@@ -245,6 +256,27 @@ flowchart TD
 **When called:** [in which use case and condition]
 **Endpoints used:** [METHOD /path list]
 **Data obtained and how it's used:** [detailed description]
+
+## Read Models (local projections)
+[Only if module has readModels: in its domain.yaml]
+
+### {ReadModelName} ← {source-module}
+**Purpose:** [why this projection exists — what data it provides and why sync HTTP was not used]
+**Source aggregate:** [{Aggregate} in {source-module}]
+**Table:** [{tableName}]
+**Projected fields:** [field list with types and business meaning]
+**Synced by:** [event name → action, for each syncedBy entry]
+**Consistency model:** Eventual — acceptable delay: [specify]
+**Replaces:** [sync port name, if applicable — e.g., "Replaces OrderProductService sync call"]
+
+### Architectural Decision — {ReadModelName}
+
+**Context:** [{module} needs {data description} from {source-module} to {business reason}]
+**Decision:** Use event-driven Local Read Model instead of sync HTTP call.
+**Consequences:**
+- (+) Module is fully autonomous — no runtime dependency on {source-module}
+- (+) Lower latency — local DB query vs HTTP roundtrip
+- (-) Eventual consistency — milliseconds delay on updates
 ```
 
 ---
@@ -253,7 +285,7 @@ flowchart TD
 
 - **Todo en inglés**: títulos, secciones, descripciones, invariantes, use cases.
 - **INVARIANTES obligatorias**: al menos 2–3 por módulo. Analizar unicidad, estados válidos, rangos, precondiciones de transición.
-- **Diagrama de interacciones obligatorio**: todos los endpoints y eventos entrantes. Sin entradas → nodo `[[passive module]]`.
+- **Diagrama de interacciones obligatorio**: todos los endpoints, eventos entrantes y read models. Sin entradas → nodo `[[passive module]]`. Read models se muestran como subgraphs separados con label `Read Models` y nodos `📦 {ReadModelName}` conectados desde eventos de sincronización.
 - **Diagrama de secuencia obligatorio**: al menos un `sequenceDiagram` cubriendo el happy path. Diagramas adicionales para bifurcaciones (error, compensación). Modelar todos los actores reales.
 - **Diagrama de flujo por caso de uso**: `flowchart TD` dentro de cada `### {UseCase}` con trigger, invariantes, lógica y eventos.
 - **Máquina de estados condicional**: solo si hay entidades con ciclo de vida. Restricciones de transición son invariantes implícitas.
