@@ -305,6 +305,32 @@ aggregates:
           - name: estimatedDeliveryDate # no resuelto → null /* TODO */
             type: LocalDate
 
+      # ─── Eventos con lifecycle: (alterntiva a triggers:) ──────────────
+      # Cuando el evento se produce en una operación CRUD y no en una transición de estado,
+      # se usa lifecycle: en lugar de triggers:
+      # El generador emite raise() automáticamente en el punto CRUD correspondiente.
+
+      - name: OrderCreatedEvent
+        lifecycle: create           # raise() en el constructor de creación
+        fields:                     # UUID auto-generado como id antes de raise()
+          - name: orderId
+            type: String
+          - name: customerName      # → this.getCustomerName() si existe en la entidad
+            type: String
+          - name: createdAt
+            type: LocalDateTime     # → LocalDateTime.now()
+
+      - name: OrderUpdatedEvent
+        lifecycle: update           # raise() en UpdateCommandHandler antes de save()
+        fields:
+          - name: orderId
+            type: String
+          - name: customerName
+            type: String
+
+      # lifecycle: delete requiere hasSoftDelete: false en la entidad raíz
+      # lifecycle: softDelete requiere hasSoftDelete: true en la entidad raíz
+
 # ─── Eventos externos que este módulo CONSUME ────────────────────────────────
 # Nivel raíz, sibling de aggregates:
 # Requiere broker instalado (eva add kafka-client) para generación.

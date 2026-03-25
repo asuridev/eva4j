@@ -139,6 +139,9 @@ aggregates:
       # Eventos de dominio que emite este agregado (dentro del agregado)
       - name: NombreEventoOcurrido
         fields: []
+        # Opciones mutuamente excluyentes para emisión automática:
+        # triggers: [methodName]    # Emite raise() dentro de un método de transición
+        # lifecycle: create         # Emite raise() en operación CRUD (create|update|delete|softDelete)
 
 # listeners: — eventos externos que CONSUME este módulo (nivel raíz)
 listeners:
@@ -1723,12 +1726,61 @@ aggregates:
 |-----------|------|-------------|-------------|
 | `name` | String | ✅ | Nombre de la clase del evento (PascalCase) |
 | `fields` | Array | ✅ | Campos que transporta el evento |
-| `triggers` | Array\<String\> | ➖ | Nombres de métodos de transición que publican este evento. El generador emite `raise(new XEvent(...))` automáticamente. |
+| `triggers` | Array\<String\> | ➖ | Nombres de métodos de transición que publican este evento. El generador emite `raise(new XEvent(...))` automáticamente. Mutuamente excluyente con `lifecycle`. |
+| `lifecycle` | String | ➖ | Operación CRUD que publica este evento: `create`, `update`, `delete`, `softDelete`. Mutuamente excluyente con `triggers`. |
 | `topic` | String | ➖ | **Override del topic Kafka.** Por defecto el generador quita el sufijo `Event` del nombre de la clase: `ProductPublishedEvent` → `PRODUCT_PUBLISHED`. Úsalo cuando el consumer en `listeners[]` de otro módulo declara un topic diferente al auto-derivado. |
 
 > **Regla de derivación de topic:** `ProductPublishedEvent` → quita `Event` → `ProductPublished` → SCREAMING_SNAKE → `PRODUCT_PUBLISHED`. Esto garantiza que el producer y el consumer coincidan cuando el consumer declara `topic: PRODUCT_PUBLISHED` en `listeners[]`.
 
 > **`kafka: true`** ya no es necesario — si el proyecto tiene `kafka-client` instalado, todos los eventos se cablearán automáticamente al ejecutar `eva g entities`.
+
+### Ejemplo con `lifecycle:`
+
+```yaml
+events:
+  - name: ProductCreatedEvent
+    lifecycle: create              # raise() en el constructor de creación
+    fields:
+      - name: productId
+        type: String
+      - name: name
+        type: String
+
+  - name: ProductUpdatedEvent
+    lifecycle: update              # raise() en UpdateCommandHandler antes de save()
+    fields:
+      - name: productId
+        type: String
+      - name: name
+        type: String
+
+  - name: ProductDeletedEvent
+    lifecycle: delete              # raise() en DeleteCommandHandler; requiere !hasSoftDelete
+    fields:
+      - name: productId
+        type: String
+      - name: deletedAt
+        type: LocalDateTime
+
+  - name: ProductDeactivatedEvent
+    lifecycle: softDelete          # raise() en softDelete(); requiere hasSoftDelete: true
+    fields:
+      - name: productId
+        type: String
+      - name: deletedAt
+        type: LocalDateTime
+```
+
+**Puntos de emisión:**
+
+| `lifecycle` | Punto de emisión | UUID auto-gen | `raise()` visibility |
+|---|---|---|---|
+| `create` | Constructor de creación | ✅ `this.id = UUID.randomUUID().toString()` | `protected` |
+| `update` | `UpdateCommandHandler`, antes de `repository.save()` | — | `public` |
+| `delete` | `DeleteCommandHandler`, antes de `repository.delete()` | — | `public` |
+| `softDelete` | Método `softDelete()` de la entidad | — | `protected` |
+
+> **Validaciones:** `C2-008` (error) si el valor de lifecycle no es válido. `C2-009` (warning) si `lifecycle: softDelete` sin `hasSoftDelete: true`, o `lifecycle: delete` con `hasSoftDelete: true`. `C2-010` (error) si un campo del lifecycle event no existe en la entidad raíz del agregado.
 
 ### Archivos generados
 
@@ -2190,6 +2242,7 @@ Para sobrescribir, usar `topic:` explícito en la entrada de `syncedBy`.
 | RM-004 | ERROR | `fields` debe incluir un campo `id` |
 | RM-005 | ERROR | `syncedBy` debe tener al menos una entrada |
 | RM-006 | ERROR | `syncedBy[].action` debe ser `UPSERT`, `DELETE` o `SOFT_DELETE` |
+| RM-008 / C1-007 | WARNING | Campo del readModel no cubierto por ningún evento UPSERT del productor — siempre será null |
 | RM-009 | WARNING | `ports:` tiene llamadas sync al mismo `source.module` — considerar eliminarlas |
 | RM-010 | ERROR | `source.module` es el mismo módulo actual |
 

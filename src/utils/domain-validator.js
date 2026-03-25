@@ -119,7 +119,10 @@ function buildSystemAsyncMap(systemConfig) {
     map[ev.event] = {
       producer: ev.producer,
       topic: ev.topic,
-      consumers: (ev.consumers || []).map((c) => (typeof c === 'string' ? c : c.module)),
+      consumers: (ev.consumers || []).map((c) => {
+        if (typeof c === 'string') return { module: c, useCase: undefined, readModel: undefined };
+        return { module: c.module, useCase: c.useCase, readModel: c.readModel };
+      }),
     };
   }
   return map;
@@ -213,8 +216,9 @@ function runC1(domainConfigs, systemConfig) {
     'C1-002': { label: 'Listener referencia evento que ningún módulo produce', severity: 'ok', findings: [] },
     'C1-003': { label: 'Campo en listener.fields no existe en el evento del productor', severity: 'ok', findings: [] },
     'C1-004': { label: 'Campo existe pero con tipo incompatible productor/consumidor', severity: 'ok', findings: [] },
-    'C1-005': { label: 'system.yaml registra consumidor pero módulo no tiene listener declarado', severity: 'ok', findings: [] },
+    'C1-005': { label: 'system.yaml registra consumidor pero módulo no tiene listener o readModel.syncedBy declarado', severity: 'ok', findings: [] },
     'C1-006': { label: 'Listener declara producer: incorrecto', severity: 'ok', findings: [] },
+    'C1-007': { label: 'Campo de readModel no cubierto por eventos UPSERT del productor', severity: 'ok', findings: [] },
   };
 
   // C1-001: produced event in domain but zero consumers in system.yaml
@@ -277,20 +281,38 @@ function runC1(domainConfigs, systemConfig) {
     }
   }
 
-  // C1-005: system.yaml consumer present but module has no listener
+  // C1-005: system.yaml consumer present but module has no listener or readModel.syncedBy
   for (const [eventName, sysEntry] of Object.entries(systemAsyncMap)) {
-    for (const consumerModule of sysEntry.consumers) {
-      const consumerConfig = domainConfigs[consumerModule];
+    for (const consumer of sysEntry.consumers) {
+      const consumerConfig = domainConfigs[consumer.module];
       if (!consumerConfig) continue; // module domain.yaml not loaded — skip
-      const hasListener = (consumerConfig.listeners || []).some((l) => l.event === eventName);
-      if (!hasListener) {
-        checks['C1-005'].findings.push(
-          finding(
-            consumerModule,
-            `system.yaml registra '${consumerModule}' como consumidor de '${eventName}' pero el módulo no tiene listener declarado`,
-            `Evento producido por: ${sysEntry.producer}`
-          )
+
+      if (consumer.readModel) {
+        // readModel consumer → check readModels[].syncedBy[]
+        const hasSync = (consumerConfig.readModels || []).some((rm) =>
+          (rm.syncedBy || []).some((s) => s.event === eventName)
         );
+        if (!hasSync) {
+          checks['C1-005'].findings.push(
+            finding(
+              consumer.module,
+              `system.yaml registra '${consumer.module}' como consumidor readModel de '${eventName}' pero el módulo no tiene readModels[].syncedBy con ese evento`,
+              `Evento producido por: ${sysEntry.producer}, readModel esperado: ${consumer.readModel}`
+            )
+          );
+        }
+      } else {
+        // useCase consumer → check listeners[]
+        const hasListener = (consumerConfig.listeners || []).some((l) => l.event === eventName);
+        if (!hasListener) {
+          checks['C1-005'].findings.push(
+            finding(
+              consumer.module,
+              `system.yaml registra '${consumer.module}' como consumidor de '${eventName}' pero el módulo no tiene listener declarado`,
+              `Evento producido por: ${sysEntry.producer}`
+            )
+          );
+        }
       }
     }
   }
@@ -312,6 +334,35 @@ function runC1(domainConfigs, systemConfig) {
     }
   }
 
+  // C1-007: readModel field not covered by any UPSERT event from producer (RM-008)
+  for (const [moduleName, config] of Object.entries(domainConfigs)) {
+    for (const rm of config.readModels || []) {
+      // Collect field names from all UPSERT syncedBy events
+      const upsertEventFields = new Set();
+      for (const sync of rm.syncedBy || []) {
+        if ((sync.action || '').toUpperCase() !== 'UPSERT') continue;
+        const producerInfo = producedEvents[sync.event];
+        if (!producerInfo) continue; // caught by other checks
+        for (const f of producerInfo.fields) {
+          upsertEventFields.add(f.name);
+        }
+      }
+      // Check each readModel field (except 'id') is covered
+      for (const rmField of rm.fields || []) {
+        if (rmField.name === 'id') continue; // mapped to {entityName}Id in events
+        if (!upsertEventFields.has(rmField.name)) {
+          checks['C1-007'].findings.push(
+            finding(
+              moduleName,
+              `ReadModel '${rm.name}' tiene campo '${rmField.name}' que no aparece en ningún evento UPSERT de syncedBy`,
+              `Source: ${rm.source ? rm.source.module : '?'}. El campo siempre será null — agregar a los events del productor o quitar del readModel`
+            )
+          );
+        }
+      }
+    }
+  }
+
   // Assign severities
   setDefaultSeverities(checks, {
     'C1-001': 'info',
@@ -320,6 +371,7 @@ function runC1(domainConfigs, systemConfig) {
     'C1-004': 'error',
     'C1-005': 'error',
     'C1-006': 'error',
+    'C1-007': 'warning',
   });
 
   return checks;
@@ -336,6 +388,9 @@ function runC2(domainConfigs, systemConfig) {
     'C2-005': { label: 'Transición de estado sin Domain Event asociado (sin trigger)', severity: 'ok', findings: [] },
     'C2-006': { label: 'Colisión de nombre de useCase entre endpoints y listeners', severity: 'ok', findings: [] },
     'C2-007': { label: 'UseCase FindAll con nombre de agregado sin pluralizar correctamente', severity: 'ok', findings: [] },
+    'C2-008': { label: 'Evento con valor de lifecycle inválido', severity: 'ok', findings: [] },
+    'C2-009': { label: 'Evento lifecycle incompatible con configuración de entidad', severity: 'ok', findings: [] },
+    'C2-010': { label: 'Campo de lifecycle event no existe en la entidad raíz', severity: 'ok', findings: [] },
   };
 
   for (const [moduleName, config] of Object.entries(domainConfigs)) {
@@ -405,6 +460,7 @@ function runC2(domainConfigs, systemConfig) {
     }
 
     // C2-004: event trigger references a method that does not exist in any transition
+    // Skipped for events that use lifecycle: instead of triggers:
     const allTransitionMethods = new Set();
     for (const agg of config.aggregates || []) {
       for (const en of agg.enums || []) {
@@ -415,6 +471,7 @@ function runC2(domainConfigs, systemConfig) {
     }
     for (const agg of config.aggregates || []) {
       for (const ev of agg.events || []) {
+        if (ev.lifecycle) continue; // lifecycle events don't reference transition methods
         for (const trigger of ev.triggers || []) {
           if (!allTransitionMethods.has(trigger)) {
             checks['C2-004'].findings.push(
@@ -422,6 +479,74 @@ function runC2(domainConfigs, systemConfig) {
                 moduleName,
                 `Evento '${ev.name}' tiene trigger '${trigger}' que no corresponde a ningún método de transición`,
                 `Métodos disponibles: ${[...allTransitionMethods].join(', ') || '(ninguno)'}`
+              )
+            );
+          }
+        }
+      }
+    }
+
+    // C2-008: event lifecycle value is not one of the valid options
+    const validLifecycleValues = ['create', 'update', 'delete', 'softDelete'];
+    for (const agg of config.aggregates || []) {
+      for (const ev of agg.events || []) {
+        if (ev.lifecycle && !validLifecycleValues.includes(ev.lifecycle)) {
+          checks['C2-008'].findings.push(
+            finding(
+              moduleName,
+              `Evento '${ev.name}' tiene lifecycle: '${ev.lifecycle}' que no es un valor válido`,
+              `Valores válidos: ${validLifecycleValues.join(', ')}`
+            )
+          );
+        }
+      }
+    }
+
+    // C2-009: lifecycle value is incompatible with entity configuration
+    for (const agg of config.aggregates || []) {
+      const rootEntity = (agg.entities || []).find(e => e.isRoot);
+      const hasSoftDelete = rootEntity && rootEntity.hasSoftDelete;
+      for (const ev of agg.events || []) {
+        if (ev.lifecycle === 'softDelete' && !hasSoftDelete) {
+          checks['C2-009'].findings.push(
+            finding(
+              moduleName,
+              `Evento '${ev.name}' tiene lifecycle: 'softDelete' pero la entidad raíz '${rootEntity ? rootEntity.name : agg.name}' no tiene hasSoftDelete: true`,
+              `Agregado: ${agg.name}. Agregar hasSoftDelete: true a la entidad raíz o cambiar lifecycle a 'delete'`
+            )
+          );
+        }
+        if (ev.lifecycle === 'delete' && hasSoftDelete) {
+          checks['C2-009'].findings.push(
+            finding(
+              moduleName,
+              `Evento '${ev.name}' tiene lifecycle: 'delete' pero la entidad raíz '${rootEntity.name}' tiene hasSoftDelete: true`,
+              `Agregado: ${agg.name}. Usar lifecycle: 'softDelete' en su lugar o quitar hasSoftDelete`
+            )
+          );
+        }
+      }
+    }
+
+    // C2-010: lifecycle event field not found in root entity
+    for (const agg of config.aggregates || []) {
+      const rootEntityC10 = (agg.entities || []).find(e => e.isRoot);
+      if (!rootEntityC10) continue;
+      const entityFieldNames = new Set((rootEntityC10.fields || []).map(f => f.name));
+      const entityBase = rootEntityC10.name.charAt(0).toLowerCase() + rootEntityC10.name.slice(1);
+      for (const ev of agg.events || []) {
+        if (!ev.lifecycle) continue;
+        for (const ef of ev.fields || []) {
+          // Skip {entityName}Id — mapped to aggregateId in DomainEvent
+          if (ef.name === entityBase + 'Id') continue;
+          // Skip temporal auto-resolved fields (*At + LocalDateTime)
+          if (ef.name.endsWith('At') && ef.type === 'LocalDateTime') continue;
+          if (!entityFieldNames.has(ef.name)) {
+            checks['C2-010'].findings.push(
+              finding(
+                moduleName,
+                `Evento '${ev.name}' (lifecycle: ${ev.lifecycle}) tiene campo '${ef.name}' que no existe en la entidad raíz '${rootEntityC10.name}'`,
+                `Agregado: ${agg.name}. Quitar '${ef.name}' del evento o agregar el campo a la entidad`
               )
             );
           }
@@ -576,6 +701,9 @@ function runC2(domainConfigs, systemConfig) {
     'C2-005': 'info',
     'C2-006': 'error',
     'C2-007': 'error',
+    'C2-008': 'error',
+    'C2-009': 'warning',
+    'C2-010': 'error',
   });
 
   return checks;

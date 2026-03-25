@@ -58,6 +58,14 @@ public class <%= rootEntity.name %>RepositoryImpl implements <%= rootEntity.name
     public void deleteById(<%= rootEntity.fields[0].javaType %> id) {
         jpaRepository.deleteById(id);
     }
+<% if (hasDeleteLifecycle) { %>
+
+    @Override
+    public void delete(<%= rootEntity.name %> <%= rootEntity.fieldName %>) {
+        <%= rootEntity.fieldName %>.pullDomainEvents().forEach(eventPublisher::publishEvent);
+        jpaRepository.deleteById(<%= rootEntity.fieldName %>.getId());
+    }
+<% } %>
 <% } %>
 <% if (findByOps && findByOps.length > 0) { %>
 <% findByOps.forEach(function(op) { %>

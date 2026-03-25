@@ -20,6 +20,10 @@ public interface <%= rootEntity.name %>Repository {
     boolean existsById(<%= rootEntity.fields[0].javaType %> id);
 <% if (!hasSoftDelete) { %>
     void deleteById(<%= rootEntity.fields[0].javaType %> id);
+<% if (hasDeleteLifecycle) { %>
+
+    void delete(<%= rootEntity.name %> <%= rootEntity.fieldName %>);
+<% } %>
 <% } %>
 <% if (findByOps && findByOps.length > 0) { %>
 <% findByOps.forEach(function(op) { %>

@@ -2,8 +2,19 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 
 import <%= packageName %>.<%= moduleName %>.application.commands.Delete<%= aggregateName %>Command;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateName %>Repository;
-<% if (hasSoftDelete) { %>
+<% const _deleteLifecycleEvents = (lifecycleEventsMap || {}).delete || []; %>
+<% const _softDeleteLifecycleEvents2 = (lifecycleEventsMap || {}).softDelete || []; %>
+<% if (hasSoftDelete || _deleteLifecycleEvents.length > 0) { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= aggregateName %>;
+<% } %>
+<% if (_deleteLifecycleEvents.length > 0) { %>
+import <%= packageName %>.shared.domain.DomainEvent;
+<% _deleteLifecycleEvents.forEach(function(evt) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.events.<%= evt.name %>;
+<% }); %>
+<% if (_deleteLifecycleEvents.some(function(evt) { return evt.needsLocalDateTime; })) { %>
+import java.time.LocalDateTime;
+<% } %>
 <% } %>
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
 import <%= packageName %>.shared.domain.annotations.LogExceptions;
@@ -33,6 +44,13 @@ public class Delete<%= aggregateName %>CommandHandler implements CommandHandler<
                 .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
         entity.softDelete();
         repository.save(entity);
+<% } else if (_deleteLifecycleEvents.length > 0) { %>
+        <%= aggregateName %> entity = repository.findById(command.id())
+                .orElseThrow(() -> new NotFoundException("<%= aggregateName %> not found with id: " + command.id()));
+<% _deleteLifecycleEvents.forEach(function(evt) { %>
+        entity.raise(new <%= evt.name %>(<%= evt.resolvedArgs.join(', ') %>));
+<% }); %>
+        repository.delete(entity);
 <% } else { %>
         if (!repository.existsById(command.id())) {
             throw new NotFoundException("<%= aggregateName %> not found with id: " + command.id());

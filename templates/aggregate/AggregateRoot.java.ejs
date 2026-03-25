@@ -19,9 +19,14 @@ import <%= packageName %>.<%= moduleName %>.domain.models.events.<%= event.name 
 <% }); %>
 <% } %>
 <%
-const _needsLocalDateTimeImport = Object.values(triggeredEventsMap || {}).flat().some(function(ev) {
-  return (ev.fields || []).some(function(ef) { return ef.name.endsWith('At') && ef.javaType === 'LocalDateTime'; });
-}) && !imports.some(function(imp) { return imp.includes('LocalDateTime'); });
+const _allLifecycleEvents = Object.values(lifecycleEventsMap || {}).flat();
+const _needsLocalDateTimeImport = (
+  Object.values(triggeredEventsMap || {}).flat().some(function(ev) {
+    return (ev.fields || []).some(function(ef) { return ef.name.endsWith('At') && ef.javaType === 'LocalDateTime'; });
+  }) ||
+  _allLifecycleEvents.some(function(ev) { return ev.needsLocalDateTime; })
+) && !imports.some(function(imp) { return imp.includes('LocalDateTime'); });
+const _hasCreateLifecycle = ((lifecycleEventsMap || {}).create || []).length > 0;
 %>
 <% if (_needsLocalDateTimeImport) { %>
 import java.time.LocalDateTime;
@@ -36,6 +41,7 @@ import java.util.List;
  */
 public class <%= name %> {
 <% if (domainEvents && domainEvents.length > 0) { %>
+<%   const _needsPublicRaise = ((lifecycleEventsMap || {}).update || []).length > 0 || ((lifecycleEventsMap || {}).delete || []).length > 0; %>
 
     // ─── Domain Events ──────────────────────────────────────────────────────────
     private final List<DomainEvent> _domainEvents = new ArrayList<>();
@@ -44,7 +50,7 @@ public class <%= name %> {
      * Registers a domain event to be published after successful persistence.
      * Call this inside business methods when something significant happens.
      */
-    protected void raise(DomainEvent event) {
+    <%= _needsPublicRaise ? 'public' : 'protected' %> void raise(DomainEvent event) {
         _domainEvents.add(event);
     }
 
@@ -93,9 +99,13 @@ public class <%= name %> {
 <% const creationFields = fields.filter(f => f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' && f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.readOnly && !f.autoInit); %>
 <% const autoInitFields = fields.filter(f => f.autoInit); %>
 <% const defaultValueFields = fields.filter(f => f.readOnly && !f.autoInit && f.javaDefaultValue); %>
+<% const _createLifecycleEvents = (lifecycleEventsMap || {}).create || []; %>
 <% if (creationFields.length > 0 || autoInitFields.length > 0 || defaultValueFields.length > 0) { %>
     // Constructor for new entity creation (without id, audit fields, readOnly and auto-initialized fields)
     public <%= name %>(<% let paramIdx = 0; %><% creationFields.forEach((field, idx) => { %><% if (paramIdx > 0) { %>, <% } %><%- field.javaType %> <%= field.name %><% paramIdx++; %><% }); %>) {
+<% if (_createLifecycleEvents.length > 0) { %>
+        this.id = java.util.UUID.randomUUID().toString();
+<% } %>
 <% creationFields.forEach(field => { %>
         this.<%= field.name %> = <%= field.name %>;
 <% }); %>
@@ -104,6 +114,9 @@ public class <%= name %> {
 <% }); %>
 <% defaultValueFields.forEach(field => { %>
         this.<%= field.name %> = <%- field.javaDefaultValue %>;
+<% }); %>
+<% _createLifecycleEvents.forEach(function(evt) { %>
+        raise(new <%= evt.name %>(<%= evt.resolvedArgs.join(', ') %>));
 <% }); %>
     }
 <% } %>
@@ -243,6 +256,7 @@ public class <%= name %> {
 <% }); %>
 <% } %>
 <% if (hasSoftDelete) { %>
+<% const _softDeleteLifecycleEvents = (lifecycleEventsMap || {}).softDelete || []; %>
 
     // ─── Soft Delete ─────────────────────────────────────────────────────────
     /**
@@ -254,6 +268,9 @@ public class <%= name %> {
             throw new IllegalStateException("<%= name %> is already deleted");
         }
         this.deletedAt = java.time.LocalDateTime.now();
+<% _softDeleteLifecycleEvents.forEach(function(evt) { %>
+        raise(new <%= evt.name %>(<%= evt.resolvedArgs.join(', ') %>));
+<% }); %>
     }
 
     public boolean isDeleted() {

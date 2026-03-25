@@ -616,12 +616,15 @@ public void cancel() {
 }
 ```
 
-Si un evento **no declara `triggers`**, el desarrollador debe llamar a `raise()` manualmente dentro del método de negocio.
+Si un evento **no declara `triggers`** ni `lifecycle`, el desarrollador debe llamar a `raise()` manualmente dentro del método de negocio.
 
 **Validaciones generadas:**
-- **C2-004** (error): trigger referencia un método que no existe en ninguna transición del módulo
+- **C2-004** (error): trigger referencia un método que no existe en ninguna transición del módulo (se omite para eventos con `lifecycle`)
 - **C2-005** (info): transición sin ningún evento asociado — considera declarar `triggers`
 - **C2-001** se silencia automáticamente para transiciones que ya tienen `triggers`
+- **C2-008** (error): valor de `lifecycle` inválido (no es `create`, `update`, `delete` ni `softDelete`)
+- **C2-009** (warning): `lifecycle: softDelete` sin `hasSoftDelete: true` en la entidad raíz, o `lifecycle: delete` con `hasSoftDelete: true`
+- **C2-010** (error): campo de lifecycle event no existe en la entidad raíz del agregado (excluyendo `{entityName}Id` y campos `*At` + `LocalDateTime`)
 
 **Auto-wiring de broker:** Si el proyecto tiene un broker de mensajería instalado (`eva add kafka-client`), `eva g entities` genera automáticamente la capa de Integration Events para **todos** los eventos declarados — sin necesidad de ejecutar `eva g kafka-event` por separado:
 
@@ -657,6 +660,100 @@ public void confirm() {
 ```
 
 **Nota:** el flag `kafka: true` por evento ya no es necesario — todos los eventos se cablearán automáticamente cuando haya un broker instalado.
+
+#### Propiedad `lifecycle`
+
+Conecta un evento a una operación CRUD del ciclo de vida del agregado. A diferencia de `triggers` (que se conecta a métodos de transición de estado), `lifecycle` emite `raise()` automáticamente en el punto CRUD correspondiente.
+
+**Valores válidos:**
+
+| Valor | Punto de emisión | Descripción |
+|---|---|---|
+| `create` | Constructor de creación de la entidad | UUID auto-generado como id antes de raise() |
+| `update` | UpdateCommandHandler, antes de `repository.save()` | `raise()` sobre la entidad reconstruida |
+| `delete` | DeleteCommandHandler, antes de `repository.delete()` | Requiere `hasSoftDelete: false`; genera `repository.delete(entity)` |
+| `softDelete` | Método `softDelete()` de la entidad | Requiere `hasSoftDelete: true`; raise() después de `this.deletedAt = ...` |
+
+**Ejemplo en domain.yaml:**
+
+```yaml
+events:
+  - name: ProductCreatedEvent
+    lifecycle: create
+    fields:
+      - name: productId
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+
+  - name: ProductUpdatedEvent
+    lifecycle: update
+    fields:
+      - name: productId
+        type: String
+      - name: name
+        type: String
+
+  - name: ProductDeletedEvent
+    lifecycle: delete
+    fields:
+      - name: productId
+        type: String
+      - name: deletedAt
+        type: LocalDateTime
+```
+
+**Resultado generado para `lifecycle: create`:**
+
+```java
+// En Product.java — constructor de creación
+public Product(String name, String description, BigDecimal price) {
+    this.id = java.util.UUID.randomUUID().toString();
+    this.name = name;
+    this.description = description;
+    this.price = price;
+    raise(new ProductCreatedEvent(this.getId(), this.getName(), this.getPrice()));
+}
+```
+
+**Resultado generado para `lifecycle: update`:**
+
+```java
+// En UpdateProductCommandHandler.java
+Product updated = new Product(/* full constructor args */);
+updated.raise(new ProductUpdatedEvent(updated.getId(), updated.getName()));
+repository.save(updated);
+```
+
+**Resultado generado para `lifecycle: delete`:**
+
+```java
+// En DeleteProductCommandHandler.java
+Product entity = repository.findById(command.id())...;
+entity.raise(new ProductDeletedEvent(entity.getId(), LocalDateTime.now()));
+repository.delete(entity);
+```
+
+**Resultado generado para `lifecycle: softDelete`:**
+
+```java
+// En Product.java — método softDelete()
+public void softDelete() {
+    if (this.deletedAt != null) { throw new IllegalStateException("..."); }
+    this.deletedAt = java.time.LocalDateTime.now();
+    raise(new ProductDeactivatedEvent(this.getId(), LocalDateTime.now()));
+}
+```
+
+**Resolución de argumentos:** usa las mismas reglas que `triggers` (match por nombre de campo, VO unwrapping, `LocalDateTime.now()` para campos *At, `null /* TODO */` para no resueltos).
+
+**Visibilidad de `raise()`:** cuando un evento usa `lifecycle: update` o `lifecycle: delete`, el método `raise()` en la entidad se genera como `public` (en vez de `protected`) para permitir que los handlers de aplicación lo invoquen.
+
+**Infraestructura de repositorio:** cuando un evento usa `lifecycle: delete`, el generador agrega automáticamente `void delete(Entity entity)` al repositorio (interface + implementación). La implementación publica los eventos pendientes antes de la eliminación física.
+
+**Restricción:** un evento puede declarar `triggers` O `lifecycle`, no ambos. `lifecycle` aplica solo a eventos de la entidad raíz del agregado.
 
 ### Consumo de Eventos Externos (`listeners[]`)
 
@@ -1562,7 +1659,13 @@ Al generar o modificar código, verificar:
 - [ ] Value Object con comportamiento → declarar `methods` en lugar de lógica en entidad
 - [ ] Evento de dominio → declarar en `events[]`, publicar con `raise()` en método de negocio
 - [ ] Evento con `triggers: [methodName]` → el generador emite `raise()` automáticamente; args no resolubles quedan como `null /* TODO */`
-- [ ] Sin `triggers` en el evento → el dev llama a `raise()` manualmente
+- [ ] Evento con `lifecycle: create` → el generador emite UUID auto-generado + `raise()` en el constructor de creación
+- [ ] Evento con `lifecycle: update` → el generador emite `raise()` en UpdateCommandHandler antes de `repository.save()`; `raise()` se genera como `public`
+- [ ] Evento con `lifecycle: delete` → el generador emite `raise()` en DeleteCommandHandler + genera `repository.delete(entity)` con publicación de eventos; `raise()` se genera como `public`
+- [ ] Evento con `lifecycle: softDelete` → el generador emite `raise()` dentro del método `softDelete()` de la entidad; requiere `hasSoftDelete: true`
+- [ ] Un evento puede declarar `triggers` O `lifecycle`, no ambos
+- [ ] Campos de lifecycle events son campos de la entidad raíz (excluyendo `{entityName}Id` y `*At` temporal) — `C2-010`
+- [ ] Sin `triggers` ni `lifecycle` en el evento → el dev llama a `raise()` manualmente
 - [ ] Evento con broker → **no** usar `kafka: true`; si `eva add kafka-client` está instalado, `eva g entities` auto-cablea todos los eventos
 - [ ] Distinguir entre Domain Event (`domain/models/events/X.java`) e Integration Event (`application/events/XIntegrationEvent.java`) — cambios de broker solo afectan al adaptador `MessageBroker`
 - [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
@@ -1582,6 +1685,8 @@ Al generar o modificar código, verificar:
 - [ ] Cada read model genera: clase de dominio inmutable, JPA entity (sin audit), repositorio (interface + impl), sync handler
 - [ ] Cada `syncedBy` entry genera: IntegrationEvent (reutilizado si ya existe), KafkaListener, registro de topic
 - [ ] `source.module` nunca puede ser el mismo módulo (RM-010) — readModels son exclusivamente cross-module
+- [ ] ReadModel fields cubiertos por eventos UPSERT del productor — `C1-007`
+- [ ] ReadModel fields son subconjunto de los campos de la entidad raíz fuente (por C2-010, los lifecycle events no pueden emitir campos ajenos)
 - [ ] Topics de readModels se derivan automáticamente del nombre del evento (strip `Event` → SCREAMING_SNAKE_CASE)
 
 ---

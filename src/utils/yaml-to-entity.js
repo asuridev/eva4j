@@ -112,7 +112,8 @@ function parseAggregate(aggregateData) {
       name: eventName,
       fieldName: toCamelCase(eventName),
       fields: eventFields,
-      triggers: event.triggers || []
+      triggers: event.triggers || [],
+      lifecycle: event.lifecycle || null
     };
   });
 
@@ -126,6 +127,17 @@ function parseAggregate(aggregateData) {
     });
   });
 
+  // Build lifecycle map: { create → [event, ...], update → [...], delete → [...], softDelete → [...] }
+  // Used by templates to emit raise() calls at CRUD lifecycle points.
+  const VALID_LIFECYCLE_VALUES = ['create', 'update', 'delete', 'softDelete'];
+  const lifecycleEventsMap = {};
+  domainEvents.forEach(event => {
+    if (event.lifecycle && VALID_LIFECYCLE_VALUES.includes(event.lifecycle)) {
+      if (!lifecycleEventsMap[event.lifecycle]) lifecycleEventsMap[event.lifecycle] = [];
+      lifecycleEventsMap[event.lifecycle].push(event);
+    }
+  });
+
   return {
     name: toPascalCase(name),
     packageName: aggregateData.package || '',
@@ -136,6 +148,7 @@ function parseAggregate(aggregateData) {
     allEntities: parsedEntities,
     domainEvents,
     triggeredEventsMap,
+    lifecycleEventsMap,
     enums: aggregateEnums
   };
 }
@@ -1411,6 +1424,90 @@ function parseReadModels(domainData, moduleName = '', ports = []) {
   });
 }
 
+/**
+ * Resolve event constructor arguments for a domain event given entity context.
+ * Replicates the same resolution logic used in AggregateRoot.java.ejs for transitions.
+ *
+ * @param {Object} event - Parsed domain event { name, fields }
+ * @param {string} entityName - PascalCase aggregate root name (e.g. 'Product')
+ * @param {Array}  entityFields - Parsed fields of the root entity
+ * @param {Array}  valueObjects - Parsed value objects of the aggregate
+ * @param {string} prefix - Expression prefix for getters (e.g. 'this' or 'updated' or 'entity')
+ * @returns {Object} { args: string[], needsLocalDateTime: boolean, needsUUID: boolean }
+ */
+function resolveEventArgs(event, entityName, entityFields, valueObjects = [], prefix = 'this') {
+  const entityBase = entityName.charAt(0).toLowerCase() + entityName.slice(1);
+  const args = [`${prefix}.getId()`];
+  let needsLocalDateTime = false;
+  let needsUUID = false;
+
+  (event.fields || []).forEach(ef => {
+    // Skip {entityName}Id — already provided as aggregateId in the DomainEvent constructor
+    if (ef.name === entityBase + 'Id') return;
+
+    const matched = entityFields.find(f => f.name === ef.name);
+    if (matched) {
+      if (matched.javaType === ef.javaType) {
+        const cap = ef.name.charAt(0).toUpperCase() + ef.name.slice(1);
+        args.push(`${prefix}.get${cap}()`);
+        return;
+      }
+      // Type mismatch: entity field may be a VO wrapping the expected primitive/type
+      const vo = (valueObjects || []).find(v => v.name === matched.javaType);
+      if (vo) {
+        const voSub = vo.fields.find(voF => voF.name === ef.name && voF.javaType === ef.javaType)
+                    || vo.fields.find(voF => voF.javaType === ef.javaType);
+        if (voSub) {
+          const oCap = ef.name.charAt(0).toUpperCase() + ef.name.slice(1);
+          const sCap = voSub.name.charAt(0).toUpperCase() + voSub.name.slice(1);
+          args.push(`${prefix}.get${oCap}().get${sCap}()`);
+          return;
+        }
+      }
+      // Enum → String: convert via .name()
+      if (matched.isEnum && ef.javaType === 'String') {
+        const cap = ef.name.charAt(0).toUpperCase() + ef.name.slice(1);
+        args.push(`${prefix}.get${cap}().name()`);
+        return;
+      }
+      args.push(`null /* TODO: provide ${ef.name} (entity returns ${matched.javaType}, expected ${ef.javaType}) */`);
+      return;
+    }
+    if (ef.name.endsWith('At') && ef.javaType === 'LocalDateTime') {
+      args.push('LocalDateTime.now()');
+      needsLocalDateTime = true;
+      return;
+    }
+    args.push(`null /* TODO: provide ${ef.name} */`);
+  });
+
+  return { args, needsLocalDateTime, needsUUID };
+}
+
+/**
+ * Pre-compute resolved arguments for all lifecycle events.
+ * Returns an enriched lifecycleEventsMap where each event has a `resolvedArgs` array.
+ *
+ * @param {Object} lifecycleEventsMap - { create: [event, ...], update: [...], ... }
+ * @param {string} entityName - PascalCase aggregate root name
+ * @param {Array}  entityFields - Parsed fields of the root entity
+ * @param {Array}  valueObjects - Parsed value objects of the aggregate
+ * @returns {Object} enriched map: { create: [{ ...event, resolvedArgs, needsLocalDateTime }], ... }
+ */
+function resolveLifecycleEventArgs(lifecycleEventsMap, entityName, entityFields, valueObjects = []) {
+  const resolved = {};
+  // Each lifecycle type uses a different variable name in the generated code
+  const prefixMap = { create: 'this', update: 'updated', delete: 'entity', softDelete: 'this' };
+  for (const [lifecycle, events] of Object.entries(lifecycleEventsMap)) {
+    const prefix = prefixMap[lifecycle] || 'this';
+    resolved[lifecycle] = events.map(event => {
+      const { args, needsLocalDateTime } = resolveEventArgs(event, entityName, entityFields, valueObjects, prefix);
+      return { ...event, resolvedArgs: args, needsLocalDateTime };
+    });
+  }
+  return resolved;
+}
+
 module.exports = {
   parseDomainYaml,
   parseAggregate,
@@ -1422,5 +1519,7 @@ module.exports = {
   generateAggregateMethodImports,
   parseListeners,
   parsePorts,
-  parseReadModels
+  parseReadModels,
+  resolveEventArgs,
+  resolveLifecycleEventArgs
 };

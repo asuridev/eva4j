@@ -86,6 +86,7 @@ When any design file changes, you MUST propagate to all dependent files. Never m
 | New/modified event with triggers | `system/{module}.md` → Emitted Events; `system/system.yaml` → `integrations.async:` if new event |
 | New/modified listener | `system/{module}.md` → Use Cases (incoming event handlers) |
 | New/modified value object | `system/{module}.md` → Module Role or relevant use cases |
+| New/modified readModel | `system/{source-module}.yaml` → verify source events have `lifecycle:` matching syncedBy entries; `system/system.yaml` → verify `integrations.async[]` exists for each syncedBy event; `system/{module}.md` → Read Models section |
 
 ### Change in `system/{module}.md`
 
@@ -139,6 +140,8 @@ When modifying design files, always follow these conventions. Read the reference
 - Enum transitions require `initialValue`
 - `hasSoftDelete: true` only on root entities (`isRoot: true`)
 - Cross-aggregate references use `reference:` on ID fields, never `relationships:`
+- Events consumed by readModels in other modules must declare `lifecycle:` — derive from event name convention: `*CreatedEvent`/`*RegisteredEvent`→`create`, `*UpdatedEvent`→`update`, `*DeletedEvent`→`delete`, `*DeactivatedEvent`→`softDelete`. `lifecycle` and `triggers` are mutually exclusive
+- `lifecycle: softDelete` requires `hasSoftDelete: true` on root entity; `lifecycle: delete` requires `hasSoftDelete` absent or false
 
 ### Language Rule
 

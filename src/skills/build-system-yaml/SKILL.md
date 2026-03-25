@@ -86,7 +86,7 @@ Si decides usar readModel:
 1. En `system.yaml`: declarar eventos con `consumers[].readModel:` en vez de `useCase:`
 2. En `{module}.yaml`: declarar `readModels:` con `source`, `tableName`, `fields`, `syncedBy`
 3. Eliminar la entrada `integrations.sync[]` que reemplaza
-4. Asegurar que el módulo fuente emita los eventos necesarios en sus `events:`
+4. Asegurar que el módulo fuente emita los eventos necesarios en sus `events:` — usar `lifecycle:` para eventos CRUD (`create`/`update`/`delete`/`softDelete`) en vez de `triggers:`
 
 ---
 
@@ -347,6 +347,83 @@ Cuando `integrations.async[].consumers[]` tiene `readModel:` y el `module` es el
 5. `fields` = inferir del payload del evento fuente (incluir siempre `id`)
 6. `syncedBy[].action` = `UPSERT` para Created/Updated, `SOFT_DELETE` para Deactivated, `DELETE` para Deleted
 7. Si había una entrada `integrations.sync[]` al mismo módulo fuente → **no generar `ports:`** para esa llamada (el readModel la reemplaza)
+
+### Lifecycle events en módulos fuente
+
+Cuando el módulo actual es `producer` en `integrations.async[]` y algún consumer tiene `readModel:`, los eventos de este módulo deben usar `lifecycle:` (operación CRUD) en vez de `triggers:` (transición de estado).
+
+Para cada evento de este módulo consumido por un readModel:
+
+1. Agregar `lifecycle:` al evento — derivar el valor del nombre del evento:
+   | Patrón del nombre | `lifecycle:` |
+   |---|---|
+   | `*CreatedEvent`, `*RegisteredEvent` | `create` |
+   | `*UpdatedEvent` | `update` |
+   | `*DeletedEvent` | `delete` |
+   | `*DeactivatedEvent` | `softDelete` |
+
+2. **NO** agregar `triggers:` — estos eventos son CRUD, no transiciones de estado
+3. Si `lifecycle: softDelete` → la entidad raíz **debe** tener `hasSoftDelete: true`
+4. Si `lifecycle: delete` → la entidad raíz **NO debe** tener `hasSoftDelete: true`
+5. `fields:` del evento debe incluir **todos** los campos declarados en el `readModels[].fields` del módulo consumidor (el payload es la fuente de verdad de la proyección)
+6. Siempre incluir `{entityName}Id` como campo (se mapea a `aggregateId` del DomainEvent base)
+7. `fields:` del lifecycle event solo puede contener: (a) `{entityName}Id` (aggregateId), (b) campos que existen en la entidad raíz, (c) campos temporales `*At` + `LocalDateTime`. No incluir campos que no existan en la entidad — genera error `C2-010`
+8. Los campos de los readModels consumidores deben ser subconjunto de los campos de la entidad raíz del productor. Si el readModel necesita un campo, ese campo debe existir en la entidad fuente — de lo contrario los lifecycle events no podrán emitirlo (C2-010) y el campo siempre será null (C1-007)
+
+**Ejemplo — módulo `products` como fuente de `ProductReadModel`:**
+
+```yaml
+aggregates:
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        tableName: products
+        hasSoftDelete: true
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: status
+            type: String
+            readOnly: true
+            defaultValue: "ACTIVE"
+    events:
+      - name: ProductCreatedEvent
+        lifecycle: create
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: status
+            type: String
+      - name: ProductUpdatedEvent
+        lifecycle: update
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: status
+            type: String
+      - name: ProductDeactivatedEvent
+        lifecycle: softDelete
+        fields:
+          - name: productId
+            type: String
+          - name: deactivatedAt
+            type: LocalDateTime
+```
 
 ---
 

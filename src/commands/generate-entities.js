@@ -7,7 +7,7 @@ const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
 const { toPackagePath, toCamelCase, toKebabCase, toPascalCase, getApplicationClassName, pluralizeWord } = require('../utils/naming');
 const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
-const { parseDomainYaml, generateEntityImports, generateValidationImports } = require('../utils/yaml-to-entity');
+const { parseDomainYaml, generateEntityImports, generateValidationImports, resolveLifecycleEventArgs, resolveEventArgs } = require('../utils/yaml-to-entity');
 const { createOrUpdateUrlsConfig, ensureUrlsImport } = require('./generate-http-exchange');
 const SharedGenerator = require('../generators/shared-generator');
 const ChecksumManager = require('../utils/checksum-manager');
@@ -369,6 +369,9 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       const { name: aggregateName, rootEntity, secondaryEntities, valueObjects } = aggregate;
 
       // 1. Generate Domain Aggregate Root
+      const resolvedLifecycle = resolveLifecycleEventArgs(
+        aggregate.lifecycleEventsMap || {}, rootEntity.name, rootEntity.fields, valueObjects
+      );
       const rootDomainContext = {
         packageName,
         moduleName,
@@ -381,7 +384,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         auditable: rootEntity.auditable,
         hasSoftDelete: rootEntity.hasSoftDelete || false,
         domainEvents: aggregate.domainEvents || [],
-        triggeredEventsMap: aggregate.triggeredEventsMap || {}
+        triggeredEventsMap: aggregate.triggeredEventsMap || {},
+        lifecycleEventsMap: resolvedLifecycle
       };
 
       await renderAndWrite(
@@ -524,6 +528,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         moduleName,
         rootEntity,
         hasSoftDelete: rootEntity.hasSoftDelete || false,
+        hasDomainEvents: (aggregate.domainEvents || []).length > 0,
+        hasDeleteLifecycle: !!(aggregate.lifecycleEventsMap || {}).delete,
         findByOps: []
       };
 
@@ -551,6 +557,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         aggregateName,
         rootEntity,
         hasDomainEvents: (aggregate.domainEvents || []).length > 0,
+        hasDeleteLifecycle: !!(aggregate.lifecycleEventsMap || {}).delete,
         hasSoftDelete: rootEntity.hasSoftDelete || false,
         findByOps: []
       };
@@ -1735,13 +1742,18 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
   const oneToManyRelationshipsApp = enrichRelsWithSchemaExamples(
     transformRelsForApp(oneToManyRelationships, validatedVoNames), localAllEnums, valueObjects);
 
+  const resolvedLifecycleEndpoints = resolveLifecycleEventArgs(
+    aggregate.lifecycleEventsMap || {}, aggregateName, rootEntity.fields, valueObjects
+  );
   const baseContext = {
     packageName, moduleName, aggregateName, aggregateNamePlural, rootEntity, secondaryEntities,
     responseFields, responseSecondaryEntities, idType,
     commandFields: commandFieldsApp, oneToManyRelationships, oneToOneRelationships,
     hasValueObjects, hasEnums, imports: rootEntity.imports,
     resourceNameCamel, resourceNameKebab,
-    hasSoftDelete: rootEntity.hasSoftDelete || false
+    hasSoftDelete: rootEntity.hasSoftDelete || false,
+    domainEvents: aggregate.domainEvents || [],
+    lifecycleEventsMap: resolvedLifecycleEndpoints
   };
 
   // ── Step 1: Validated VO Dtos ────────────────────────────────────────
@@ -2248,6 +2260,9 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     transformRelsForApp(oneToManyRelationships, validatedVoNames), localAllEnums, valueObjects);
 
   // Base context for all templates
+  const resolvedLifecycleCrud = resolveLifecycleEventArgs(
+    aggregate.lifecycleEventsMap || {}, aggregateName, rootEntity.fields, valueObjects
+  );
   const baseContext = {
     packageName,
     moduleName,
@@ -2268,7 +2283,9 @@ async function generateCrudResources(aggregate, moduleName, moduleBasePath, pack
     resourceNameCamel,
     resourceNameKebab,
     hasSoftDelete: rootEntity.hasSoftDelete || false,
-    hasCreateOperation: true  // In interactive CRUD flow, Create is always generated
+    hasCreateOperation: true,  // In interactive CRUD flow, Create is always generated
+    domainEvents: aggregate.domainEvents || [],
+    lifecycleEventsMap: resolvedLifecycleCrud
   };
 
   // 0. Generate Create<VoName>Dto for validated Value Objects

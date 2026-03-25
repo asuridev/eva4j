@@ -3,6 +3,33 @@
 # This example shows an "orders" module that uses readModels to maintain
 # local projections of data from "products" and "customers" modules,
 # eliminating synchronous HTTP dependencies.
+#
+# ─── SOURCE MODULE NOTE ──────────────────────────────────────────────────────
+# The source module (e.g. products/domain.yaml) must declare the events
+# that this readModel's syncedBy entries reference. Use lifecycle: to
+# automatically emit raise() at CRUD operations:
+#
+#   events:
+#     - name: ProductCreatedEvent
+#       lifecycle: create          # raise() in creation constructor
+#       fields:
+#         - name: productId
+#           type: String
+#         - name: name
+#           type: String
+#         - name: price
+#           type: BigDecimal
+#         - name: status
+#           type: String
+#
+#     - name: ProductUpdatedEvent
+#       lifecycle: update          # raise() in UpdateCommandHandler
+#       fields: [...]
+#
+#     - name: ProductDeactivatedEvent
+#       lifecycle: softDelete      # raise() in softDelete() method
+#       fields: [...]
+# ─────────────────────────────────────────────────────────────────────────────
 
 aggregates:
   - name: Order

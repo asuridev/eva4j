@@ -472,7 +472,7 @@ Verifies that the producer → consumer graph is coherent at the code level: eve
 | C1-002 | 🔴 error | `listeners[]` references an event that no domain module produces |
 | C1-003 | 🔴 error | Field in `listener.fields` does not exist in the producer event |
 | C1-004 | 🔴 error | Field exists in both producer and consumer but with incompatible types |
-| C1-005 | 🔴 error | `system.yaml` registers a module as consumer but that module has no matching `listener` |
+| C1-005 | 🔴 error | `system.yaml` registers a module as consumer but that module has no matching `listener` or `readModels[].syncedBy` |
 | C1-006 | 🔴 error | `listener.producer` references the wrong producer module |
 
 #### C1-001 — Produced event with no consumers in system.yaml
@@ -534,7 +534,9 @@ listeners:
 
 **Fix:** Align the field type in the listener with the type declared in the producer event.
 
-#### C1-005 — Registered consumer has no listener in domain.yaml
+#### C1-005 — Registered consumer has no listener or readModel.syncedBy in domain.yaml
+
+For `useCase:` consumers, the module must have a matching `listeners[]` entry:
 
 ```yaml
 # system.yaml registers notifications as consumer:
@@ -547,6 +549,20 @@ consumers:
 **Message:** `[C1-005] system.yaml registra 'notifications' como consumidor de 'OrderCreatedEvent' pero el módulo no tiene listener declarado`
 
 **Fix:** Add a `listeners[]` entry for `OrderCreatedEvent` in `notifications/domain.yaml`.
+
+For `readModel:` consumers, the module must have a matching `readModels[].syncedBy[]` entry:
+
+```yaml
+# system.yaml registers orders as readModel consumer:
+consumers:
+  - module: orders
+    readModel: ProductReadModel
+# orders/domain.yaml must have readModels[].syncedBy[].event matching the event
+```
+
+**Message:** `[C1-005] system.yaml registra 'orders' como consumidor readModel de 'ProductCreatedEvent' pero el módulo no tiene readModels[].syncedBy con ese evento`
+
+**Fix:** Add a `readModels[]` entry with a `syncedBy[]` entry for the event in the consumer module's `domain.yaml`.
 
 #### C1-006 — listener.producer references wrong module
 

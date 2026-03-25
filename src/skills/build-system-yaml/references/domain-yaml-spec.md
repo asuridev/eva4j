@@ -36,6 +36,10 @@ Propón campos necesarios no mencionados, Value Objects expresivos, invariantes 
 15. ❌ **No auditoría, endpoints REST ni lógica de negocio en `readModels:`** — son proyecciones inmutables
 16. ❌ **No `readModels[].name` sin sufijo `ReadModel`** — siempre `PascalCase + ReadModel`
 17. ❌ **No `readModels[].tableName` sin prefijo `rm_`** — identificación visual obligatoria
+18. ❌ **No `lifecycle:` y `triggers:` en el mismo evento** — son mutuamente excluyentes
+19. ❌ **No `lifecycle: softDelete` sin `hasSoftDelete: true`** en la entidad raíz
+20. ❌ **No `lifecycle: delete` con `hasSoftDelete: true`** — delete es hard delete
+21. ❌ **No declarar campos en lifecycle events que no existan en la entidad raíz** — solo `{entityName}Id`, campos de la entidad y campos temporales auto-resolubles (`*At` + `LocalDateTime`). Genera error `C2-010`
 
 ---
 
@@ -180,6 +184,35 @@ aggregates:
         fields:
           - name: reason
             type: String
+
+      # ── Lifecycle events (CRUD-based, no transitions) ──
+      # Use lifecycle: instead of triggers: when the event is emitted
+      # at a CRUD operation (create/update/delete/softDelete).
+      # Typical use: source modules whose events feed readModels.
+      #
+      # - name: ProductCreatedEvent
+      #   lifecycle: create          # raise() in creation constructor
+      #   fields:
+      #     - name: productId
+      #       type: String
+      #     - name: name
+      #       type: String
+      #
+      # - name: ProductUpdatedEvent
+      #   lifecycle: update          # raise() in UpdateCommandHandler
+      #   fields: [...]
+      #
+      # - name: ProductDeletedEvent
+      #   lifecycle: delete          # raise() in DeleteCommandHandler
+      #   fields:
+      #     - name: productId
+      #       type: String
+      #
+      # - name: ProductDeactivatedEvent
+      #   lifecycle: softDelete      # raise() in softDelete() method
+      #   fields:
+      #     - name: productId
+      #       type: String
 
 endpoints:
   basePath: /orders
@@ -367,6 +400,91 @@ readModels:
 
 El módulo fuente **debe** emitir los eventos referenciados en `syncedBy`. Asegurar que los `events:` del fuente incluyan todos los campos declarados en `readModels[].fields` (el payload es la fuente de verdad para la proyección).
 
+**Restricción de cobertura:** Los campos del readModel (excepto `id`) deben estar cubiertos por al menos un evento UPSERT en `syncedBy[]`. Si un campo no aparece en ningún evento UPSERT, siempre será null — genera warning `C1-007`. Además, los campos del readModel deben ser subconjunto de los campos de la entidad raíz del módulo fuente (por C2-010, los lifecycle events no pueden emitir campos ajenos a la entidad).
+
+### Propiedad `lifecycle:` en eventos del módulo fuente
+
+Cuando un evento existe para alimentar un readModel (operación CRUD pura, sin transición de estado), usar `lifecycle:` en vez de `triggers:`.
+
+| Valor | Punto de emisión | Descripción |
+|---|---|---|
+| `create` | Constructor de creación de la entidad | UUID auto-generado como id antes de raise() |
+| `update` | UpdateCommandHandler, antes de `repository.save()` | raise() sobre la entidad reconstruida |
+| `delete` | DeleteCommandHandler, antes de `repository.delete()` | Hard delete — requiere `hasSoftDelete` ausente o false |
+| `softDelete` | Método `softDelete()` de la entidad | Requiere `hasSoftDelete: true` en la entidad raíz |
+
+**Derivación desde el nombre del evento:**
+
+| Patrón del nombre del evento | `lifecycle:` |
+|---|---|
+| `*CreatedEvent`, `*RegisteredEvent` | `create` |
+| `*UpdatedEvent` | `update` |
+| `*DeletedEvent` | `delete` |
+| `*DeactivatedEvent` | `softDelete` |
+
+**Ejemplo — módulo fuente `products`:**
+
+```yaml
+aggregates:
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        tableName: products
+        hasSoftDelete: true              # requerido por lifecycle: softDelete
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: status
+            type: String
+            readOnly: true
+            defaultValue: "ACTIVE"
+    events:
+      - name: ProductCreatedEvent
+        lifecycle: create
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: status
+            type: String
+      - name: ProductUpdatedEvent
+        lifecycle: update
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: status
+            type: String
+      - name: ProductDeactivatedEvent
+        lifecycle: softDelete
+        fields:
+          - name: productId
+            type: String
+          - name: deactivatedAt
+            type: LocalDateTime
+```
+
+**Reglas:**
+- `lifecycle:` y `triggers:` son mutuamente excluyentes — un evento usa uno u otro, nunca ambos
+- `lifecycle: softDelete` requiere `hasSoftDelete: true` en la entidad raíz
+- `lifecycle: delete` requiere que `hasSoftDelete` sea `false` o esté ausente
+- `fields:` del evento debe incluir **todos** los campos del readModel que lo consume (el payload es la fuente de verdad para la proyección)
+- Siempre incluir `{entityName}Id` como campo (se mapea a `aggregateId` del DomainEvent base)
+- `fields:` del lifecycle event solo puede contener: (a) `{entityName}Id`, (b) campos que existen en la entidad raíz del agregado, (c) campos temporales auto-resolubles (nombre termina en `At` + tipo `LocalDateTime`). Cualquier otro campo genera error `C2-010`
+
 ---
 
 ## Clasificación de campos readOnly
@@ -461,5 +579,13 @@ Si un valor no es trazable → falta un endpoint o listener en el diseño.
 - [ ] `readModels[].source.module` ≠ módulo actual
 - [ ] `readModels[].syncedBy` → al menos una entrada con `action` válida (UPSERT, DELETE, SOFT_DELETE)
 - [ ] Eventos en `syncedBy` deben existir como `events:` en el módulo fuente
+- [ ] Eventos del módulo fuente consumidos por readModels → deben tener `lifecycle:` (no `triggers:`)
+- [ ] `lifecycle:` derivado del nombre del evento: `*CreatedEvent`→`create`, `*UpdatedEvent`→`update`, `*DeletedEvent`→`delete`, `*DeactivatedEvent`→`softDelete`
+- [ ] `lifecycle: softDelete` → entidad raíz tiene `hasSoftDelete: true`
+- [ ] `lifecycle: delete` → entidad raíz NO tiene `hasSoftDelete: true`
+- [ ] `lifecycle:` y `triggers:` nunca en el mismo evento
+- [ ] Lifecycle event fields son campos de la entidad raíz (excluyendo `{entityName}Id` y `*At` temporal) — `C2-010`
+- [ ] ReadModel fields cubiertos por eventos UPSERT del productor — `C1-007`
+- [ ] ReadModel fields son subconjunto de los campos de la entidad raíz fuente
 - [ ] Si `readModels:` reemplaza un `ports:`, eliminar la entrada sync correspondiente
 - [ ] Todo en inglés

@@ -6,6 +6,16 @@ import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateNam
 <% if ((commandFields || []).some(f => f.originalVoType)) { %>
 import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 <% } %>
+<% const _updateLifecycleEvents = (lifecycleEventsMap || {}).update || []; %>
+<% if (_updateLifecycleEvents.length > 0) { %>
+import <%= packageName %>.shared.domain.DomainEvent;
+<% _updateLifecycleEvents.forEach(function(evt) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.events.<%= evt.name %>;
+<% }); %>
+<% if (_updateLifecycleEvents.some(function(evt) { return evt.needsLocalDateTime; })) { %>
+import java.time.LocalDateTime;
+<% } %>
+<% } %>
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
 import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
@@ -96,6 +106,9 @@ public class Update<%= aggregateName %>CommandHandler implements CommandHandler<
         // if (command.<%= rel.fieldName %>() != null) { /* replace <%= rel.fieldName %> */ }
 <% }); %>
 <% } %>
+<% _updateLifecycleEvents.forEach(function(evt) { %>
+        updated.raise(new <%= evt.name %>(<%= evt.resolvedArgs.join(', ') %>));
+<% }); %>
 
         repository.save(updated);
     }
