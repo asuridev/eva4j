@@ -7,15 +7,6 @@ import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= aggregateNam
 import <%= packageName %>.<%= moduleName %>.application.mappers.<%= aggregateName %>ApplicationMapper;
 <% } %>
 <% const _updateLifecycleEvents = (lifecycleEventsMap || {}).update || []; %>
-<% if (_updateLifecycleEvents.length > 0) { %>
-import <%= packageName %>.shared.domain.DomainEvent;
-<% _updateLifecycleEvents.forEach(function(evt) { %>
-import <%= packageName %>.<%= moduleName %>.domain.models.events.<%= evt.name %>;
-<% }); %>
-<% if (_updateLifecycleEvents.some(function(evt) { return evt.needsLocalDateTime; })) { %>
-import java.time.LocalDateTime;
-<% } %>
-<% } %>
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
 import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
@@ -25,8 +16,13 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Update<%= aggregateName %>CommandHandler — PATCH
  *
+<% if (_updateLifecycleEvents.length > 0) { %>
+ * Delegates field updates to the aggregate root's update() method,
+ * which raises domain events internally.
+<% } else { %>
  * Reconstructs the <%= aggregateName %> aggregate using the full constructor,
  * merging each command field with the existing entity value.
+<% } %>
  * Non-null command fields override the current value; null fields are preserved
  * from the loaded entity. No setters are required on the domain entity.
  */
@@ -62,12 +58,56 @@ public class Update<%= aggregateName %>CommandHandler implements CommandHandler<
     const cmdFieldMap = {};
     (commandFields || []).forEach(f => { cmdFieldMap[f.name] = f; });
 
+    function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+    // Updatable fields: same filter as creationFields (exclude id, audit, deletedAt, readOnly, autoInit)
+    const updatableFields = (rootEntity.fields || []).filter(f =>
+      f.name !== 'id' && f.name !== 'createdAt' && f.name !== 'updatedAt' &&
+      f.name !== 'createdBy' && f.name !== 'updatedBy' && f.name !== 'deletedAt' && !f.readOnly && !f.autoInit
+    );
+%>
+<% if (_updateLifecycleEvents.length > 0) { %>
+        // Merge: use command value when non-null, otherwise preserve existing value.
+        // The aggregate root's update() method raises domain events internally.
+        existing.update(
+<% updatableFields.forEach((field, idx) => { %>
+<%   const cmdField = cmdFieldMap[field.name]; %>
+<%   const getter = `existing.get${capitalize(field.name)}()`; %>
+<%   const comma = idx < updatableFields.length - 1 ? ',' : ''; %>
+<%   if (cmdField && cmdField.originalVoType) { %>
+                command.<%= field.name %>() != null
+                        ? mapper.to<%= cmdField.originalVoType %>(command.<%= field.name %>())
+                        : <%= getter %><%= comma %>
+<%   } else if (cmdField) { %>
+                command.<%= field.name %>() != null ? command.<%= field.name %>() : <%= getter %><%= comma %>
+<%   } else { %>
+                <%= getter %><%= comma %> // preserved: <%= field.name %>
+<%   } %>
+<% }); %>
+        );
+<% if ((oneToManyRelationships || []).length > 0) { %>
+
+        // TODO: Collection relationships require an explicit replacement strategy.
+        //       Choose the right approach for your domain and uncomment:
+        //
+        //  Option A — Clear-and-replace (simple, loses existing entity ids):
+        //    existing.get<collection>().clear();
+        //    command.<collection>().forEach(dto -> entity.add<Item>(...));
+        //
+        //  Option B — Merge by id (preserves audit trail, more complex):
+        //    reconcile existing items against command items by id
+<% (oneToManyRelationships || []).forEach(rel => { %>
+        // if (command.<%= rel.fieldName %>() != null) { /* replace <%= rel.fieldName %> */ }
+<% }); %>
+<% } %>
+
+        repository.save(existing);
+<% } else { %>
+<%
     // oneToOneRelationships are non-collection non-inverse rels → appear in the full constructor
     const ctorRels = oneToOneRelationships || [];
     const totalArgs = (rootEntity.fields || []).length + ctorRels.length;
     let argIdx = 0;
-
-    function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 %>
         // Merge: use command value when non-null, otherwise preserve existing value.
         // The full constructor is called so no setters are needed on the domain entity.
@@ -106,10 +146,8 @@ public class Update<%= aggregateName %>CommandHandler implements CommandHandler<
         // if (command.<%= rel.fieldName %>() != null) { /* replace <%= rel.fieldName %> */ }
 <% }); %>
 <% } %>
-<% _updateLifecycleEvents.forEach(function(evt) { %>
-        updated.raise(new <%= evt.name %>(<%= evt.resolvedArgs.join(', ') %>));
-<% }); %>
 
         repository.save(updated);
+<% } %>
     }
 }

@@ -670,7 +670,7 @@ Conecta un evento a una operación CRUD del ciclo de vida del agregado. A difere
 | Valor | Punto de emisión | Descripción |
 |---|---|---|
 | `create` | Constructor de creación de la entidad | UUID auto-generado como id antes de raise() |
-| `update` | UpdateCommandHandler, antes de `repository.save()` | `raise()` sobre la entidad reconstruida |
+| `update` | Método `update()` de la entidad raíz | Handler llama `existing.update(...)`; `raise()` interno |
 | `delete` | DeleteCommandHandler, antes de `repository.delete()` | Requiere `hasSoftDelete: false`; genera `repository.delete(entity)` |
 | `softDelete` | Método `softDelete()` de la entidad | Requiere `hasSoftDelete: true`; raise() después de `this.deletedAt = ...` |
 
@@ -721,10 +721,24 @@ public Product(String name, String description, BigDecimal price) {
 **Resultado generado para `lifecycle: update`:**
 
 ```java
+// En Product.java — método update()
+public void update(String name, String description, BigDecimal price) {
+    this.name = name;
+    this.description = description;
+    this.price = price;
+    raise(new ProductUpdatedEvent(this.getId(), this.getName(), this.getPrice()));
+}
+```
+
+```java
 // En UpdateProductCommandHandler.java
-Product updated = new Product(/* full constructor args */);
-updated.raise(new ProductUpdatedEvent(updated.getId(), updated.getName()));
-repository.save(updated);
+Product existing = repository.findById(command.id())...;
+existing.update(
+    command.name() != null ? command.name() : existing.getName(),
+    command.description() != null ? command.description() : existing.getDescription(),
+    command.price() != null ? command.price() : existing.getPrice()
+);
+repository.save(existing);
 ```
 
 **Resultado generado para `lifecycle: delete`:**
@@ -749,7 +763,7 @@ public void softDelete() {
 
 **Resolución de argumentos:** usa las mismas reglas que `triggers` (match por nombre de campo, VO unwrapping, `LocalDateTime.now()` para campos *At, `null /* TODO */` para no resueltos).
 
-**Visibilidad de `raise()`:** cuando un evento usa `lifecycle: update` o `lifecycle: delete`, el método `raise()` en la entidad se genera como `public` (en vez de `protected`) para permitir que los handlers de aplicación lo invoquen.
+**Visibilidad de `raise()`:** cuando un evento usa `lifecycle: delete`, el método `raise()` en la entidad se genera como `public` (en vez de `protected`) para permitir que los handlers de aplicación lo invoquen. Con `lifecycle: update`, `raise()` permanece `protected` porque se invoca internamente desde el método `update()` de la entidad.
 
 **Infraestructura de repositorio:** cuando un evento usa `lifecycle: delete`, el generador agrega automáticamente `void delete(Entity entity)` al repositorio (interface + implementación). La implementación publica los eventos pendientes antes de la eliminación física.
 
@@ -1660,7 +1674,7 @@ Al generar o modificar código, verificar:
 - [ ] Evento de dominio → declarar en `events[]`, publicar con `raise()` en método de negocio
 - [ ] Evento con `triggers: [methodName]` → el generador emite `raise()` automáticamente; args no resolubles quedan como `null /* TODO */`
 - [ ] Evento con `lifecycle: create` → el generador emite UUID auto-generado + `raise()` en el constructor de creación
-- [ ] Evento con `lifecycle: update` → el generador emite `raise()` en UpdateCommandHandler antes de `repository.save()`; `raise()` se genera como `public`
+- [ ] Evento con `lifecycle: update` → el generador emite método `update()` en la entidad raíz con `raise()` interno; handler llama `existing.update(...)`; `raise()` permanece `protected`
 - [ ] Evento con `lifecycle: delete` → el generador emite `raise()` en DeleteCommandHandler + genera `repository.delete(entity)` con publicación de eventos; `raise()` se genera como `public`
 - [ ] Evento con `lifecycle: softDelete` → el generador emite `raise()` dentro del método `softDelete()` de la entidad; requiere `hasSoftDelete: true`
 - [ ] Un evento puede declarar `triggers` O `lifecycle`, no ambos

@@ -1497,7 +1497,8 @@ function resolveEventArgs(event, entityName, entityFields, valueObjects = [], pr
 function resolveLifecycleEventArgs(lifecycleEventsMap, entityName, entityFields, valueObjects = []) {
   const resolved = {};
   // Each lifecycle type uses a different variable name in the generated code
-  const prefixMap = { create: 'this', update: 'updated', delete: 'entity', softDelete: 'this' };
+  // update uses 'this' because raise() is now inside the entity's update() method
+  const prefixMap = { create: 'this', update: 'this', delete: 'entity', softDelete: 'this' };
   for (const [lifecycle, events] of Object.entries(lifecycleEventsMap)) {
     const prefix = prefixMap[lifecycle] || 'this';
     resolved[lifecycle] = events.map(event => {

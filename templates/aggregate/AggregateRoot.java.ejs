@@ -41,7 +41,7 @@ import java.util.List;
  */
 public class <%= name %> {
 <% if (domainEvents && domainEvents.length > 0) { %>
-<%   const _needsPublicRaise = ((lifecycleEventsMap || {}).update || []).length > 0 || ((lifecycleEventsMap || {}).delete || []).length > 0; %>
+<%   const _needsPublicRaise = ((lifecycleEventsMap || {}).delete || []).length > 0; %>
 
     // ─── Domain Events ──────────────────────────────────────────────────────────
     private final List<DomainEvent> _domainEvents = new ArrayList<>();
@@ -116,6 +116,23 @@ public class <%= name %> {
         this.<%= field.name %> = <%- field.javaDefaultValue %>;
 <% }); %>
 <% _createLifecycleEvents.forEach(function(evt) { %>
+        raise(new <%= evt.name %>(<%= evt.resolvedArgs.join(', ') %>));
+<% }); %>
+    }
+<% } %>
+<% const _updateLifecycleEvents = (lifecycleEventsMap || {}).update || []; %>
+<% if (_updateLifecycleEvents.length > 0 && creationFields.length > 0) { %>
+
+    // ─── Update Method (lifecycle: update) ───────────────────────────────────
+    /**
+     * Updates the entity fields and raises domain event(s).
+     * Receives final (already-merged) values — PATCH semantics are resolved by the caller.
+     */
+    public void update(<% creationFields.forEach((field, idx) => { %><%- field.javaType %> <%= field.name %><%= idx < creationFields.length - 1 ? ', ' : '' %><% }); %>) {
+<% creationFields.forEach(field => { %>
+        this.<%= field.name %> = <%= field.name %>;
+<% }); %>
+<% _updateLifecycleEvents.forEach(function(evt) { %>
         raise(new <%= evt.name %>(<%= evt.resolvedArgs.join(', ') %>));
 <% }); %>
     }

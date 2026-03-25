@@ -321,7 +321,7 @@ aggregates:
             type: LocalDateTime     # → LocalDateTime.now()
 
       - name: OrderUpdatedEvent
-        lifecycle: update           # raise() en UpdateCommandHandler antes de save()
+        lifecycle: update           # raise() en el método update() de la entidad raíz
         fields:
           - name: orderId
             type: String
