@@ -994,6 +994,8 @@ Por cada entrada en `syncedBy`:
 | `DELETE` | Eliminar el registro permanentemente | Hard deletes en el módulo fuente |
 | `SOFT_DELETE` | Marcar como inactivo con timestamp | Cuando el fuente usa soft delete |
 
+> **Nota:** Para acciones `DELETE` y `SOFT_DELETE`, el listener **no usa IntegrationEvent** — extrae directamente el `id` del payload y lo pasa como `String` al `SyncHandler`. El `SyncHandler` llama a `repository.deleteById(id)` o `repository.softDeleteById(id)` respectivamente. El generador tampoco produce el archivo IntegrationEvent para estas acciones.
+
 ### Reglas de `readModels[]`
 
 - **`name:`** — PascalCase, **DEBE** terminar con `ReadModel`
@@ -1698,6 +1700,8 @@ Al generar o modificar código, verificar:
 - [ ] Read models nunca tienen auditoría, endpoints REST, ni lógica de negocio
 - [ ] Cada read model genera: clase de dominio inmutable, JPA entity (sin audit), repositorio (interface + impl), sync handler
 - [ ] Cada `syncedBy` entry genera: IntegrationEvent (reutilizado si ya existe), KafkaListener, registro de topic
+- [ ] Para `DELETE`/`SOFT_DELETE`, el listener bypasses IntegrationEvent — extrae `id` directamente y pasa `String id` al SyncHandler
+- [ ] `SOFT_DELETE` → `repository.softDeleteById(id)`; `DELETE` → `repository.deleteById(id)`; `UPSERT` → reconstruye modelo completo con IntegrationEvent + `repository.upsert()`
 - [ ] `source.module` nunca puede ser el mismo módulo (RM-010) — readModels son exclusivamente cross-module
 - [ ] ReadModel fields cubiertos por eventos UPSERT del productor — `C1-007`
 - [ ] ReadModel fields son subconjunto de los campos de la entidad raíz fuente (por C2-010, los lifecycle events no pueden emitir campos ajenos)

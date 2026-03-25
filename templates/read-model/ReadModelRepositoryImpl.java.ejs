@@ -62,7 +62,8 @@ public class <%= repositoryImplName %> implements <%= repositoryName %> {
     }
 <% if (hasSoftDelete) { %>
 
-    public void softDelete(String id) {
+    @Override
+    public void softDeleteById(String id) {
         jpaRepository.findById(id).ifPresent(entity -> {
             entity.setDeletedAt(LocalDateTime.now());
             jpaRepository.save(entity);

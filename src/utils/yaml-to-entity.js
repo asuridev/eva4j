@@ -1384,7 +1384,8 @@ function parseReadModels(domainData, moduleName = '', ports = []) {
         topicKey,
         topicSpringProperty: `\${topics.${topicKey}}`,
         topicVariableName: toCamelCase(topicKey.replace(/-/g, '_')),
-        fields // pass readModel fields to each sync entry for the listener templates
+        // UPSERT needs all readModel fields; DELETE/SOFT_DELETE only need the id
+        fields: action === 'UPSERT' ? fields : [{ name: 'id', javaType: 'String' }]
       };
     });
 

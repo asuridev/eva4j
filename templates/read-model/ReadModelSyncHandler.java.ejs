@@ -1,7 +1,7 @@
 package <%= packageName %>.<%= moduleName %>.application.usecases;
-<% const allIntegrationImports = syncedBy.map(s => s.integrationEventClassName); %>
-<% const uniqueImports = [...new Set(allIntegrationImports)]; %>
-<% uniqueImports.forEach(cls => { %>
+<% const upsertEntries = syncedBy.filter(s => s.action === 'UPSERT'); %>
+<% const upsertImports = [...new Set(upsertEntries.map(s => s.integrationEventClassName))]; %>
+<% upsertImports.forEach(cls => { %>
 import <%= packageName %>.<%= moduleName %>.application.events.<%= cls %>;
 <% }); %>
 import <%= packageName %>.<%= moduleName %>.domain.models.readmodels.<%= domainClassName %>;
@@ -24,27 +24,29 @@ public class <%= syncHandlerName %> {
         this.repository = repository;
     }
 <% syncedBy.forEach(sync => { %>
+<% if (sync.action === 'UPSERT') { %>
 
     @LogExceptions
     public void on<%= sync.eventBaseName %>(<%= sync.integrationEventClassName %> event) {
-<% if (sync.action === 'UPSERT') { %>
         <%= domainClassName %> model = new <%= domainClassName %>(
 <% fields.forEach((field, idx) => { %>
                 event.<%= field.name %>()<%= idx < fields.length - 1 ? ',' : '' %>
 <% }); %>
         );
         repository.upsert(model);
-<% } else if (sync.action === 'DELETE') { %>
-        repository.deleteById(event.id());
-<% } else if (sync.action === 'SOFT_DELETE') { %>
-        // SOFT_DELETE: mark record as inactive rather than removing it
-        <%= domainClassName %> model = new <%= domainClassName %>(
-<% fields.forEach((field, idx) => { %>
-                event.<%= field.name %>()<%= idx < fields.length - 1 ? ',' : '' %>
-<% }); %>
-        );
-        repository.upsert(model);
-<% } %>
     }
+<% } else if (sync.action === 'DELETE') { %>
+
+    @LogExceptions
+    public void on<%= sync.eventBaseName %>(String id) {
+        repository.deleteById(id);
+    }
+<% } else if (sync.action === 'SOFT_DELETE') { %>
+
+    @LogExceptions
+    public void on<%= sync.eventBaseName %>(String id) {
+        repository.softDeleteById(id);
+    }
+<% } %>
 <% }); %>
 }

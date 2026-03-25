@@ -1,6 +1,9 @@
 package <%= packageName %>.<%= moduleName %>.infrastructure.kafkaListener;
+<% const isUpsert = action === 'UPSERT'; %>
+<% if (isUpsert) { %>
 
 import <%= packageName %>.<%= moduleName %>.application.events.<%= integrationEventClassName %>;
+<% } %>
 import <%= packageName %>.<%= moduleName %>.application.usecases.<%= syncHandlerName %>;
 import <%= packageName %>.shared.infrastructure.eventEnvelope.EventEnvelope;
 
@@ -10,6 +13,7 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+<% if (isUpsert) { %>
 <% const needsBigDecimal = fields && fields.some(f => f.javaType === 'BigDecimal'); %>
 <% const needsLocalDate  = fields && fields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
 <% const needsInstant    = fields && fields.some(f => f.javaType === 'Instant'); %>
@@ -20,6 +24,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 <% } %><% if (needsInstant) { %>import java.time.Instant;
 <% } %><% if (needsUUID) { %>import java.util.UUID;
+<% } %>
 <% } %>
 
 /**
@@ -39,6 +44,7 @@ public class <%= listenerClassName %> {
 
     @KafkaListener(topics = "<%= topicSpringProperty %>", groupId = "${spring.application.name}-<%= moduleName %>-group")
     public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
+<% if (isUpsert) { %>
 <% (fields || []).forEach(f => { %>
         <%- f.javaType %> <%= f.name %> = objectMapper.convertValue(event.data().get("<%= f.name %>"), <%- f.javaType %>.class);
 <% }); %>
@@ -48,6 +54,10 @@ public class <%= listenerClassName %> {
                 <%= f.name %><%= i < fields.length - 1 ? ',' : '' %>
 <% }); %>
         ));
+<% } else { %>
+        String id = objectMapper.convertValue(event.data().get("id"), String.class);
+        syncHandler.on<%= eventBaseName %>(id);
+<% } %>
 
         ack.acknowledge();
     }

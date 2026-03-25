@@ -1207,11 +1207,12 @@ async function generateEntitiesCommand(moduleName, options = {}) {
             };
 
             // Integration event (reuse if already exists from listeners: section)
+            // Only generate for UPSERT — DELETE/SOFT_DELETE bypass IntegrationEvent entirely
             const integrationEventPath = path.join(
               moduleBasePath, 'application', 'events',
               `${sync.integrationEventClassName}.java`
             );
-            if (!(await fs.pathExists(integrationEventPath))) {
+            if (sync.action === 'UPSERT' && !(await fs.pathExists(integrationEventPath))) {
               await renderAndWrite(
                 path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerIntegrationEvent.java.ejs'),
                 integrationEventPath,

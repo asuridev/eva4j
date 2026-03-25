@@ -295,11 +295,8 @@ public class SyncProductReadModelHandler {
         repository.upsert(model);
     }
 
-    public void onProductDeactivated(ProductDeactivatedIntegrationEvent event) {
-        ProductReadModel model = new ProductReadModel(
-            event.id(), event.name(), event.price(), "INACTIVE"
-        );
-        repository.upsert(model);
+    public void onProductDeactivated(String id) {
+        repository.softDeleteById(id);
     }
 }
 ```
@@ -415,7 +412,9 @@ The source module (`products`, `customers`) must emit the events referenced in `
 
 ### Event Field Convention
 
-Events consumed by read models should include **all fields declared in the read model's `fields`** section. The event payload is the source of truth for the projection.
+Events consumed by read models for **UPSERT** actions should include **all fields declared in the read model's `fields`** section. The event payload is the source of truth for the projection.
+
+For **DELETE** and **SOFT_DELETE** actions, the listener only deserializes the `id` field — the event only needs to carry the entity identifier. The `SyncHandler` calls `repository.deleteById(id)` or `repository.softDeleteById(id)` respectively.
 
 ```yaml
 # In products.yaml — event must carry all fields that rm_products needs

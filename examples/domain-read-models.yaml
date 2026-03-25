@@ -90,7 +90,7 @@ readModels:
       - event: ProductUpdatedEvent
         action: UPSERT
       - event: ProductDeactivatedEvent
-        action: UPSERT
+        action: SOFT_DELETE
 
   - name: CustomerReadModel
     source:

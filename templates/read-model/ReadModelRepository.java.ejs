@@ -31,6 +31,10 @@ public interface <%= repositoryName %> {
     void upsert(<%= domainClassName %> readModel);
 
     void deleteById(String id);
+<% if (hasSoftDelete) { %>
+
+    void softDeleteById(String id);
+<% } %>
 
     Optional<<%= domainClassName %>> findById(String id);
 
