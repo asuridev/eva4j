@@ -1358,6 +1358,11 @@ function parseReadModels(domainData, moduleName = '', ports = []) {
       );
     }
 
+    // Derive the source aggregate's id key for payload extraction
+    // e.g., source.aggregate = 'Product' → sourceIdKey = 'productId'
+    const sourceBase = rm.source.aggregate.charAt(0).toLowerCase() + rm.source.aggregate.slice(1);
+    const sourceIdKey = sourceBase + 'Id';
+
     const parsedSyncedBy = syncedBy.map(sync => {
       const eventName = toPascalCase(sync.event);
       const action = (sync.action || '').toUpperCase();
@@ -1385,7 +1390,11 @@ function parseReadModels(domainData, moduleName = '', ports = []) {
         topicSpringProperty: `\${topics.${topicKey}}`,
         topicVariableName: toCamelCase(topicKey.replace(/-/g, '_')),
         // UPSERT needs all readModel fields; DELETE/SOFT_DELETE only need the id
-        fields: action === 'UPSERT' ? fields : [{ name: 'id', javaType: 'String' }]
+        // payloadKey maps readModel field names to producer payload keys
+        // e.g., readModel 'id' → payload 'productId' (convention {entityName}Id)
+        fields: action === 'UPSERT'
+          ? fields.map(f => ({ ...f, payloadKey: f.name === 'id' ? sourceIdKey : f.name }))
+          : [{ name: 'id', javaType: 'String', payloadKey: sourceIdKey }]
       };
     });
 

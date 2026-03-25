@@ -46,7 +46,7 @@ public class <%= listenerClassName %> {
     public void handle(EventEnvelope<Map<String, Object>> event, Acknowledgment ack) {
 <% if (isUpsert) { %>
 <% (fields || []).forEach(f => { %>
-        <%- f.javaType %> <%= f.name %> = objectMapper.convertValue(event.data().get("<%= f.name %>"), <%- f.javaType %>.class);
+        <%- f.javaType %> <%= f.name %> = objectMapper.convertValue(event.data().get("<%= f.payloadKey || f.name %>"), <%- f.javaType %>.class);
 <% }); %>
 
         syncHandler.on<%= eventBaseName %>(new <%= integrationEventClassName %>(
@@ -55,7 +55,7 @@ public class <%= listenerClassName %> {
 <% }); %>
         ));
 <% } else { %>
-        String id = objectMapper.convertValue(event.data().get("id"), String.class);
+        String id = objectMapper.convertValue(event.data().get("<%= (fields[0] && fields[0].payloadKey) || 'id' %>"), String.class);
         syncHandler.on<%= eventBaseName %>(id);
 <% } %>
 

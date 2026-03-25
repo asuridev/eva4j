@@ -68,9 +68,9 @@ if (audit && audit.trackUser) {
     private <%- field.javaTypeJpa %> <%= field.name %> = new ArrayList<>();
   <% } else { %>
     <% if (index === 0) { %>@Id
-    <% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)
+    <% if (!hasCreateLifecycle) { %><% if (field.javaType === 'String') { %>@GeneratedValue(strategy = GenerationType.UUID)
     <% } else if (field.javaType === 'Long' || field.javaType === 'Integer') { %>@GeneratedValue(strategy = GenerationType.IDENTITY)
-    <% } %><% } %><% if (field.annotations.length > 0) { %><% field.annotations.forEach(annotation => { %><%= annotation %>
+    <% } %><% } %><% } %><% if (field.annotations.length > 0) { %><% field.annotations.forEach(annotation => { %><%= annotation %>
     <% }); %><% } %><% if (field.isEmbedded || field.isValueObject) { %><% 
     // Find the Value Object definition to get its fields
     const vo = valueObjects && valueObjects.find(v => v.name === field.javaType);

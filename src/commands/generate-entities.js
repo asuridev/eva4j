@@ -397,6 +397,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       generatedFiles.push({ type: 'Domain Entity', name: rootEntity.name, path: `${moduleName}/domain/models/entities/${rootEntity.name}.java` });
 
       // 2. Generate JPA Aggregate Root
+      const hasCreateLifecycle = !!(aggregate.lifecycleEventsMap && aggregate.lifecycleEventsMap.create && aggregate.lifecycleEventsMap.create.length > 0);
       const rootJpaContext = {
         packageName,
         moduleName,
@@ -409,7 +410,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         enums: allEnums,
         auditable: rootEntity.auditable,
         audit: rootEntity.audit,
-        hasSoftDelete: rootEntity.hasSoftDelete || false
+        hasSoftDelete: rootEntity.hasSoftDelete || false,
+        hasCreateLifecycle
       };
 
       await renderAndWrite(
