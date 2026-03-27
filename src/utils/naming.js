@@ -57,6 +57,15 @@ function pluralizeWord(word) {
 }
 
 /**
+ * Singularize a word
+ * @param {string} word - Word to singularize
+ * @returns {string} Singularized word
+ */
+function singularizeWord(word) {
+  return pluralize.singular(word);
+}
+
+/**
  * Convert package name to path
  * @param {string} packageName - Package name (e.g., com.company.project)
  * @returns {string} Package path (e.g., com/company/project)
@@ -129,6 +138,7 @@ module.exports = {
   toSnakeCase,
   toKebabCase,
   pluralizeWord,
+  singularizeWord,
   toPackagePath,
   getBaseEntity,
   artifactIdToPackageName,

@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toPackagePath, toPascalCase, pluralizeWord, toKebabCase } = require('../utils/naming');
+const { toPackagePath, toPascalCase, pluralizeWord, toKebabCase, toCamelCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const ChecksumManager = require('../utils/checksum-manager');
 
@@ -29,6 +29,9 @@ async function generateResourceCommand(moduleName, options = {}) {
   const projectConfig = await configManager.loadProjectConfig();
   const { packageName } = projectConfig;
   const packagePath = toPackagePath(packageName);
+
+  // Normalise module name to camelCase (system.yaml uses kebab-case, .eva4j.json stores camelCase)
+  moduleName = toCamelCase(moduleName);
 
   // Validate module exists
   if (!(await configManager.moduleExists(moduleName))) {

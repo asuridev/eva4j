@@ -5,7 +5,7 @@ const fs = require('fs-extra');
 const inquirer = require('inquirer');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toPackagePath, toCamelCase, toKebabCase, toPascalCase, getApplicationClassName, pluralizeWord } = require('../utils/naming');
+const { toPackagePath, toCamelCase, toKebabCase, toPascalCase, getApplicationClassName, pluralizeWord, singularizeWord } = require('../utils/naming');
 const { renderAndWrite, renderTemplate } = require('../utils/template-engine');
 const { parseDomainYaml, generateEntityImports, generateValidationImports, resolveLifecycleEventArgs, resolveEventArgs } = require('../utils/yaml-to-entity');
 const { createOrUpdateUrlsConfig, ensureUrlsImport } = require('./generate-http-exchange');
@@ -215,6 +215,9 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
   const { packageName, artifactId } = projectConfig;
   const packagePath = toPackagePath(packageName);
+
+  // Normalise module name to camelCase (system.yaml uses kebab-case, .eva4j.json stores camelCase)
+  moduleName = toCamelCase(moduleName);
 
   // Validate module exists
   if (!(await configManager.moduleExists(moduleName))) {
@@ -1306,8 +1309,18 @@ async function generateEntitiesCommand(moduleName, options = {}) {
             }
           }
           if (!op._ownerAggregate) {
-            // True scaffold: heuristic — find aggregate whose name appears inside the use case name
-            const matched = aggregates.find(agg =>
+            // True scaffold: heuristic — strip CRUD verb prefix and singularize to find
+            // the best aggregate match via prefix comparison.
+            // e.g. "FindAllGuarantees" → suffix "Guarantees" → singular "Guarantee"
+            //      → "GuaranteeCatalog".startsWith("guarantee") ✓
+            const ucSuffix = op.useCase.replace(/^(FindAll|GetAll|Get|Create|Update|Delete|Add|Remove)/, '');
+            const singularSuffix = ucSuffix ? singularizeWord(ucSuffix).toLowerCase() : '';
+            const matched = (singularSuffix &&
+              aggregates.find(agg => {
+                const aggLower = agg.name.toLowerCase();
+                return aggLower.startsWith(singularSuffix) || singularSuffix.startsWith(aggLower);
+              })
+            ) || aggregates.find(agg =>
               op.useCase.toLowerCase().includes(agg.name.toLowerCase())
             );
             const owner = matched || aggregates[0];
@@ -1624,6 +1637,34 @@ function classifyUseCase(op, aggregateName, aggregate) {
         fieldJavaType: field.javaType,
         jpaMethodName: `findBy${fieldPascal}`
       };
+    }
+  }
+
+  // 5. Fuzzy FindAll — useCase starts with "FindAll" and the singular of the
+  //    suffix is a prefix of the aggregate name (or vice-versa).
+  //    e.g. FindAllGuarantees → singular "Guarantee" → "GuaranteeCatalog" starts with it ✓
+  if (op.useCase.startsWith('FindAll')) {
+    const suffix = op.useCase.slice(7);
+    if (suffix) {
+      const singularSuffix = singularizeWord(suffix).toLowerCase();
+      const aggLower = aggregateName.toLowerCase();
+      if (aggLower.startsWith(singularSuffix) || singularSuffix.startsWith(aggLower)) {
+        return { category: 'standard', variant: 'findAll' };
+      }
+    }
+  }
+
+  // 6. Fuzzy Get — useCase starts with "Get" and the suffix matches the
+  //    aggregate name as a prefix (or vice-versa).
+  //    e.g. GetCatTariff → "CatTariff" matches aggregate "CatTariff" ✓
+  if (op.useCase.startsWith('Get') && !op.useCase.startsWith('GetAll')) {
+    const suffix = op.useCase.slice(3);
+    if (suffix) {
+      const suffixLower = suffix.toLowerCase();
+      const aggLower = aggregateName.toLowerCase();
+      if (aggLower.startsWith(suffixLower) || suffixLower.startsWith(aggLower)) {
+        return { category: 'standard', variant: 'getById' };
+      }
     }
   }
 

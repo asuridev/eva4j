@@ -1,6 +1,6 @@
 'use strict';
 
-const { pluralizeWord } = require('./naming');
+const { pluralizeWord, singularizeWord } = require('./naming');
 
 /**
  * Domain-level validator for eva evaluate system --domain
@@ -391,6 +391,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-008': { label: 'Evento con valor de lifecycle inválido', severity: 'ok', findings: [] },
     'C2-009': { label: 'Evento lifecycle incompatible con configuración de entidad', severity: 'ok', findings: [] },
     'C2-010': { label: 'Campo de lifecycle event no existe en la entidad raíz', severity: 'ok', findings: [] },
+    'C2-011': { label: 'Endpoint useCase no se resuelve a ningún agregado del módulo', severity: 'ok', findings: [] },
   };
 
   for (const [moduleName, config] of Object.entries(domainConfigs)) {
@@ -691,6 +692,92 @@ function runC2(domainConfigs, systemConfig) {
         }
       }
     }
+
+    // C2-011: Endpoint useCase not semantically resolvable to any aggregate
+    // Detects FindAll/Get use cases that won't match any aggregate via exact
+    // or fuzzy matching — these silently fall to scaffold with the wrong
+    // aggregate's ResponseDto, producing code that doesn't compile.
+    const allAggs = config.aggregates || [];
+    for (const ver of (config.endpoints && config.endpoints.versions) || []) {
+      for (const op of ver.operations || []) {
+        const uc = op.useCase || '';
+        let resolved = false;
+
+        for (const agg of allAggs) {
+          const aggName = agg.name;
+          const aggPlural = pluralizeWord(aggName);
+          // Exact standard match
+          if (uc === `Create${aggName}` || uc === `Update${aggName}` ||
+              uc === `Delete${aggName}` || uc === `Get${aggName}` ||
+              uc === `FindAll${aggPlural}`) {
+            resolved = true;
+            break;
+          }
+          // Fuzzy FindAll: singular of suffix is prefix of aggregate name (or vice-versa)
+          if (uc.startsWith('FindAll')) {
+            const suffix = uc.slice(7);
+            if (suffix) {
+              const singular = singularizeWord(suffix).toLowerCase();
+              const aggLower = aggName.toLowerCase();
+              if (aggLower.startsWith(singular) || singular.startsWith(aggLower)) {
+                resolved = true;
+                break;
+              }
+            }
+          }
+          // Fuzzy Get: suffix is prefix of aggregate name (or vice-versa)
+          if (uc.startsWith('Get') && !uc.startsWith('GetAll')) {
+            const suffix = uc.slice(3);
+            if (suffix) {
+              const suffixLower = suffix.toLowerCase();
+              const aggLower = aggName.toLowerCase();
+              if (aggLower.startsWith(suffixLower) || suffixLower.startsWith(aggLower)) {
+                resolved = true;
+                break;
+              }
+            }
+          }
+          // Transition match
+          const entities = agg.entities || [];
+          const rootEntity = entities.find(e => e.isRoot) || entities[0] || {};
+          const enums = rootEntity.enums || agg.enums || [];
+          for (const enumDef of enums) {
+            for (const tr of (enumDef.transitions || [])) {
+              const methodPascal = tr.method.charAt(0).toUpperCase() + tr.method.slice(1);
+              if (uc === `${methodPascal}${aggName}`) {
+                resolved = true;
+              }
+            }
+          }
+          if (resolved) break;
+          // SubEntity match
+          const rels = (rootEntity.relationships || []).filter(r => r.type === 'OneToMany' && !r.isInverse);
+          for (const rel of rels) {
+            if (uc === `Add${rel.target}` || uc === `Remove${rel.target}`) {
+              resolved = true;
+              break;
+            }
+          }
+          if (resolved) break;
+          // Substring fallback: aggregate name inside useCase
+          if (uc.toLowerCase().includes(aggName.toLowerCase())) {
+            resolved = true;
+            break;
+          }
+        }
+
+        if (!resolved) {
+          const firstAgg = allAggs.length > 0 ? allAggs[0].name : '(none)';
+          checks['C2-011'].findings.push(
+            finding(
+              moduleName,
+              `UseCase '${uc}' no se resuelve a ningún agregado del módulo — se asignará al primero ('${firstAgg}') y generará código con tipos incorrectos`,
+              `Versión: ${ver.version}. Considere renombrar el useCase para que contenga el nombre del agregado, o verificar que el agregado destino existe.`
+            )
+          );
+        }
+      }
+    }
   }
 
   setDefaultSeverities(checks, {
@@ -704,6 +791,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-008': 'error',
     'C2-009': 'warning',
     'C2-010': 'error',
+    'C2-011': 'error',
   });
 
   return checks;

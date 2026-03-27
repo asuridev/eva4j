@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject, moduleExists } = require('../utils/validator');
-const { toPackagePath, toPascalCase } = require('../utils/naming');
+const { toPackagePath, toPascalCase, toCamelCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const ChecksumManager = require('../utils/checksum-manager');
 
@@ -47,6 +47,9 @@ async function generateTemporalFlowCommand(moduleName, flowName, options = {}) {
 
   const { packageName } = projectConfig;
   const packagePath = toPackagePath(packageName);
+
+  // Normalise module name to camelCase (system.yaml uses kebab-case, .eva4j.json stores camelCase)
+  moduleName = toCamelCase(moduleName);
 
   if (!(await configManager.moduleExists(moduleName))) {
     console.error(chalk.red(`❌ Module '${moduleName}' does not exist`));

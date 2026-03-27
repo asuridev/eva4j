@@ -1,5 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
+const { toCamelCase } = require('./naming');
 
 class ConfigManager {
   constructor(projectPath = process.cwd()) {
@@ -88,8 +89,9 @@ class ConfigManager {
   async moduleExists(moduleName) {
     const config = await this.loadProjectConfig();
     if (!config) return false;
-    
-    return config.modules.some(module => module.name === moduleName);
+
+    const normalized = toCamelCase(moduleName);
+    return config.modules.some(module => module.name === normalized);
   }
 
   /**

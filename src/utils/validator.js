@@ -1,5 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
+const { toCamelCase } = require('./naming');
 
 /**
  * Validate project name
@@ -107,7 +108,8 @@ async function isEva4jProject(dir) {
  * @returns {boolean} True if module exists
  */
 async function moduleExists(projectDir, packagePath, moduleName) {
-  const modulePath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName);
+  const normalized = toCamelCase(moduleName);
+  const modulePath = path.join(projectDir, 'src', 'main', 'java', packagePath, normalized);
   return await fs.pathExists(modulePath);
 }
 

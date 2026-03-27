@@ -32,6 +32,9 @@ async function generateHttpExchangeCommand(moduleName, portName) {
   const { packageName } = projectConfig;
   const packagePath = toPackagePath(packageName);
 
+  // Normalise module name to camelCase (system.yaml uses kebab-case, .eva4j.json stores camelCase)
+  moduleName = toCamelCase(moduleName);
+
   // Validate module exists
   if (!(await configManager.moduleExists(moduleName))) {
     console.error(chalk.red(`❌ Module '${moduleName}' not found in project configuration`));

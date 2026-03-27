@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject, moduleExists } = require('../utils/validator');
-const { toPackagePath, toPascalCase } = require('../utils/naming');
+const { toPackagePath, toPascalCase, toCamelCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const ChecksumManager = require('../utils/checksum-manager');
 
@@ -31,6 +31,9 @@ async function generateUsecaseCommand(moduleName, usecaseName, options = {}) {
 
   const { packageName } = projectConfig;
   const packagePath = toPackagePath(packageName);
+
+  // Normalise module name to camelCase (system.yaml uses kebab-case, .eva4j.json stores camelCase)
+  moduleName = toCamelCase(moduleName);
 
   // Validate module exists
   if (!(await configManager.moduleExists(moduleName))) {

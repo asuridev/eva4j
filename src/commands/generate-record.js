@@ -6,7 +6,7 @@ const inquirer = require('inquirer');
 const clipboardy = require('clipboardy');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toPackagePath, toPascalCase } = require('../utils/naming');
+const { toPackagePath, toPascalCase, toCamelCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const { parseJsonToRecords } = require('../utils/json-to-java');
 
@@ -107,7 +107,7 @@ async function generateRecordCommand(options = {}) {
     const { recordName, moduleName, targetFolder } = answers;
 
     // Validate module exists in filesystem
-    const modulePath = path.join(projectDir, 'src', 'main', 'java', packagePath, moduleName);
+    const modulePath = path.join(projectDir, 'src', 'main', 'java', packagePath, toCamelCase(moduleName));
     if (!(await fs.pathExists(modulePath))) {
       console.error(chalk.red(`❌ Module '${moduleName}' not found in filesystem`));
       process.exit(1);
