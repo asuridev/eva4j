@@ -936,6 +936,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
         const adapterDir = path.join(moduleBasePath, 'infrastructure', 'adapters', adapterPackage);
 
+        const aclMapperClassName = `${serviceName}AclMapper`;
+
         const portContext = {
           packageName,
           moduleName,
@@ -948,6 +950,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           feignClientClassName,
           feignAdapterClassName,
           feignConfigClassName,
+          aclMapperClassName,
           adapterPackage,
           methods,
           nestedTypes,
@@ -988,9 +991,9 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           });
         }
 
-        // 1b. Infra DTOs (one per method that has fields:) — live in infrastructure/adapters/{service}/
+        // 1b. Infra DTOs (one per method that has fields:) — live in infrastructure/adapters/{service}/dtos/
         for (const method of methods.filter(m => m.hasResponse)) {
-          const infraDtoPath = path.join(adapterDir, `${method.infraDtoName}.java`);
+          const infraDtoPath = path.join(adapterDir, 'dtos', `${method.infraDtoName}.java`);
           await renderAndWrite(
             path.join(__dirname, '..', '..', 'templates', 'ports', 'PortResponseDto.java.ejs'),
             infraDtoPath,
@@ -1000,7 +1003,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           generatedFiles.push({
             type: 'Port Infra DTO',
             name: method.infraDtoName,
-            path: `${moduleName}/infrastructure/adapters/${adapterPackage}/${method.infraDtoName}.java`
+            path: `${moduleName}/infrastructure/adapters/${adapterPackage}/dtos/${method.infraDtoName}.java`
           });
         }
 
@@ -1059,6 +1062,19 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           type: 'HTTP Port',
           name: feignAdapterClassName,
           path: `${moduleName}/infrastructure/adapters/${adapterPackage}/${feignAdapterClassName}.java`
+        });
+
+        // 5b. ACL Mapper (maps infra DTOs → domain models)
+        await renderAndWrite(
+          path.join(__dirname, '..', '..', 'templates', 'ports', 'PortAclMapper.java.ejs'),
+          path.join(adapterDir, `${aclMapperClassName}.java`),
+          portContext,
+          writeOptions
+        );
+        generatedFiles.push({
+          type: 'HTTP Port',
+          name: aclMapperClassName,
+          path: `${moduleName}/infrastructure/adapters/${adapterPackage}/${aclMapperClassName}.java`
         });
 
         // 6. Feign Config

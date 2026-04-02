@@ -1,4 +1,4 @@
-package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= adapterPackage %>;
+package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= adapterPackage %>.dtos;
 <% const needsBigDecimal = fields && fields.some(f => f.javaType === 'BigDecimal'); %>
 <% const needsLocalDate  = fields && fields.some(f => ['LocalDate','LocalDateTime','LocalTime'].includes(f.javaType)); %>
 <% const needsInstant    = fields && fields.some(f => f.javaType === 'Instant'); %>

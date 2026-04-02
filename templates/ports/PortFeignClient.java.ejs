@@ -23,6 +23,10 @@ import java.time.LocalTime;
 <% }); %>
 <% (nestedTypes || []).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
 <% }); %>
+<% /* Infra response DTOs live in infrastructure.adapters.{service}.dtos */ %>
+<% const uniqueInfraDtos = [...new Set(allMethods.filter(m => m.hasResponse).map(m => m.infraDtoName))]; %>
+<% uniqueInfraDtos.forEach(dto => { %>import <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= adapterPackage %>.dtos.<%= dto %>;
+<% }); %>
 @FeignClient(
     name = "<%= feignClientName %>",
     url = "${<%= baseUrlProperty %>}",

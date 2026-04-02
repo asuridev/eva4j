@@ -1,0 +1,35 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= adapterPackage %>;
+
+import org.springframework.stereotype.Component;
+<% const allMethods = methods || []; %>
+<% const responseMethods = allMethods.filter(m => m.hasResponse); %>
+<% /* ACL: import domain models */ %>
+<% const uniqueDomainTypes = [...new Set(responseMethods.map(m => m.domainType))]; %>
+<% uniqueDomainTypes.forEach(dt => { %>import <%= packageName %>.<%= moduleName %>.domain.models.<%= adapterPackage %>.<%= dt %>;
+<% }); %>
+<% /* Import infra DTOs from dtos sub-package */ %>
+<% const uniqueInfraDtos = [...new Set(responseMethods.map(m => m.infraDtoName))]; %>
+<% uniqueInfraDtos.forEach(dto => { %>import <%= packageName %>.<%= moduleName %>.infrastructure.adapters.<%= adapterPackage %>.dtos.<%= dto %>;
+<% }); %>
+
+/**
+ * ACL (Anti-Corruption Layer) mapper for {@link <%= serviceName %>}.
+ *
+ * <p>Maps infrastructure DTOs (shaped by the external service) to domain models.
+ * If the external API changes, only these methods need to be updated;
+ * domain logic using the domain models remains untouched.
+ */
+@Component("<%= moduleName %>.<%= aclMapperClassName %>")
+public class <%= aclMapperClassName %> {
+<% responseMethods.forEach(m => { %>
+
+    public <%- m.domainType %> to<%= m.domainType %>(<%= m.infraDtoName %> dto) {
+        if (dto == null) return null;
+        return new <%= m.domainType %>(
+<%     m.fields.forEach((f, i) => { %>
+            dto.<%= f.name %>()<%= i < m.fields.length - 1 ? ',' : '' %>
+<%     }); %>
+        );
+    }
+<% }); %>
+}

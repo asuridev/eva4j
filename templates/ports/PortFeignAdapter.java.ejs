@@ -20,9 +20,11 @@ import java.util.stream.Collectors;
 public class <%= feignAdapterClassName %> implements <%= serviceName %> {
 
     private final <%= feignClientClassName %> feignClient;
+    private final <%= aclMapperClassName %> aclMapper;
 
-    public <%= feignAdapterClassName %>(<%= feignClientClassName %> feignClient) {
+    public <%= feignAdapterClassName %>(<%= feignClientClassName %> feignClient, <%= aclMapperClassName %> aclMapper) {
         this.feignClient = feignClient;
+        this.aclMapper = aclMapper;
     }
 <% allMethods.forEach(m => { %>
 <%   /* Public override returns domain model; FeignClient returns infra DTO */ %>
@@ -39,29 +41,12 @@ public class <%= feignAdapterClassName %> implements <%= serviceName %> {
 <%   if (!m.hasResponse) { %>
         feignClient.<%= m.name %>(<%= args.join(', ') %>);
 <%   } else if (m.returnList) { %>
-        List<<%= m.infraDtoName %>> dtos = feignClient.<%= m.name %>(<%= args.join(', ') %>);
-        return dtos.stream().map(dto -> to<%= m.domainType %>(dto)).collect(Collectors.toList());
+        return feignClient.<%= m.name %>(<%= args.join(', ') %>).stream()
+            .map(aclMapper::to<%= m.domainType %>)
+            .collect(Collectors.toList());
 <%   } else { %>
-        return to<%= m.domainType %>(feignClient.<%= m.name %>(<%= args.join(', ') %>));
+        return aclMapper.to<%= m.domainType %>(feignClient.<%= m.name %>(<%= args.join(', ') %>));
 <%   } %>
-    }
-<% }); %>
-
-    // ── ACL Mappers ─────────────────────────────────────────────────────────
-    // Maps infra DTOs (shaped by the external service) to domain models.
-    // If the external API changes, only these methods need to be updated.
-<%
-  // Build one mapper per method that has a response
-  const responseMethods = allMethods.filter(m => m.hasResponse);
-%>
-<% responseMethods.forEach(m => { %>
-    private <%- m.domainType %> to<%= m.domainType %>(<%= m.infraDtoName %> dto) {
-        if (dto == null) return null;
-        return new <%= m.domainType %>(
-<%     m.fields.forEach((f, i) => { %>
-            dto.<%= f.name %>()<%= i < m.fields.length - 1 ? ',' : '' %>
-<%     }); %>
-        );
     }
 <% }); %>
 }
