@@ -9,15 +9,67 @@
 3. [system.yaml structure required](#3-systemyaml-structure-required)
 4. [system.yaml evaluation criteria (S1–S5)](#4-systemyaml-evaluation-criteria-s1s5)
    - [S1 — Module integrity](#s1--module-integrity)
+     - [S1-001 — Undeclared module referenced in integrations](#s1-001--undeclared-module-referenced-in-integrations)
+     - [S1-002 — Module with no responsibilities](#s1-002--module-with-no-responsibilities)
+     - [S1-003 — Module without description](#s1-003--module-without-description)
+     - [S1-004 — Purely reactive module not documented](#s1-004--purely-reactive-module-not-documented)
    - [S2 — Async event graph integrity](#s2--async-event-graph-integrity)
+     - [S2-001 — Event with no consumers](#s2-001--event-with-no-consumers)
+     - [S2-002 — Duplicate topic value](#s2-002--duplicate-topic-value)
+     - [S2-003 — Self-loop (module consuming its own event)](#s2-003--self-loop-module-consuming-its-own-event)
+     - [S2-004/S2-005 — Unbalanced producer/consumer roles](#s2-004s2-005--unbalanced-producerconsumer-roles)
+     - [S2-006 — Event name convention](#s2-006--event-name-convention)
+     - [S2-007 — Topic without configured prefix](#s2-007--topic-without-configured-prefix-info)
    - [S3 — Sync call integrity](#s3--sync-call-integrity)
+     - [S3-001 — Sync call to module without endpoints](#s3-001--sync-call-to-module-without-endpoints)
+     - [S3-002 — Endpoint not declared in target module](#s3-002--endpoint-not-declared-in-target-module)
+     - [S3-003 — Bidirectional sync coupling](#s3-003--bidirectional-sync-coupling)
+     - [S3-004 — Too many outgoing sync dependencies](#s3-004--too-many-outgoing-sync-dependencies)
+     - [S3-005 — Module consulted synchronously but emits no events](#s3-005--module-consulted-synchronously-but-emits-no-events-info)
+     - [S3-006 — Duplicate port name across caller modules](#s3-006--duplicate-port-name-across-caller-modules)
    - [S4 — Endpoint coherence](#s4--endpoint-coherence)
+     - [S4-001 — Duplicate route](#s4-001--duplicate-route)
+     - [S4-002 — PUT without GET for same resource](#s4-002--put-without-get-for-same-resource)
+     - [S4-003 — DELETE without description](#s4-003--delete-without-description)
+     - [S4-004 — Endpoint without description](#s4-004--endpoint-without-description-info)
+     - [S4-005 — POST without GET /{id}](#s4-005--post-without-get-id-info)
    - [S5 — Global system coherence](#s5--global-system-coherence)
+     - [S5-001 — Messaging disabled but events declared](#s5-001--messaging-disabled-but-events-declared)
+     - [S5-002 — Success event without matching failure event](#s5-002--success-event-without-matching-failure-event)
+     - [S5-003 — Auth module without integrations](#s5-003--auth-module-without-integrations-info)
+     - [S5-004 — Isolated module](#s5-004--isolated-module-info)
 5. [Domain evaluation criteria (C1–C4) — `--domain`](#5-domain-evaluation-criteria-c1c4----domain)
    - [C1 — Kafka event contracts](#c1--kafka-event-contracts)
+     - [C1-001 — Produced event with no consumers in system.yaml](#c1-001--produced-event-with-no-consumers-in-systemyaml)
+     - [C1-002 — Listener references event no module produces](#c1-002--listener-references-event-no-module-produces)
+     - [C1-003 — Field in listener missing in producer event](#c1-003--field-in-listener-missing-in-producer-event)
+     - [C1-004 — Incompatible field types between producer and consumer](#c1-004--incompatible-field-types-between-producer-and-consumer)
+     - [C1-005 — Registered consumer has no listener or readModel.syncedBy](#c1-005--registered-consumer-has-no-listener-or-readmodelsyncedby-in-domainyaml)
+     - [C1-006 — listener.producer references wrong module](#c1-006--listenerproducer-references-wrong-module)
+     - [C1-007 — readModel field not covered by any UPSERT event](#c1-007--readmodel-field-not-covered-by-any-upsert-event)
    - [C2 — Behavior gaps](#c2--behavior-gaps)
+     - [C2-001 — Transition with no endpoint or listener](#c2-001--transition-with-no-endpoint-or-listener)
+     - [C2-002 — Listener useCase without REST endpoint](#c2-002--c2-003--completeness-checks-info--warning)
+     - [C2-004 — Trigger references non-existent transition method](#c2-004--trigger-references-non-existent-transition-method)
+     - [C2-005 — Transition without a Domain Event](#c2-005--transition-without-a-domain-event-info)
+     - [C2-006 — useCase collision between endpoints and listeners](#c2-006--usecase-name-collision-between-endpoints-and-listeners)
+     - [C2-007 — FindAll useCase with incorrect plural form](#c2-007--findall-usecase-with-incorrect-plural-form)
+     - [C2-008 — Event with invalid lifecycle value](#c2-008--event-with-invalid-lifecycle-value)
+     - [C2-009 — Lifecycle value incompatible with entity configuration](#c2-009--lifecycle-value-incompatible-with-entity-configuration)
+     - [C2-010 — Lifecycle event field not found in root entity](#c2-010--lifecycle-event-field-not-found-in-root-entity)
+     - [C2-011 — Endpoint useCase not resolvable to any aggregate](#c2-011--endpoint-usecase-not-resolvable-to-any-aggregate)
    - [C3 — Cross-reference integrity](#c3--cross-reference-integrity)
+     - [C3-001 — Cross-aggregate reference without a port or listener](#c3-001--cross-aggregate-reference-without-a-port-or-listener)
+     - [C3-002 — Port target missing domain.yaml](#c3-002--port-target-missing-domainyaml)
+     - [C3-003 — Port calls undeclared endpoint](#c3-003--port-calls-undeclared-endpoint)
+     - [C3-005 — Bidirectional sync coupling](#c3-005--bidirectional-sync-coupling)
+     - [C3-006 — system.yaml sync call without matching port](#c3-006--systemyaml-sync-call-without-matching-port)
+     - [C3-007 — Cross-module useCase name collision](#c3-007--cross-module-usecase-name-collision-bean-conflict)
    - [C4 — Audit & traceability](#c4--audit--traceability)
+     - [C4-001 — Child entity deletable without audit trail](#c4-001--child-entity-deletable-without-audit-trail)
+     - [C4-002 — Critical root entity without audit](#c4-002--critical-root-entity-without-audit)
+     - [C4-003 — External data stored as unstructured String](#c4-003--external-data-stored-as-unstructured-string)
+     - [C4-004 — readOnly field not surfaced in any event](#c4-004--readonly-field-not-surfaced-in-any-event)
 6. [Score calculation](#6-score-calculation)
 7. [Report output](#7-report-output)
 8. [Practical examples with real findings](#8-practical-examples-with-real-findings)
@@ -130,7 +182,7 @@ All fields are optional except `modules[].name`. The evaluator gracefully handle
 
 These rules evaluate **only** `system.yaml`. For the domain-level criteria applied when using `--domain`, see [section 5](#5-domain-evaluation-criteria-c1c4----domain).
 
-The evaluator runs **5 rule groups (S1–S5)** with a total of **20 rules** across three severity levels:
+The evaluator runs **5 rule groups (S1–S5)** with a total of **26 rules** across three severity levels:
 
 | Severity | Symbol | Affects score | Description |
 |----------|--------|--------------|-------------|
@@ -149,7 +201,7 @@ Verifies that all modules declared in `modules[]` have defined responsibilities 
 | S1-001 | 🔴 error | Module referenced in `integrations` but not declared in `modules[]` |
 | S1-002 | 🔴 error | Module with no responsibilities — no exposes, no events produced or consumed |
 | S1-003 | 🟡 warning | Module without a `description` field |
-| S1-004 | 🟡 warning | Purely reactive module (only consumes events) not documented explicitly in its description |
+| S1-004 | � info | Purely reactive module (only consumes events) not documented explicitly in its description |
 
 #### S1-001 — Undeclared module referenced in integrations
 
@@ -271,6 +323,7 @@ Verifies that all synchronous dependencies declared in `integrations.sync` refer
 | S3-003 | 🟡 warning | Bidirectional sync coupling — A calls B and B calls A |
 | S3-004 | 🟡 warning | Module with more than 3 distinct outgoing sync dependencies |
 | S3-005 | 🔵 info | Module consulted synchronously but emits no events when its state changes |
+| S3-006 | 🔴 error | Same `port:` name declared by two or more different caller modules — causes `ConflictingBeanDefinitionException` |
 
 #### S3-001 — Sync call to module without endpoints
 
@@ -325,6 +378,36 @@ A module calling more than 3 distinct modules synchronously is tightly coupled a
 When other modules depend synchronously on a module but that module never publishes events, downstream consumers have no way to react to its state changes.
 
 **Message:** `[S3-005] Módulo 'movies' es consultado síncronamente pero no emite ningún evento cuando su estado cambia`
+
+#### S3-006 — Duplicate port name across caller modules
+
+When two or more modules declare a sync integration with **the same `port:` value**, each module generates a `{PortName}FeignAdapter.java` bean. Since `@Component` registers beans by class name without a module namespace, Spring throws `ConflictingBeanDefinitionException` at startup.
+
+```yaml
+# ❌ ERROR — both modules use the same port name 'CustomerService'
+sync:
+  - caller: orders
+    calls: customers
+    port: CustomerService   # generates CustomerServiceFeignAdapter in orders
+  - caller: deliveries
+    calls: customers
+    port: CustomerService   # generates CustomerServiceFeignAdapter in deliveries → collision
+```
+
+**Message:** `[S3-006] Port 'CustomerService' es usado por módulos distintos (orders, deliveries). Esto causa ConflictingBeanDefinitionException en Spring. Cada módulo debe usar un nombre propio: ej. OrdersCustomerService, DeliveriesCustomerService`
+
+**Fix:** Give each module a unique, context-specific port name:
+
+```yaml
+sync:
+  - caller: orders
+    calls: customers
+    port: OrderCustomerService      # ✅ generates OrderCustomerServiceFeignAdapter in orders
+
+  - caller: deliveries
+    calls: customers
+    port: DeliveryCustomerService   # ✅ generates DeliveryCustomerServiceFeignAdapter in deliveries
+```
 
 ---
 
@@ -452,7 +535,7 @@ When `--domain` is passed, the evaluator additionally loads a `domain.yaml` file
 - Modules without a `domain.yaml` are silently skipped — their rules will not fire
 - Domain findings appear in the **Dominio** tab of the HTML report
 
-Domain rules are organized in **4 rule groups (C1–C4)** with a total of **19 rules**:
+Domain rules are organized in **4 rule groups (C1–C4)** with a total of **29 rules**:
 
 | Severity | Symbol | Affects score | Description |
 |----------|--------|--------------|-------------|
@@ -468,12 +551,13 @@ Verifies that the producer → consumer graph is coherent at the code level: eve
 
 | Rule | Severity | Description |
 |------|----------|-------------|
-| C1-001 | 🟡 warning | Domain event produced by a module but has no consumers registered in `system.yaml` |
+| C1-001 | � info | Domain event produced by a module but has no consumers registered in `system.yaml` |
 | C1-002 | 🔴 error | `listeners[]` references an event that no domain module produces |
 | C1-003 | 🔴 error | Field in `listener.fields` does not exist in the producer event |
 | C1-004 | 🔴 error | Field exists in both producer and consumer but with incompatible types |
 | C1-005 | 🔴 error | `system.yaml` registers a module as consumer but that module has no matching `listener` or `readModels[].syncedBy` |
 | C1-006 | 🔴 error | `listener.producer` references the wrong producer module |
+| C1-007 | 🟡 warning | Field declared in a `readModels[]` entry is not covered by any UPSERT event from the source module |
 
 #### C1-001 — Produced event with no consumers in system.yaml
 
@@ -482,7 +566,7 @@ Verifies that the producer → consumer graph is coherent at the code level: eve
 aggregates:
   - name: Order
     events:
-      - name: OrderConfirmed   # ⚠️ WARNING — not registered in system.yaml
+      - name: OrderConfirmed   # 🔵 INFO — not registered in system.yaml
         fields: [...]
 ```
 
@@ -576,6 +660,35 @@ listeners:
 
 **Fix:** Update `producer:` to match the actual producing module.
 
+#### C1-007 — readModel field not covered by any UPSERT event
+
+When a `readModels[]` entry declares a field that is not included in any event with `action: UPSERT` from the source module's `syncedBy`, that field will always be `null` after synchronization because no event ever carries a value for it.
+
+```yaml
+# orders/domain.yaml
+readModels:
+  - name: ProductReadModel
+    source:
+      module: products
+    tableName: rm_products
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: stock         # ⚠️ WARNING — no UPSERT event from 'products' includes 'stock'
+        type: Integer
+    syncedBy:
+      - event: ProductCreatedEvent
+        action: UPSERT
+      - event: ProductUpdatedEvent
+        action: UPSERT
+```
+
+**Message:** `[C1-007] ReadModel 'ProductReadModel' tiene campo 'stock' que no aparece en ningún evento UPSERT de syncedBy`
+
+**Fix:** Add `stock` to the `fields[]` of `ProductCreatedEvent` and `ProductUpdatedEvent` in `products/domain.yaml`, or remove `stock` from the readModel if it is not needed.
+
 ---
 
 ### C2 — Behavior gaps
@@ -589,6 +702,12 @@ Verifies that every transition method and every use case has a traceable activat
 | C2-003 | 🟡 warning | Value in a `*Type` enum with no traceable Kafka event as origin |
 | C2-004 | 🔴 error | Event `triggers[]` references a transition method that does not exist |
 | C2-005 | 🔵 info | Transition method without any associated Domain Event (no `triggers`) |
+| C2-006 | 🔴 error | Same `useCase` name declared in both `endpoints:` and `listeners:` in the same module |
+| C2-007 | 🔴 error | `FindAll` use case name uses incorrect plural form — generator will produce a scaffold instead of full implementation |
+| C2-008 | 🔴 error | Event declares `lifecycle:` with an invalid value (not `create`, `update`, `delete`, or `softDelete`) |
+| C2-009 | 🟡 warning | `lifecycle: softDelete` on entity without `hasSoftDelete: true`, or `lifecycle: delete` on entity with `hasSoftDelete: true` |
+| C2-010 | 🔴 error | Field declared in a `lifecycle` event does not exist in the root entity |
+| C2-011 | 🔴 error | Endpoint `useCase` cannot be resolved to any aggregate in the module — generator will assign wrong types |
 
 > **Note on C2-001:** Silenced automatically when the transition method already has an event `trigger` declared — the trigger itself is sufficient design evidence.
 
@@ -631,6 +750,151 @@ events:
 - `[C2-002]` — Listener `useCase` has no REST equivalent in the same module (info; acceptable when the module is purely event-driven)
 - `[C2-003]` — Value in a `*Type` enum (e.g., `PaymentType.BANK_TRANSFER`) has no Kafka event whose name or fields overlap — suggests the value originates from an external trigger not yet documented
 
+#### C2-006 — useCase name collision between endpoints and listeners
+
+When a `useCase` name appears in both `endpoints[].operations[]` and `listeners[]` in the same module, both generate a `{UseCase}Command.java` file. The endpoint version silently overwrites the listener version at generation time, leaving the listener with broken code.
+
+```yaml
+# ❌ ERROR — 'CreateOrder' is declared in both endpoints and listeners
+endpoints:
+  versions:
+    - version: v1
+      operations:
+        - useCase: CreateOrder        # → CreateOrderCommand.java (endpoint version)
+          method: POST
+          path: /orders
+
+listeners:
+  - event: CartCheckedOutEvent
+    useCase: CreateOrder              # ❌ also generates CreateOrderCommand.java → overwritten
+```
+
+**Message:** `[C2-006] UseCase 'CreateOrder' está declarado en endpoints: y en listeners: (evento 'CartCheckedOutEvent')`
+
+**Fix:** Rename the listener `useCase` to reflect its bounded context:
+
+```yaml
+listeners:
+  - event: CartCheckedOutEvent
+    useCase: InitializeOrder          # ✅ distinct name; no collision
+```
+
+#### C2-007 — FindAll useCase with incorrect plural form
+
+The generator recognizes `FindAll{Plural}` as the standard list query and produces the full paginated implementation. If the plural is wrong (e.g., a naive `s` suffix on an irregular noun), the generator creates an empty scaffold instead.
+
+```yaml
+# ❌ ERROR — 'FindAllCategorys' is incorrect English plural
+endpoints:
+  versions:
+    - version: v1
+      operations:
+        - useCase: FindAllCategorys   # ❌ should be FindAllCategories
+```
+
+**Message:** `[C2-007] UseCase 'FindAllCategorys' debería ser 'FindAllCategories' (plural correcto de 'Category')`
+
+**Fix:** Use the correct English plural:
+
+```yaml
+- useCase: FindAllCategories    # ✅ correct plural → generates full implementation
+- useCase: FindAllInventories   # ✅ correct for 'Inventory'
+- useCase: FindAllPolicies      # ✅ correct for 'Policy'
+```
+
+#### C2-008 — Event with invalid lifecycle value
+
+The `lifecycle:` property on a domain event only accepts `create`, `update`, `delete`, or `softDelete`. Any other value is silently ignored by the generator, leaving the event without auto-wiring.
+
+```yaml
+events:
+  - name: ProductArchivedEvent
+    lifecycle: archive   # ❌ ERROR — not a valid lifecycle value
+```
+
+**Message:** `[C2-008] Evento 'ProductArchivedEvent' tiene lifecycle: 'archive' que no es un valor válido`
+
+**Fix:** Use one of the valid values: `create`, `update`, `delete`, `softDelete`. If `archive` is a business transition, use `transitions:` with `triggers:` instead.
+
+#### C2-009 — Lifecycle value incompatible with entity configuration
+
+`lifecycle: softDelete` requires the root entity to have `hasSoftDelete: true`, and `lifecycle: delete` requires `hasSoftDelete` to be absent or `false`. Mixing these configurations generates code that either won't compile or creates an incorrect deletion mechanism.
+
+```yaml
+# ⚠️ WARNING — entity has no soft delete but event declares softDelete lifecycle
+entities:
+  - name: Product
+    isRoot: true
+    # hasSoftDelete: true is missing
+events:
+  - name: ProductDeactivatedEvent
+    lifecycle: softDelete   # ⚠️ WARNING — entity doesn't support soft delete
+```
+
+**Messages:**
+- `[C2-009] Evento 'ProductDeactivatedEvent' tiene lifecycle: 'softDelete' pero la entidad raíz 'Product' no tiene hasSoftDelete: true`
+- `[C2-009] Evento 'ProductDeletedEvent' tiene lifecycle: 'delete' pero la entidad raíz 'Product' tiene hasSoftDelete: true`
+
+**Fix:** Align the lifecycle value with the entity configuration:
+- Add `hasSoftDelete: true` to the entity, **or** change `lifecycle: softDelete` to `lifecycle: delete`
+
+#### C2-010 — Lifecycle event field not found in root entity
+
+Fields declared in a `lifecycle` event must exist on the root entity so the generator can resolve them automatically. Two exceptions apply: `{entityName}Id` (mapped to `aggregateId`) and any field ending in `At` with type `LocalDateTime` (auto-resolved to `LocalDateTime.now()`).
+
+```yaml
+entities:
+  - name: Product
+    isRoot: true
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+
+events:
+  - name: ProductCreatedEvent
+    lifecycle: create
+    fields:
+      - name: productId       # ✅ exception — maps to aggregateId
+        type: String
+      - name: name            # ✅ exists in entity
+        type: String
+      - name: createdAt       # ✅ exception — *At + LocalDateTime auto-resolved
+        type: LocalDateTime
+      - name: categoryCode    # ❌ ERROR — does not exist in Product entity
+        type: String
+```
+
+**Message:** `[C2-010] Evento 'ProductCreatedEvent' (lifecycle: create) tiene campo 'categoryCode' que no existe en la entidad raíz 'Product'`
+
+**Fix:** Remove `categoryCode` from the event fields, or add it as a field to the `Product` entity.
+
+#### C2-011 — Endpoint useCase not resolvable to any aggregate
+
+The generator resolves each `useCase` name to an aggregate to determine which `ResponseDto` and `CommandHandler` types to use. If the name cannot be matched via standard patterns (`Create{X}`, `Update{X}`, `Delete{X}`, `Get{X}`, `FindAll{Plural(X)}`) or fuzzy matching, the generator assigns the first aggregate in the module by default and produces code with incorrect types that won't compile.
+
+```yaml
+aggregates:
+  - name: Quote
+
+endpoints:
+  versions:
+    - version: v1
+      operations:
+        - useCase: CalculatePremium    # ⚠️ — 'Premium' doesn't match aggregate 'Quote'
+        - useCase: IssuePolicy         # ❌ ERROR — 'Policy' is not an aggregate in this module
+```
+
+**Message:** `[C2-011] UseCase 'IssuePolicy' no se resuelve a ningún agregado del módulo — se asignará al primero ('Quote') y generará código con tipos incorrectos`
+
+**Fix:** Ensure the useCase name contains the aggregate name (or a recognizable part of it):
+
+```yaml
+- useCase: CalculateQuotePremium    # ✅ contains 'Quote' — resolves correctly
+- useCase: CompleteQuote            # ✅ contains 'Quote'
+```
+
 ---
 
 ### C3 — Cross-reference integrity
@@ -639,7 +903,7 @@ Verifies that all declared dependencies between modules are consistent: cross-ag
 
 | Rule | Severity | Description |
 |------|----------|-------------|
-| C3-001 | 🟡 warning | Field with `reference.module=X` but no port or listener connecting to X |
+| C3-001 | � info | Field with `reference.module=X` but no port or listener connecting to X |
 | C3-002 | 🔴 error | `port.target` refers to an internal module with no `domain.yaml` loaded |
 | C3-003 | 🟡 warning | Port calls an endpoint not declared in the target module |
 | C3-004 | 🟡 warning | Sync dependency on a module that emits no Kafka events |
@@ -658,7 +922,7 @@ fields:
     type: String
     reference:
       aggregate: Customer
-      module: customers   # ⚠️ WARNING — no port or listener to 'customers'
+      module: customers   # 🔵 INFO — no port or listener to 'customers'
 ```
 
 **Message:** `[C3-001] Campo 'customerId' referencia módulo 'customers' pero no hay port ni listener que conecte con ese módulo`
@@ -890,7 +1154,7 @@ Running `eva evaluate system` on a cinema booking `system.yaml` with 7 modules a
 
 | Rule | Severity | Finding | Recommendation |
 |------|----------|---------|----------------|
-| S1-004 | 🟡 | `notifications` is purely reactive but description doesn't say so | Add "consumes events" to its description |
+| S1-004 | � | `notifications` is purely reactive but description doesn't say so | Add "consumes events" to its description |
 | S2-005 | 🟡 | `customers` consumes events but produces none | Intentional — accumulates loyalty points. Acceptable. |
 | S2-005 | 🟡 | `notifications` consumes events but produces none | Intentional — pure notification sink. Acceptable. |
 | S2-007 | 🔵 | 9 topics don't include the `cinema` prefix | Rename topics to `cinema.RESERVATION_CREATED`, etc. |
