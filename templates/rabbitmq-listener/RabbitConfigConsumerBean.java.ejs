@@ -1,13 +1,13 @@
-  @Value("${queues.<%= topicNameKebab %>}")
+  @Value("${queues.<%= topicKey %>}")
   private String <%= valueFieldName %>QueueName;
 
-  @Value("${routing-keys.<%= topicNameKebab %>}")
+  @Value("${routing-keys.<%= topicKey %>}")
   private String <%= valueFieldName %>RoutingKeyValue;
 
   @Bean
   public Queue <%= beanMethodName %>Queue() {
     return QueueBuilder.durable(<%= valueFieldName %>QueueName)
-        .withArgument("x-dead-letter-exchange", <%= moduleName %>ExchangeName + ".dlx")
+        .withArgument("x-dead-letter-exchange", <%= producerModule %>ExchangeName + ".dlx")
         .build();
   }
 
@@ -15,7 +15,7 @@
   public Binding <%= beanMethodName %>Binding() {
     return BindingBuilder
         .bind(<%= beanMethodName %>Queue())
-        .to(<%= moduleName %>Exchange())
+        .to(<%= producerModule %>Exchange())
         .with(<%= valueFieldName %>RoutingKeyValue);
   }
 
@@ -28,6 +28,6 @@
   public Binding <%= beanMethodName %>DlqBinding() {
     return BindingBuilder
         .bind(<%= beanMethodName %>Dlq())
-        .to(<%= moduleName %>DlxExchange())
+        .to(<%= producerModule %>DlxExchange())
         .with(<%= valueFieldName %>RoutingKeyValue);
   }

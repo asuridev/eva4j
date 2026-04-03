@@ -534,6 +534,126 @@ function injectImportIntoFile(content, importStatement) {
   }
 }
 
+/**
+ * Update RabbitMQConfig.java with consumer-side beans: producer exchange + queue + binding.
+ * Used by listeners and read-model consumers that need to declare infrastructure
+ * for binding to a remote producer's exchange.
+ *
+ * @param {string} projectDir - Project root
+ * @param {string} packagePath - Java package path (e.g. com/myapp)
+ * @param {Object} ctx - Consumer context
+ * @param {string} ctx.producerModule - Producer module name (camelCase, e.g. "orders")
+ * @param {string} ctx.topicKey - Kebab-case topic key (e.g. "order-confirmed")
+ * @param {string} ctx.beanMethodName - Bean method prefix (e.g. "orderConfirmedTopic")
+ * @param {string} ctx.valueFieldName - Field name prefix (e.g. "orderConfirmedTopic")
+ */
+async function updateRabbitMQConfigForConsumer(projectDir, packagePath, ctx) {
+  const configPath = path.join(
+    projectDir, 'src', 'main', 'java', packagePath,
+    'shared', 'infrastructure', 'configurations', 'rabbitmqConfig', 'RabbitMQConfig.java'
+  );
+
+  if (!(await fs.pathExists(configPath))) {
+    throw new Error('RabbitMQConfig.java not found. Please install RabbitMQ first using: eva4j add rabbitmq-client');
+  }
+
+  let content = await fs.readFile(configPath, 'utf-8');
+
+  // Skip if queue bean already exists
+  if (content.includes(`public Queue ${ctx.beanMethodName}Queue(`)) {
+    return;
+  }
+
+  const templatesDir = path.join(__dirname, '..', '..', 'templates', 'rabbitmq-listener');
+
+  // ── Producer exchange bean — emit only once per unique producer ─────────────
+  const exchangeBeanName = `${ctx.producerModule}Exchange`;
+  if (!content.includes(`public TopicExchange ${exchangeBeanName}(`)) {
+    const exchangeSnippet = await renderTemplate(
+      path.join(templatesDir, 'RabbitConfigConsumerExchange.java.ejs'),
+      { producerModule: ctx.producerModule }
+    );
+    const lastBrace = content.lastIndexOf('}');
+    if (lastBrace === -1) throw new Error('Could not find closing brace in RabbitMQConfig class');
+    content = content.slice(0, lastBrace) + '\n' + exchangeSnippet + '\n}\n';
+  }
+
+  // ── Queue + Binding beans — emit per consumer listener ─────────────────────
+  const queueBindingSnippet = await renderTemplate(
+    path.join(templatesDir, 'RabbitConfigConsumerBean.java.ejs'),
+    {
+      topicKey: ctx.topicKey,
+      beanMethodName: ctx.beanMethodName,
+      valueFieldName: ctx.valueFieldName,
+      producerModule: ctx.producerModule
+    }
+  );
+
+  const lastBraceIndex = content.lastIndexOf('}');
+  if (lastBraceIndex === -1) throw new Error('Could not find closing brace in RabbitMQConfig class');
+  content = content.slice(0, lastBraceIndex) + '\n' + queueBindingSnippet + '\n}\n';
+
+  await fs.writeFile(configPath, content, 'utf-8');
+}
+
+/**
+ * Update rabbitmq.yaml for consumer-side: adds exchange (producer), queue, and routing-key entries.
+ *
+ * @param {string} projectDir - Project root
+ * @param {string} topicKey - Kebab-case key (e.g. "order-confirmed")
+ * @param {string} queueName - Full queue name (e.g. "notifications.order-confirmed")
+ * @param {string} producerModule - Producer module name (e.g. "orders")
+ * @param {string} exchangeName - Exchange name (e.g. "orders.events")
+ * @param {string} routingKey - Routing key (e.g. "order.confirmed")
+ */
+async function updateRabbitMQYmlForConsumer(projectDir, topicKey, queueName, producerModule, exchangeName, routingKey) {
+  const environments = ['local', 'develop', 'test', 'production'];
+
+  for (const env of environments) {
+    const rabbitYmlPath = path.join(projectDir, 'src', 'main', 'resources', 'parameters', env, 'rabbitmq.yaml');
+
+    if (!(await fs.pathExists(rabbitYmlPath))) {
+      continue;
+    }
+
+    const existingContent = await fs.readFile(rabbitYmlPath, 'utf8');
+    let rabbitContent = yaml.load(existingContent) || {};
+    let changed = false;
+
+    if (!rabbitContent.exchanges) rabbitContent.exchanges = {};
+    if (!rabbitContent.queues) rabbitContent.queues = {};
+    if (!rabbitContent['routing-keys']) rabbitContent['routing-keys'] = {};
+
+    // Producer exchange (once per unique producer)
+    if (!rabbitContent.exchanges[producerModule]) {
+      rabbitContent.exchanges[producerModule] = exchangeName;
+      changed = true;
+    }
+
+    // Queue
+    if (!rabbitContent.queues[topicKey]) {
+      rabbitContent.queues[topicKey] = queueName;
+      changed = true;
+    }
+
+    // Routing key
+    if (!rabbitContent['routing-keys'][topicKey]) {
+      rabbitContent['routing-keys'][topicKey] = routingKey;
+      changed = true;
+    }
+
+    if (changed) {
+      const yamlContent = yaml.dump(rabbitContent, {
+        indent: 2,
+        lineWidth: -1,
+        quotingType: '"',
+        forceQuotes: false
+      });
+      await fs.writeFile(rabbitYmlPath, yamlContent, 'utf8');
+    }
+  }
+}
+
 module.exports = generateRabbitMQEventCommand;
 module.exports.generateSingleRabbitEvent = generateSingleRabbitEvent;
 module.exports.buildRabbitEventContext = buildRabbitEventContext;
@@ -541,3 +661,5 @@ module.exports.updateRabbitMQYml = updateRabbitMQYml;
 module.exports.updateRabbitMQYmlQueue = updateRabbitMQYmlQueue;
 module.exports.createOrUpdateRabbitMessageBroker = createOrUpdateRabbitMessageBroker;
 module.exports.updateRabbitMQConfig = updateRabbitMQConfig;
+module.exports.updateRabbitMQConfigForConsumer = updateRabbitMQConfigForConsumer;
+module.exports.updateRabbitMQYmlForConsumer = updateRabbitMQYmlForConsumer;

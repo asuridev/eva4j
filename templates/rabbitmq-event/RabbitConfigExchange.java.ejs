@@ -5,3 +5,8 @@
   public TopicExchange <%= moduleName %>Exchange() {
     return new TopicExchange(<%= moduleName %>ExchangeName, true, false);
   }
+
+  @Bean
+  public TopicExchange <%= moduleName %>DlxExchange() {
+    return new TopicExchange(<%= moduleName %>ExchangeName + ".dlx", true, false);
+  }

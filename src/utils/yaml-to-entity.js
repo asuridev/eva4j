@@ -1077,8 +1077,8 @@ function parseListeners(domainData) {
     // Normalise: strip trailing 'Event' suffix for class naming, re-add it consistently
     const baseName = eventName.endsWith('Event') ? eventName.slice(0, -5) : eventName;
     const integrationEventClassName = `${baseName}IntegrationEvent`;
-    // e.g. PaymentApprovedKafkaListener
-    const listenerClassName = `${baseName}KafkaListener`;
+    // Generic suffix — broker-specific suffix applied in generate-entities.js
+    const listenerClassName = `${baseName}Listener`;
     const useCaseName = toPascalCase(listener.useCase);
     const commandClassName = `${useCaseName}Command`;
     const topic = listener.topic || null;

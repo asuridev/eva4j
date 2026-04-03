@@ -1,0 +1,12 @@
+  @Value("${exchanges.<%= producerModule %>}")
+  private String <%= producerModule %>ExchangeName;
+
+  @Bean
+  public TopicExchange <%= producerModule %>Exchange() {
+    return new TopicExchange(<%= producerModule %>ExchangeName, true, false);
+  }
+
+  @Bean
+  public TopicExchange <%= producerModule %>DlxExchange() {
+    return new TopicExchange(<%= producerModule %>ExchangeName + ".dlx", true, false);
+  }

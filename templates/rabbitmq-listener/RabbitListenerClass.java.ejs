@@ -43,7 +43,7 @@ public class <%= listenerClassName %> {
         this.objectMapper = objectMapper;
     }
 
-    @RabbitListener(queues = "${queues.<%= topicVariableName %>}")
+    @RabbitListener(queues = "<%= topicSpringProperty %>")
     public void handle(Message message, Channel channel) throws IOException {
         EventEnvelope<Map<String, Object>> event = objectMapper.readValue(
                 message.getBody(),

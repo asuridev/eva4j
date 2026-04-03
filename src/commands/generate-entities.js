@@ -15,7 +15,7 @@ const { generateFakeValue, initSeed } = require('../utils/fake-data');
 const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext, updateKafkaYml,
         generateEventRecord, createOrUpdateMessageBroker, updateDomainEventHandler } = require('./generate-kafka-event');
 const { generateSingleRabbitEvent, buildRabbitEventContext, updateRabbitMQYml, updateRabbitMQYmlQueue,
-        createOrUpdateRabbitMessageBroker } = require('./generate-rabbitmq-event');
+        createOrUpdateRabbitMessageBroker, updateRabbitMQConfigForConsumer, updateRabbitMQYmlForConsumer } = require('./generate-rabbitmq-event');
 
 // Maximum depth for recursive relationship traversal
 const MAX_DEPTH = 5;
@@ -768,10 +768,12 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           const topicRaw = listener.topic;
           const topicSuffix = topicRaw.includes('.') ? topicRaw.slice(topicRaw.lastIndexOf('.') + 1) : topicRaw;
           const topicKey = topicSuffix.toLowerCase().replace(/_/g, '-');
+          const kafkaListenerClassName = `${listener.baseName}KafkaListener`;
           const listenerContext = {
             packageName,
             moduleName,
             ...listener,
+            listenerClassName: kafkaListenerClassName,
             topicConstant: topicRaw,
             topicSpringProperty: `\${topics.${topicKey}}`,
             topicVariableName: toCamelCase(topicSuffix.toLowerCase())
@@ -817,7 +819,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           // If the file is currently a mock Spring listener, force overwrite with the real Kafka impl
           const kafkaListenerPath = path.join(
             moduleBasePath, 'infrastructure', 'kafkaListener',
-            `${listener.listenerClassName}.java`
+            `${kafkaListenerClassName}.java`
           );
           let kafkaListenerWriteOpts = writeOptions;
           if (await fs.pathExists(kafkaListenerPath)) {
@@ -834,8 +836,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           );
           generatedFiles.push({
             type: 'Kafka Listener',
-            name: listener.listenerClassName,
-            path: `${moduleName}/infrastructure/kafkaListener/${listener.listenerClassName}.java`
+            name: kafkaListenerClassName,
+            path: `${moduleName}/infrastructure/kafkaListener/${kafkaListenerClassName}.java`
           });
 
           // 3. Register topic in kafka.yaml (all environments)
@@ -892,10 +894,12 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           const topicRaw = listener.topic;
           const topicSuffix = topicRaw.includes('.') ? topicRaw.slice(topicRaw.lastIndexOf('.') + 1) : topicRaw;
           const topicKey = topicSuffix.toLowerCase().replace(/_/g, '-');
+          const mockListenerClassName = `${listener.baseName}KafkaListener`;
           const listenerContext = {
             packageName,
             moduleName,
             ...listener,
+            listenerClassName: mockListenerClassName,
             topicConstant: topicRaw,
             topicSpringProperty: `\${topics.${topicKey}}`,
             topicVariableName: toCamelCase(topicSuffix.toLowerCase())
@@ -924,14 +928,14 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           generatedFiles.push({ type: 'Listener Integration Event', name: listener.integrationEventClassName, path: `${moduleName}/application/events/${listener.integrationEventClassName}.java` });
 
           // 2. Spring @EventListener class (mock — same file path as Kafka listener)
-          const listenerPath = path.join(moduleBasePath, 'infrastructure', 'kafkaListener', `${listener.listenerClassName}.java`);
+          const listenerPath = path.join(moduleBasePath, 'infrastructure', 'kafkaListener', `${mockListenerClassName}.java`);
           await renderAndWrite(
             path.join(__dirname, '..', '..', 'templates', 'mock', 'SpringEventListener.java.ejs'),
             listenerPath,
             listenerContext,
             { ...writeOptions, force: true }
           );
-          generatedFiles.push({ type: 'Spring Listener (mock)', name: listener.listenerClassName, path: `${moduleName}/infrastructure/kafkaListener/${listener.listenerClassName}.java` });
+          generatedFiles.push({ type: 'Spring Listener (mock)', name: mockListenerClassName, path: `${moduleName}/infrastructure/kafkaListener/${mockListenerClassName}.java` });
 
           // 3. NO kafka.yaml update in mock mode
 
@@ -968,12 +972,15 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           const topicRaw = listener.topic;
           const topicSuffix = topicRaw.includes('.') ? topicRaw.slice(topicRaw.lastIndexOf('.') + 1) : topicRaw;
           const topicKey = topicSuffix.toLowerCase().replace(/_/g, '-');
+          const rabbitListenerClassName = `${listener.baseName}RabbitListener`;
+          const consumerTopicKey = `${moduleName}-${topicKey}`;
           const listenerContext = {
             packageName,
             moduleName,
             ...listener,
+            listenerClassName: rabbitListenerClassName,
             topicConstant: topicRaw,
-            topicSpringProperty: `\${queues.${topicKey}}`,
+            topicSpringProperty: `\${queues.${consumerTopicKey}}`,
             topicVariableName: toCamelCase(topicSuffix.toLowerCase())
           };
 
@@ -1016,7 +1023,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           // 2. RabbitMQ listener class
           const rabbitListenerPath = path.join(
             moduleBasePath, 'infrastructure', 'rabbitListener',
-            `${listener.listenerClassName}.java`
+            `${rabbitListenerClassName}.java`
           );
           let rabbitListenerWriteOpts = writeOptions;
           if (await fs.pathExists(rabbitListenerPath)) {
@@ -1033,12 +1040,28 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           );
           generatedFiles.push({
             type: 'RabbitMQ Listener',
-            name: listener.listenerClassName,
-            path: `${moduleName}/infrastructure/rabbitListener/${listener.listenerClassName}.java`
+            name: rabbitListenerClassName,
+            path: `${moduleName}/infrastructure/rabbitListener/${rabbitListenerClassName}.java`
           });
 
-          // 3. Register queue in rabbitmq.yaml (all environments)
-          await updateRabbitMQYmlQueue(projectDir, topicKey, topicRaw);
+          // 3. Register consumer infrastructure in rabbitmq.yaml + RabbitMQConfig.java
+          // Use module-prefixed keys to avoid collision with producer-side in monolith mode
+          const producerModule = toCamelCase(listener.producer || moduleName);
+          const consumerExchangeName = `${producerModule}.events`;
+          const consumerRoutingKey = topicKey.replace(/-/g, '.');
+          const consumerQueueName = `${moduleName}.${topicKey}`;
+          const consumerBeanMethodName = `${toCamelCase(consumerTopicKey)}Topic`;
+
+          await updateRabbitMQYmlForConsumer(
+            projectDir, consumerTopicKey, consumerQueueName,
+            producerModule, consumerExchangeName, consumerRoutingKey
+          );
+          await updateRabbitMQConfigForConsumer(projectDir, packagePath, {
+            producerModule,
+            topicKey: consumerTopicKey,
+            beanMethodName: consumerBeanMethodName,
+            valueFieldName: consumerBeanMethodName
+          });
 
           // 4. Typed Command dispatched from the listener
           const commandPath = path.join(
@@ -1446,10 +1469,15 @@ async function generateEntitiesCommand(moduleName, options = {}) {
                 moduleBasePath, 'infrastructure', 'rabbitListener',
                 `${sync.listenerClassName}.java`
               );
+              const rmConsumerTopicKey = `${moduleName}-${sync.topicKey}`;
+              const rabbitListenerContext = {
+                ...listenerContext,
+                topicSpringProperty: `\${queues.${rmConsumerTopicKey}}`
+              };
               await renderAndWrite(
                 path.join(readModelTemplatesDir, 'ReadModelRabbitListener.java.ejs'),
                 rabbitListenerPath,
-                listenerContext,
+                rabbitListenerContext,
                 writeOptions
               );
               generatedFiles.push({
@@ -1458,8 +1486,24 @@ async function generateEntitiesCommand(moduleName, options = {}) {
                 path: `${moduleName}/infrastructure/rabbitListener/${sync.listenerClassName}.java`
               });
 
-              // Register queue in rabbitmq.yaml
-              await updateRabbitMQYmlQueue(projectDir, sync.topicKey, sync.topicConstant);
+              // Register consumer infrastructure in rabbitmq.yaml + RabbitMQConfig.java
+              // Use module-prefixed keys to avoid collision with producer-side in monolith mode
+              const rmProducerModule = toCamelCase(rm.sourceModule || moduleName);
+              const rmExchangeName = `${rmProducerModule}.events`;
+              const rmRoutingKey = sync.topicKey.replace(/-/g, '.');
+              const rmQueueName = `${moduleName}.${sync.topicKey}`;
+              const rmBeanMethodName = `${toCamelCase(rmConsumerTopicKey)}Topic`;
+
+              await updateRabbitMQYmlForConsumer(
+                projectDir, rmConsumerTopicKey, rmQueueName,
+                rmProducerModule, rmExchangeName, rmRoutingKey
+              );
+              await updateRabbitMQConfigForConsumer(projectDir, packagePath, {
+                producerModule: rmProducerModule,
+                topicKey: rmConsumerTopicKey,
+                beanMethodName: rmBeanMethodName,
+                valueFieldName: rmBeanMethodName
+              });
             }
           }
         }
