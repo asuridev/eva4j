@@ -350,7 +350,7 @@ readModels:
     source:                              # Trazabilidad al módulo fuente (OBLIGATORIO)
       module: products                   # Módulo fuente (kebab-case)
       aggregate: Product                 # Agregado fuente (PascalCase)
-    tableName: rm_products               # Tabla en BD (OBLIGATORIO, prefijo rm_)
+    tableName: rm_orders_products         # Tabla en BD (OBLIGATORIO, prefijo rm_{consumer}_{source})
     fields:                              # Campos proyectados — subconjunto del fuente
       - name: id
         type: String
@@ -372,7 +372,7 @@ readModels:
 ### Reglas
 
 - **`name:`** — PascalCase, **DEBE** terminar con `ReadModel`
-- **`tableName:`** — **DEBE** empezar con `rm_` (identificación visual en BD)
+- **`tableName:`** — **DEBE** seguir el patrón `rm_{consumerModule}_{sourceModule}` (ej: `rm_orders_products`) para evitar colisiones en monolitos
 - **`fields:`** — **DEBE** incluir un campo `id`
 - **`syncedBy:`** — **DEBE** tener al menos una entrada
 - **`source.module:`** — **NO PUEDE** ser el mismo módulo actual (cross-module exclusivamente)

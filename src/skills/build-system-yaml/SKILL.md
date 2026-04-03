@@ -343,7 +343,7 @@ Cuando `integrations.async[].consumers[]` tiene `readModel:` y el `module` es el
 1. Agrupar todos los eventos del mismo `readModel:` → una entrada `readModels:` con múltiples `syncedBy`
 2. `source.module` = el `producer` de esas integraciones async
 3. `source.aggregate` = derivar del nombre del readModel (ej: `ProductReadModel` → `Product`)
-4. `tableName` = `rm_` + snake_case del source module (ej: `rm_products`)
+4. `tableName` = `rm_` + consumer module + `_` + source module en snake_case (ej: `rm_orders_products`)
 5. `fields` = inferir del payload del evento fuente (incluir siempre `id`)
 6. `syncedBy[].action` = `UPSERT` para Created/Updated, `SOFT_DELETE` para Deactivated, `DELETE` para Deleted
 7. Si había una entrada `integrations.sync[]` al mismo módulo fuente → **no generar `ports:`** para esa llamada (el readModel la reemplaza)
