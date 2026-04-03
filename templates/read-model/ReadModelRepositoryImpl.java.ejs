@@ -38,11 +38,15 @@ public class <%= repositoryImplName %> implements <%= repositoryName %> {
 
     @Override
     public void upsert(<%= domainClassName %> readModel) {
-        <%= jpaEntityName %> entity = <%= jpaEntityName %>.builder()
-<% fields.forEach(field => { %>
-                .<%= field.name %>(readModel.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>())
+        <%= jpaEntityName %> entity = jpaRepository.findById(readModel.getId())
+                .orElseGet(() -> {
+                    <%= jpaEntityName %> newEntity = new <%= jpaEntityName %>();
+                    newEntity.setId(readModel.getId());
+                    return newEntity;
+                });
+<% fields.filter(f => f.name !== 'id').forEach(field => { %>
+        entity.set<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>(readModel.get<%= field.name.charAt(0).toUpperCase() + field.name.slice(1) %>());
 <% }); %>
-                .build();
         jpaRepository.save(entity);
     }
 

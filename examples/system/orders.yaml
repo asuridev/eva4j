@@ -82,7 +82,7 @@ readModels:
     source:
       module: product
       aggregate: Product
-    tableName: rm_products
+    tableName: rm_orders_products
     fields:
       - name: id
         type: String
@@ -102,7 +102,7 @@ readModels:
     source:
       module: customer
       aggregate: Customer
-    tableName: rm_customers
+    tableName: rm_orders_customers
     fields:
       - name: id
         type: String
