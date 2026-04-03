@@ -27,7 +27,7 @@ import java.util.Optional;
  * Repository implementation for the <%= domainClassName %> read model.
  * Maps between domain read model and JPA entity.
  */
-@Repository
+@Repository("<%= moduleName %>.<%= repositoryImplName %>")
 public class <%= repositoryImplName %> implements <%= repositoryName %> {
 
     private final <%= jpaRepositoryName %> jpaRepository;

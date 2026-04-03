@@ -2,10 +2,12 @@ package <%= packageName %>.<%= moduleName %>.infrastructure.database.repositorie
 
 import <%= packageName %>.<%= moduleName %>.infrastructure.database.entities.<%= jpaEntityName %>;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
 
 /**
  * Spring Data JPA repository for the <%= domainClassName %> read model.
  * Table: <%= tableName %>.
  */
+@Repository("<%= moduleName %>.<%= jpaRepositoryName %>")
 public interface <%= jpaRepositoryName %> extends JpaRepository<<%= jpaEntityName %>, String> {
 }

@@ -8,6 +8,7 @@ import <%= packageName %>.<%= moduleName %>.domain.models.readmodels.<%= domainC
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= repositoryName %>;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
 import <%= packageName %>.shared.domain.annotations.LogExceptions;
+import org.springframework.stereotype.Component;
 
 /**
  * Sync handler for the <%= domainClassName %> read model.
@@ -16,6 +17,7 @@ import <%= packageName %>.shared.domain.annotations.LogExceptions;
  * One method per syncedBy event — Kafka listeners delegate directly to these methods.
  */
 @ApplicationComponent
+@Component("<%= moduleName %>.<%= syncHandlerName %>")
 public class <%= syncHandlerName %> {
 
     private final <%= repositoryName %> repository;

@@ -80,6 +80,33 @@ aggregates:
           - DISCONTINUED
 
     events:
+      # ProductCreatedEvent — lifecycle: create → raise() in creation constructor
+      # Feeds readModels in consumer modules (e.g. orders/ProductReadModel)
+      - name: ProductCreatedEvent
+        lifecycle: create
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: categoryId
+            type: String
+
+      # ProductUpdatedEvent — lifecycle: update → raise() in update() method
+      - name: ProductUpdatedEvent
+        lifecycle: update
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: categoryId
+            type: String
+
       # ProductPublishedEvent — triggered by publish transition.
       # price: BigDecimal tests VO-unwrap: entity.price is Price, event expects BigDecimal
       # → generator should emit: this.getPrice().getAmount()

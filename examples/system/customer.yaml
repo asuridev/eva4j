@@ -1,0 +1,89 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# customer — Domain Model
+# ─────────────────────────────────────────────────────────────────────────────
+# Gestión de clientes. Emite eventos de ciclo de vida (create, update, delete)
+# para que otros módulos mantengan proyecciones locales via readModels.
+# ─────────────────────────────────────────────────────────────────────────────
+
+aggregates:
+  - name: Customer
+    entities:
+      - name: Customer
+        isRoot: true
+        tableName: customers
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: fullName
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Full name is required"
+          - name: email
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Email is required"
+              - type: Email
+                message: "Invalid email format"
+          - name: phone
+            type: String
+
+    events:
+      # CustomerCreatedEvent — lifecycle: create → raise() in creation constructor
+      - name: CustomerCreatedEvent
+        lifecycle: create
+        fields:
+          - name: customerId
+            type: String
+          - name: fullName
+            type: String
+          - name: email
+            type: String
+
+      # CustomerUpdatedEvent — lifecycle: update → raise() in update() method
+      - name: CustomerUpdatedEvent
+        lifecycle: update
+        fields:
+          - name: customerId
+            type: String
+          - name: fullName
+            type: String
+          - name: email
+            type: String
+
+      # CustomerDeletedEvent — lifecycle: delete → raise() in DeleteCommandHandler
+      - name: CustomerDeletedEvent
+        lifecycle: delete
+        fields:
+          - name: customerId
+            type: String
+          - name: deletedAt
+            type: LocalDateTime
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Declarative REST endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+endpoints:
+  basePath: /customers
+  versions:
+    - version: v1
+      operations:
+        - useCase: CreateCustomer
+          method: POST
+          path: /
+        - useCase: GetCustomer
+          method: GET
+          path: /{id}
+        - useCase: FindAllCustomers
+          method: GET
+          path: /
+        - useCase: UpdateCustomer
+          method: PUT
+          path: /{id}
+        - useCase: DeleteCustomer
+          method: DELETE
+          path: /{id}

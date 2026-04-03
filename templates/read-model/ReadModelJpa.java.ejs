@@ -34,7 +34,7 @@ import lombok.Setter;
  * <p>
  * No audit fields. The @Id mirrors the source entity's ID (not auto-generated).
  */
-@Entity
+@Entity(name = "<%= moduleName %>_<%= jpaEntityName %>")
 @Table(name = "<%= tableName %>")
 @Getter
 @Setter

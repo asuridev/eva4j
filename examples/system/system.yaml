@@ -93,6 +93,62 @@ modules:
         useCase: MarkNotificationRead
         description: "Marcar notificación como leída"
 
+  # ─────────────────────────────────────────────
+  # CLIENTES
+  # ─────────────────────────────────────────────
+
+  - name: customer
+    description: "Gestión de clientes. Emite lifecycle events para que otros módulos mantengan proyecciones locales."
+    exposes:
+      - method: POST
+        path: /customers
+        useCase: CreateCustomer
+        description: "Registrar un nuevo cliente"
+      - method: GET
+        path: /customers/{id}
+        useCase: GetCustomer
+        description: "Obtener detalle de un cliente"
+      - method: GET
+        path: /customers
+        useCase: FindAllCustomers
+        description: "Listar clientes con paginación"
+      - method: PUT
+        path: /customers/{id}
+        useCase: UpdateCustomer
+        description: "Actualizar datos de un cliente"
+      - method: DELETE
+        path: /customers/{id}
+        useCase: DeleteCustomer
+        description: "Eliminar un cliente"
+
+  # ─────────────────────────────────────────────
+  # ÓRDENES
+  # ─────────────────────────────────────────────
+
+  - name: orders
+    description: "Gestión de órdenes de compra. Mantiene readModels locales de Product y Customer para evitar llamadas HTTP síncronas."
+    exposes:
+      - method: POST
+        path: /orders
+        useCase: CreateOrder
+        description: "Crear una nueva orden"
+      - method: GET
+        path: /orders/{id}
+        useCase: GetOrder
+        description: "Obtener detalle de una orden"
+      - method: GET
+        path: /orders
+        useCase: FindAllOrders
+        description: "Listar órdenes con paginación"
+      - method: PUT
+        path: /orders/{id}
+        useCase: UpdateOrder
+        description: "Actualizar una orden"
+      - method: DELETE
+        path: /orders/{id}
+        useCase: DeleteOrder
+        description: "Eliminar una orden"
+
 integrations:
   async:
     # Producto publicado → notification envía alerta a usuarios suscritos
@@ -110,3 +166,27 @@ integrations:
       consumers:
         - module: notification
           useCase: SendProductDiscontinuedNotification
+
+    # ── Lifecycle events para readModels ──────────────────────────────────
+
+    # Product lifecycle → orders mantiene ProductReadModel
+    - event: ProductCreatedEvent
+      producer: product
+      topic: PRODUCT_CREATED
+
+    - event: ProductUpdatedEvent
+      producer: product
+      topic: PRODUCT_UPDATED
+
+    # Customer lifecycle → orders mantiene CustomerReadModel
+    - event: CustomerCreatedEvent
+      producer: customer
+      topic: CUSTOMER_CREATED
+
+    - event: CustomerUpdatedEvent
+      producer: customer
+      topic: CUSTOMER_UPDATED
+
+    - event: CustomerDeletedEvent
+      producer: customer
+      topic: CUSTOMER_DELETED

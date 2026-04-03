@@ -1,0 +1,119 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# orders — Domain Model
+# ─────────────────────────────────────────────────────────────────────────────
+# Gestión de órdenes de compra. Usa readModels para mantener proyecciones
+# locales de Product y Customer, eliminando dependencias HTTP síncronas.
+# ─────────────────────────────────────────────────────────────────────────────
+
+aggregates:
+  - name: Order
+    entities:
+      - name: Order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: orderNumber
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Order number is required"
+          - name: customerId
+            type: String
+            reference:
+              aggregate: Customer
+              module: customer
+            validations:
+              - type: NotBlank
+                message: "Customer ID is required"
+          - name: productId
+            type: String
+            reference:
+              aggregate: Product
+              module: product
+            validations:
+              - type: NotBlank
+                message: "Product ID is required"
+          - name: quantity
+            type: Integer
+            validations:
+              - type: Positive
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+            defaultValue: "0.00"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Declarative REST endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+endpoints:
+  basePath: /orders
+  versions:
+    - version: v1
+      operations:
+        - useCase: CreateOrder
+          method: POST
+          path: /
+        - useCase: GetOrder
+          method: GET
+          path: /{id}
+        - useCase: FindAllOrders
+          method: GET
+          path: /
+        - useCase: UpdateOrder
+          method: PUT
+          path: /{id}
+        - useCase: DeleteOrder
+          method: DELETE
+          path: /{id}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Read Models — proyecciones locales de datos de otros módulos
+# ─────────────────────────────────────────────────────────────────────────────
+# Cada readModel mantiene una tabla local (rm_*) sincronizada por eventos de
+# ciclo de vida del módulo productor. Elimina la necesidad de ports: (HTTP).
+# ─────────────────────────────────────────────────────────────────────────────
+readModels:
+  - name: ProductReadModel
+    source:
+      module: product
+      aggregate: Product
+    tableName: rm_products
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+      - name: categoryId
+        type: String
+    syncedBy:
+      - event: ProductCreatedEvent
+        action: UPSERT
+      - event: ProductUpdatedEvent
+        action: UPSERT
+
+  - name: CustomerReadModel
+    source:
+      module: customer
+      aggregate: Customer
+    tableName: rm_customers
+    fields:
+      - name: id
+        type: String
+      - name: fullName
+        type: String
+      - name: email
+        type: String
+    syncedBy:
+      - event: CustomerCreatedEvent
+        action: UPSERT
+      - event: CustomerUpdatedEvent
+        action: UPSERT
+      - event: CustomerDeletedEvent
+        action: DELETE

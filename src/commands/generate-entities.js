@@ -1292,7 +1292,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
     // ── Generate Read Models (local projections of external data) ────────────
     if (readModels && readModels.length > 0) {
-      if (broker === 'kafka' || broker === 'mock') {
+      if (broker === 'kafka' || broker === 'rabbitmq' || broker === 'mock') {
         spinner.start(`Generating ${readModels.length} read model(s)...`);
 
         const readModelTemplatesDir = path.join(__dirname, '..', '..', 'templates', 'read-model');
