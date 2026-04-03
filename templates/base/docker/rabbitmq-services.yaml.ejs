@@ -1,0 +1,12 @@
+  rabbitmq:
+    image: rabbitmq:<%= rabbitmqVersion %>
+    container_name: <%= artifactId %>-rabbitmq
+    ports:
+      - "5672:5672"       # AMQP protocol
+      - "15672:15672"     # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_VHOST: /
+    networks:
+      - <%= artifactId %>-network

@@ -1,0 +1,35 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.rabbitmqMessageBroker;
+
+import <%= packageName %>.<%= moduleName %>.application.events.<%= eventClassName %>;
+import <%= packageName %>.<%= moduleName %>.application.ports.MessageBroker;
+import <%= packageName %>.shared.infrastructure.eventEnvelope.EventEnvelope;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import org.slf4j.MDC;
+
+@Component("<%= moduleCamelCase %>RabbitMessageBroker")
+public class <%= modulePascalCase %>RabbitMessageBroker implements MessageBroker {
+
+  @Value("${exchanges.<%= moduleName %>}")
+  private String exchange;
+
+  @Value("${routing-keys.<%= topicNameKebab %>}")
+  private String <%= topicNameKebab.replace(/-/g, '') %>RoutingKey;
+
+  private final RabbitTemplate rabbitTemplate;
+
+  public <%= modulePascalCase %>RabbitMessageBroker(RabbitTemplate rabbitTemplate) {
+    this.rabbitTemplate = rabbitTemplate;
+  }
+
+  @Override
+  public void publish<%= eventClassName %>(<%= eventClassName %> event) {
+    EventEnvelope<<%= eventClassName %>> envelope = EventEnvelope.of(
+      <%= topicNameKebab.replace(/-/g, '') %>RoutingKey,
+      event,
+      MDC.get("correlationId")
+    );
+    rabbitTemplate.convertAndSend(exchange, <%= topicNameKebab.replace(/-/g, '') %>RoutingKey, envelope);
+  }
+}

@@ -1,0 +1,7 @@
+  @Value("${exchanges.<%= moduleName %>}")
+  private String <%= moduleName %>ExchangeName;
+
+  @Bean
+  public TopicExchange <%= moduleName %>Exchange() {
+    return new TopicExchange(<%= moduleName %>ExchangeName, true, false);
+  }

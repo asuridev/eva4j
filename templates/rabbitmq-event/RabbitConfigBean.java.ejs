@@ -1,0 +1,20 @@
+  @Value("${queues.<%= topicNameKebab %>}")
+  private String <%= valueFieldName %>QueueName;
+
+  @Value("${routing-keys.<%= topicNameKebab %>}")
+  private String <%= valueFieldName %>RoutingKeyValue;
+
+  @Bean
+  public Queue <%= beanMethodName %>Queue() {
+    return QueueBuilder.durable(<%= valueFieldName %>QueueName)
+        .withArgument("x-dead-letter-exchange", <%= moduleName %>ExchangeName + ".dlx")
+        .build();
+  }
+
+  @Bean
+  public Binding <%= beanMethodName %>Binding() {
+    return BindingBuilder
+        .bind(<%= beanMethodName %>Queue())
+        .to(<%= moduleName %>Exchange())
+        .with(<%= valueFieldName %>RoutingKeyValue);
+  }

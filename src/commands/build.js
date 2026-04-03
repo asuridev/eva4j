@@ -12,6 +12,7 @@ const SharedGenerator = require('../generators/shared-generator');
 const { renderAndWrite } = require('../utils/template-engine');
 const addModuleCommand = require('./add-module');
 const addKafkaClientCommand = require('./add-kafka-client');
+const addRabbitMQClientCommand = require('./add-rabbitmq-client');
 const generateEntitiesCommand = require('./generate-entities');
 const { generateUnifiedPostmanCollection } = require('../generators/postman-generator');
 
@@ -244,7 +245,16 @@ async function swapToH2(projectDir, packageName, configManager) {
   if (await fs.pathExists(kafkaConfigPath)) {
     backups.kafkaConfig = { path: kafkaConfigPath, content: await fs.readFile(kafkaConfigPath, 'utf-8') };
   }
-  // When Kafka is not installed, omit the key entirely — restoreFromH2() iterates
+
+  // ── RabbitMQConfig.java — backup so it can be restored later ──────────────
+  const rabbitConfigPath = path.join(
+    projectDir, 'src', 'main', 'java', packagePath,
+    'shared', 'infrastructure', 'configurations', 'rabbitmqConfig', 'RabbitMQConfig.java'
+  );
+  if (await fs.pathExists(rabbitConfigPath)) {
+    backups.rabbitConfig = { path: rabbitConfigPath, content: await fs.readFile(rabbitConfigPath, 'utf-8') };
+  }
+  // When broker is not installed, omit the key entirely — restoreFromH2() iterates
   // Object.values(backups) and would crash trying to destructure a null entry.
 
   // Persist backups BEFORE writing any file so a crash mid-swap is recoverable
@@ -267,6 +277,11 @@ async function swapToH2(projectDir, packageName, configManager) {
       /\n?[ \t]*\/\/ Kafka\n[ \t]*implementation 'org\.springframework\.kafka:spring-kafka'\n[ \t]*testImplementation 'org\.springframework\.kafka:spring-kafka-test'\n\n?[ \t]*/,
       '\n\t'
     );
+    // Remove spring-amqp dependencies block when RabbitMQ is installed
+    swapped = swapped.replace(
+      /\n?[ \t]*\/\/ RabbitMQ\n[ \t]*implementation 'org\.springframework\.boot:spring-boot-starter-amqp'\n[ \t]*testImplementation 'org\.springframework\.amqp:spring-rabbit-test'\n\n?[ \t]*/,
+      '\n\t'
+    );
     await fs.writeFile(buildGradlePath, swapped, 'utf-8');
   }
 
@@ -278,11 +293,16 @@ async function swapToH2(projectDir, packageName, configManager) {
     await fs.remove(kafkaConfigPath);
   }
 
+  // ── Remove RabbitMQConfig.java (restored from backup on eva build) ────────
+  if (backups.rabbitConfig) {
+    await fs.remove(rabbitConfigPath);
+  }
+
   return backups;
 }
 
 /**
- * Backup and swap ONLY the broker layer (Kafka → Spring Event bus).
+ * Backup and swap ONLY the broker layer (Kafka/RabbitMQ → Spring Event bus).
  * Database config (db.yaml) and SecurityConfig.java are left untouched.
  * Persists backups to .eva4j.json with _mockOnlyBroker = true.
  */
@@ -305,13 +325,27 @@ async function swapBrokerOnly(projectDir, packageName, configManager) {
     backups.kafkaConfig = { path: kafkaConfigPath, content: await fs.readFile(kafkaConfigPath, 'utf-8') };
   }
 
+  // ── RabbitMQConfig.java ───────────────────────────────────────────────────
+  const rabbitConfigPath = path.join(
+    projectDir, 'src', 'main', 'java', packagePath,
+    'shared', 'infrastructure', 'configurations', 'rabbitmqConfig', 'RabbitMQConfig.java'
+  );
+  if (await fs.pathExists(rabbitConfigPath)) {
+    backups.rabbitConfig = { path: rabbitConfigPath, content: await fs.readFile(rabbitConfigPath, 'utf-8') };
+  }
+
   // Persist backups BEFORE writing any file so a crash mid-swap is recoverable
   await configManager.saveMockBackup(backups, { onlyBroker: true });
 
   // ── Remove spring-kafka from build.gradle (keep existing DB driver line) ──
   if (backups.buildGradle) {
-    const swapped = backups.buildGradle.content.replace(
+    let swapped = backups.buildGradle.content.replace(
       /\n?[ \t]*\/\/ Kafka\n[ \t]*implementation 'org\.springframework\.kafka:spring-kafka'\n[ \t]*testImplementation 'org\.springframework\.kafka:spring-kafka-test'\n\n?[ \t]*/,
+      '\n\t'
+    );
+    // Remove spring-amqp dependencies block when RabbitMQ is installed
+    swapped = swapped.replace(
+      /\n?[ \t]*\/\/ RabbitMQ\n[ \t]*implementation 'org\.springframework\.boot:spring-boot-starter-amqp'\n[ \t]*testImplementation 'org\.springframework\.amqp:spring-rabbit-test'\n\n?[ \t]*/,
       '\n\t'
     );
     await fs.writeFile(buildGradlePath, swapped, 'utf-8');
@@ -320,6 +354,11 @@ async function swapBrokerOnly(projectDir, packageName, configManager) {
   // ── Remove KafkaConfig.java (restored from backup on eva build) ───────────
   if (backups.kafkaConfig) {
     await fs.remove(kafkaConfigPath);
+  }
+
+  // ── Remove RabbitMQConfig.java (restored from backup on eva build) ────────
+  if (backups.rabbitConfig) {
+    await fs.remove(rabbitConfigPath);
   }
 
   return backups;
@@ -423,18 +462,24 @@ async function buildCommand(options = {}) {
 
       const backups = await swapBrokerOnly(projectDir, pkgName, configManager);
       const hasKafkaBackup = !!backups.kafkaConfig;
+      const hasRabbitBackup = !!backups.rabbitConfig;
+      const hasBrokerBackup = hasKafkaBackup || hasRabbitBackup;
       console.log(chalk.green(`  ✅ ${Object.keys(backups).length} file(s) backed up and replaced`));
       if (hasKafkaBackup) {
         console.log(chalk.green('  ✅ KafkaConfig.java removed (Spring Events will be used instead)'));
         console.log(chalk.green('  ✅ spring-kafka dependencies removed from build.gradle'));
       }
+      if (hasRabbitBackup) {
+        console.log(chalk.green('  ✅ RabbitMQConfig.java removed (Spring Events will be used instead)'));
+        console.log(chalk.green('  ✅ spring-amqp dependencies removed from build.gradle'));
+      }
       console.log(chalk.gray('     Backup saved to .eva4j.json — will be restored on next eva build\n'));
 
-      // ── Regenerate broker layer if system.yaml exists and Kafka was installed
+      // ── Regenerate broker layer if system.yaml exists and broker was installed
       const systemDirBo = path.join(projectDir, 'system');
       const systemYamlPathBo = path.join(systemDirBo, 'system.yaml');
 
-      if (hasKafkaBackup && (await fs.pathExists(systemYamlPathBo))) {
+      if (hasBrokerBackup && (await fs.pathExists(systemYamlPathBo))) {
         let systemConfigBo;
         try {
           const content = await fs.readFile(systemYamlPathBo, 'utf-8');
@@ -475,7 +520,7 @@ async function buildCommand(options = {}) {
             await generateEntitiesCommand(mod.name, { force: false, brokerMode: 'mock' });
           }
         }
-      } else if (hasKafkaBackup) {
+      } else if (hasBrokerBackup) {
         console.log(chalk.yellow('  ℹ️  No system/system.yaml found — broker files must be regenerated manually.'));
         console.log(chalk.yellow('     Run: eva g entities <module> (with --force if needed)'));
       }
@@ -495,18 +540,24 @@ async function buildCommand(options = {}) {
 
     const backups = await swapToH2(projectDir, pkgName, configManager);
     const hasKafkaBackup = !!backups.kafkaConfig;
+    const hasRabbitBackup = !!backups.rabbitConfig;
+    const hasBrokerBackup = hasKafkaBackup || hasRabbitBackup;
     console.log(chalk.green(`  ✅ ${Object.keys(backups).length} file(s) backed up and replaced`));
     if (hasKafkaBackup) {
       console.log(chalk.green('  ✅ KafkaConfig.java removed (Spring Events will be used instead)'));
       console.log(chalk.green('  ✅ spring-kafka dependencies removed from build.gradle'));
     }
+    if (hasRabbitBackup) {
+      console.log(chalk.green('  ✅ RabbitMQConfig.java removed (Spring Events will be used instead)'));
+      console.log(chalk.green('  ✅ spring-amqp dependencies removed from build.gradle'));
+    }
     console.log(chalk.gray('     Backup saved to .eva4j.json — will be restored on next eva build\n'));
 
-    // ── Regenerate broker layer if system.yaml exists and Kafka was installed ──
+    // ── Regenerate broker layer if system.yaml exists and broker was installed ──
     const systemDir = path.join(projectDir, 'system');
     const systemYamlPath = path.join(systemDir, 'system.yaml');
 
-    if (hasKafkaBackup && (await fs.pathExists(systemYamlPath))) {
+    if (hasBrokerBackup && (await fs.pathExists(systemYamlPath))) {
       let systemConfig;
       try {
         const content = await fs.readFile(systemYamlPath, 'utf-8');
@@ -549,7 +600,7 @@ async function buildCommand(options = {}) {
           await generateEntitiesCommand(mod.name, { force: false, brokerMode: 'mock' });
         }
       }
-    } else if (hasKafkaBackup) {
+    } else if (hasBrokerBackup) {
       console.log(chalk.yellow('  ℹ️  No system/system.yaml found — broker files must be regenerated manually.'));
       console.log(chalk.yellow('     Run: eva g entities <module> (with --force if needed)'));
     }
@@ -633,8 +684,15 @@ async function buildCommand(options = {}) {
         console.log(chalk.cyan('  ➕ Installing kafka-client'));
         await addKafkaClientCommand();
       }
+    } else if (broker === 'rabbitmq') {
+      if (await configManager.featureExists('rabbitmq')) {
+        console.log(chalk.gray('  ⏭  rabbitmq-client — already installed, skipping'));
+      } else {
+        console.log(chalk.cyan('  ➕ Installing rabbitmq-client'));
+        await addRabbitMQClientCommand();
+      }
     } else {
-      console.log(chalk.yellow(`  ⚠️  Broker '${broker}' is not supported by eva build (only kafka is supported)`));
+      console.log(chalk.yellow(`  ⚠️  Broker '${broker}' is not supported by eva build (only kafka and rabbitmq are supported)`));
     }
 
     console.log();

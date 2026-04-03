@@ -6,11 +6,14 @@ const packageJson = require('../package.json');
 const createCommand = require('../src/commands/create');
 const addModuleCommand = require('../src/commands/add-module');
 const addKafkaClientCommand = require('../src/commands/add-kafka-client');
+const addRabbitMQClientCommand = require('../src/commands/add-rabbitmq-client');
 const addTemporalClientCommand = require('../src/commands/add-temporal-client');
 const generateUsecaseCommand = require('../src/commands/generate-usecase');
 const generateHttpExchangeCommand = require('../src/commands/generate-http-exchange');
 const generateKafkaEventCommand = require('../src/commands/generate-kafka-event');
 const generateKafkaListenerCommand = require('../src/commands/generate-kafka-listener');
+const generateRabbitMQEventCommand = require('../src/commands/generate-rabbitmq-event');
+const generateRabbitMQListenerCommand = require('../src/commands/generate-rabbitmq-listener');
 const generateResourceCommand = require('../src/commands/generate-resource');
 const generateRecordCommand = require('../src/commands/generate-record');
 const generateEntitiesCommand = require('../src/commands/generate-entities');
@@ -45,11 +48,21 @@ program
 // Add module command
 program
   .command('add <type> [name]')
-  .description('Add components to the project. Use: module [name], kafka-client, temporal-client')
+  .description('Add components to the project. Use: module [name], kafka-client, rabbitmq-client, temporal-client')
   .action(async (type, name, options) => {
     if (type === 'kafka-client') {
       try {
         await addKafkaClientCommand(options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (type === 'rabbitmq-client') {
+      try {
+        await addRabbitMQClientCommand(options);
       } catch (error) {
         console.error(chalk.red('Error:'), error.message);
         process.exit(1);
@@ -72,6 +85,7 @@ program
       console.log(chalk.yellow('\nUsage:'));
       console.log(chalk.gray('  eva4j add module [module-name]  # Interactive or with name'));
       console.log(chalk.gray('  eva4j add kafka-client'));
+      console.log(chalk.gray('  eva4j add rabbitmq-client'));
       console.log(chalk.gray('  eva4j add temporal-client'));
       console.log(chalk.gray('\nExamples:'));
       console.log(chalk.gray('  eva4j add module user'));
@@ -91,7 +105,7 @@ program
 program
   .command('generate <type> [module] [name]')
   .alias('g')
-  .description('Generate components (usecase, http-exchange, kafka-event, kafka-listener, resource, record)')
+  .description('Generate components (usecase, http-exchange, kafka-event, kafka-listener, rabbitmq-event, rabbitmq-listener, resource, record)')
   .option('--force', 'Overwrite files even if they were manually modified (bypasses safe mode)')
   .action(async (type, module, name, options) => {
     if (type === 'usecase') {
@@ -159,6 +173,42 @@ program
       }
       try {
         await generateKafkaListenerCommand(module, options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (type === 'rabbitmq-event') {
+      if (!module) {
+        console.error(chalk.red('❌ Module name is required'));
+        console.log(chalk.gray('Usage: eva4j generate rabbitmq-event <module> [event-name]'));
+        console.log(chalk.gray('Examples:'));
+        console.log(chalk.gray('  eva4j generate rabbitmq-event user user-created'));
+        console.log(chalk.gray('  eva4j generate rabbitmq-event user  # Will prompt for event name\n'));
+        process.exit(1);
+      }
+      try {
+        await generateRabbitMQEventCommand(module, name, options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (type === 'rabbitmq-listener') {
+      if (!module) {
+        console.error(chalk.red('❌ Module name is required'));
+        console.log(chalk.gray('Usage: eva4j generate rabbitmq-listener <module>'));
+        console.log(chalk.gray('Examples:'));
+        console.log(chalk.gray('  eva4j generate rabbitmq-listener user'));
+        console.log(chalk.gray('  eva4j g rabbitmq-listener order\n'));
+        process.exit(1);
+      }
+      try {
+        await generateRabbitMQListenerCommand(module, options);
       } catch (error) {
         console.error(chalk.red('Error:'), error.message);
         process.exit(1);
@@ -263,6 +313,8 @@ program
     console.log(chalk.gray('  eva4j generate http-exchange <port-name> <module>'));
     console.log(chalk.gray('  eva4j generate kafka-event <event-name> <module>'));
     console.log(chalk.gray('  eva4j generate kafka-listener <module>'));
+    console.log(chalk.gray('  eva4j generate rabbitmq-event <event-name> <module>'));
+    console.log(chalk.gray('  eva4j generate rabbitmq-listener <module>'));
     console.log(chalk.gray('  eva4j generate temporal-flow <module> [workflow-name]'));
     console.log(chalk.gray('  eva4j generate temporal-activity <module> [activity-name]'));
     console.log(chalk.gray('  eva4j generate resource <module>'));
@@ -273,6 +325,8 @@ program
     console.log(chalk.gray('  eva4j g http-exchange user-service-port user'));
     console.log(chalk.gray('  eva4j g kafka-event user-created user'));
     console.log(chalk.gray('  eva4j g kafka-listener user'));
+    console.log(chalk.gray('  eva4j g rabbitmq-event user-created user'));
+    console.log(chalk.gray('  eva4j g rabbitmq-listener user'));
     console.log(chalk.gray('  eva4j g temporal-flow order process-order'));
     console.log(chalk.gray('  eva4j g temporal-activity order register-order'));
     console.log(chalk.gray('  eva4j g resource product'));
@@ -359,6 +413,7 @@ program.on('--help', () => {
   console.log(chalk.gray('  $ eva4j add module user'));
   console.log(chalk.gray('  $ eva4j add module product'));
   console.log(chalk.gray('  $ eva4j add kafka-client'));
+  console.log(chalk.gray('  $ eva4j add rabbitmq-client'));
   console.log(chalk.gray('  $ eva4j generate usecase create-provider provider'));
   console.log(chalk.gray('  $ eva4j g usecase get-all-products product'));
   console.log(chalk.gray('  $ eva4j g http-exchange user-service-port user'));

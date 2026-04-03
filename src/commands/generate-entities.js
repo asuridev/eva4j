@@ -14,6 +14,8 @@ const ChecksumManager = require('../utils/checksum-manager');
 const { generateFakeValue, initSeed } = require('../utils/fake-data');
 const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext, updateKafkaYml,
         generateEventRecord, createOrUpdateMessageBroker, updateDomainEventHandler } = require('./generate-kafka-event');
+const { generateSingleRabbitEvent, buildRabbitEventContext, updateRabbitMQYml, updateRabbitMQYmlQueue,
+        createOrUpdateRabbitMessageBroker } = require('./generate-rabbitmq-event');
 
 // Maximum depth for recursive relationship traversal
 const MAX_DEPTH = 5;
@@ -699,6 +701,52 @@ async function generateEntitiesCommand(moduleName, options = {}) {
             name: 'MessageBroker (updated)',
             path: `${moduleName}/application/ports/MessageBroker.java`
           });
+        } else if (broker === 'rabbitmq') {
+          // ── RabbitMQ broker: RabbitTemplate adapter ──────────────────────────
+          const STANDARD_EVENT_TYPES = new Set([
+            'String','Integer','Long','Double','Float','Boolean',
+            'BigDecimal','LocalDate','LocalDateTime','LocalTime','Instant','UUID'
+          ]);
+          for (const event of aggregateDomainEvents) {
+            const rabbitCtx = buildRabbitEventContext(packageName, moduleName, event);
+            await generateSingleRabbitEvent(projectDir, packagePath, rabbitCtx);
+            generatedFiles.push({
+              type: 'Integration Event',
+              name: rabbitCtx.eventClassName,
+              path: `${moduleName}/application/events/${rabbitCtx.eventClassName}.java`
+            });
+
+            // Generate stub records for custom collection element types
+            const customElementTypes = [...new Set(
+              (event.fields || [])
+                .filter(f => f.isCollection && f.collectionElementType && !STANDARD_EVENT_TYPES.has(f.collectionElementType))
+                .map(f => f.collectionElementType)
+            )];
+            for (const typeName of customElementTypes) {
+              const stubPath = path.join(moduleBasePath, 'domain', 'models', 'events', `${typeName}.java`);
+              await renderAndWrite(
+                path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainEventSnapshot.java.ejs'),
+                stubPath,
+                { packageName, moduleName, name: typeName, fields: [] },
+                { ...writeOptions, overwrite: false }
+              );
+              generatedFiles.push({
+                type: 'Event Snapshot Type',
+                name: typeName,
+                path: `${moduleName}/domain/models/events/${typeName}.java`
+              });
+            }
+          }
+          generatedFiles.push({
+            type: 'Integration Event',
+            name: `${toPascalCase(moduleName)}RabbitMessageBroker (updated)`,
+            path: `${moduleName}/infrastructure/adapters/rabbitmqMessageBroker/${toPascalCase(moduleName)}RabbitMessageBroker.java`
+          });
+          generatedFiles.push({
+            type: 'Integration Event',
+            name: 'MessageBroker (updated)',
+            path: `${moduleName}/application/ports/MessageBroker.java`
+          });
         }
       }
     }
@@ -908,8 +956,127 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           generatedFiles.push({ type: 'Handler', name: `${listener.useCase}CommandHandler`, path: `${moduleName}/application/usecases/${listener.useCase}CommandHandler.java` });
         }
         spinner.succeed(chalk.green(`Spring Event listeners generated (mock mode)! ✨`));
+      } else if (broker === 'rabbitmq') {
+        // ── RabbitMQ listeners: @RabbitListener ─────────────────────────────
+        spinner.start(`Generating ${listeners.length} RabbitMQ listener(s)...`);
+        for (const listener of listeners) {
+          if (!listener.topic) {
+            spinner.warn(chalk.yellow(`⚠ listener '${listener.event}': topic is required when there is no system.yaml. Skipping.`));
+            continue;
+          }
+
+          const topicRaw = listener.topic;
+          const topicSuffix = topicRaw.includes('.') ? topicRaw.slice(topicRaw.lastIndexOf('.') + 1) : topicRaw;
+          const topicKey = topicSuffix.toLowerCase().replace(/_/g, '-');
+          const listenerContext = {
+            packageName,
+            moduleName,
+            ...listener,
+            topicConstant: topicRaw,
+            topicSpringProperty: `\${queues.${topicKey}}`,
+            topicVariableName: toCamelCase(topicSuffix.toLowerCase())
+          };
+
+          // 0. Nested type records (auxiliary value objects for object-typed fields)
+          for (const nt of (listener.nestedTypes || [])) {
+            const ntPath = path.join(
+              moduleBasePath, 'application', 'events',
+              `${nt.name}.java`
+            );
+            await renderAndWrite(
+              path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerNestedType.java.ejs'),
+              ntPath,
+              { packageName, moduleName, name: nt.name, fields: nt.fields },
+              writeOptions
+            );
+            generatedFiles.push({
+              type: 'Listener Nested Type',
+              name: nt.name,
+              path: `${moduleName}/application/events/${nt.name}.java`
+            });
+          }
+
+          // 1. Integration Event record (same template — broker-agnostic)
+          const integrationEventPath = path.join(
+            moduleBasePath, 'application', 'events',
+            `${listener.integrationEventClassName}.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerIntegrationEvent.java.ejs'),
+            integrationEventPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Listener Integration Event',
+            name: listener.integrationEventClassName,
+            path: `${moduleName}/application/events/${listener.integrationEventClassName}.java`
+          });
+
+          // 2. RabbitMQ listener class
+          const rabbitListenerPath = path.join(
+            moduleBasePath, 'infrastructure', 'rabbitListener',
+            `${listener.listenerClassName}.java`
+          );
+          let rabbitListenerWriteOpts = writeOptions;
+          if (await fs.pathExists(rabbitListenerPath)) {
+            const existing = await fs.readFile(rabbitListenerPath, 'utf-8');
+            if (existing.includes('@EventListener') && !existing.includes('@RabbitListener')) {
+              rabbitListenerWriteOpts = { ...writeOptions, force: true };
+            }
+          }
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'rabbitmq-listener', 'RabbitListenerClass.java.ejs'),
+            rabbitListenerPath,
+            listenerContext,
+            rabbitListenerWriteOpts
+          );
+          generatedFiles.push({
+            type: 'RabbitMQ Listener',
+            name: listener.listenerClassName,
+            path: `${moduleName}/infrastructure/rabbitListener/${listener.listenerClassName}.java`
+          });
+
+          // 3. Register queue in rabbitmq.yaml (all environments)
+          await updateRabbitMQYmlQueue(projectDir, topicKey, topicRaw);
+
+          // 4. Typed Command dispatched from the listener
+          const commandPath = path.join(
+            moduleBasePath, 'application', 'commands',
+            `${listener.commandClassName}.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerCommand.java.ejs'),
+            commandPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Listener Command',
+            name: listener.commandClassName,
+            path: `${moduleName}/application/commands/${listener.commandClassName}.java`
+          });
+
+          // 5. Use case handler that processes the command
+          const handlerPath = path.join(
+            moduleBasePath, 'application', 'usecases',
+            `${listener.useCase}CommandHandler.java`
+          );
+          await renderAndWrite(
+            path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerCommandHandler.java.ejs'),
+            handlerPath,
+            listenerContext,
+            writeOptions
+          );
+          generatedFiles.push({
+            type: 'Handler',
+            name: `${listener.useCase}CommandHandler`,
+            path: `${moduleName}/application/usecases/${listener.useCase}CommandHandler.java`
+          });
+        }
+        spinner.succeed(chalk.green(`RabbitMQ listeners generated! ✨`));
       } else if (listeners.length > 0) {
-        console.log(chalk.yellow(`⚠ listeners: section found but no broker is installed. Run 'eva add kafka-client' to generate listener classes.`));
+        console.log(chalk.yellow(`⚠ listeners: section found but no broker is installed. Run 'eva add kafka-client' or 'eva add rabbitmq-client' to generate listener classes.`));
       }
     }
 
@@ -1274,13 +1441,32 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
               // Register topic in kafka.yaml
               await updateKafkaYml(projectDir, sync.topicKey, sync.topicConstant);
+            } else if (broker === 'rabbitmq') {
+              const rabbitListenerPath = path.join(
+                moduleBasePath, 'infrastructure', 'rabbitListener',
+                `${sync.listenerClassName}.java`
+              );
+              await renderAndWrite(
+                path.join(readModelTemplatesDir, 'ReadModelRabbitListener.java.ejs'),
+                rabbitListenerPath,
+                listenerContext,
+                writeOptions
+              );
+              generatedFiles.push({
+                type: 'Read Model RabbitMQ Listener',
+                name: sync.listenerClassName,
+                path: `${moduleName}/infrastructure/rabbitListener/${sync.listenerClassName}.java`
+              });
+
+              // Register queue in rabbitmq.yaml
+              await updateRabbitMQYmlQueue(projectDir, sync.topicKey, sync.topicConstant);
             }
           }
         }
 
         spinner.succeed(chalk.green(`Read models generated! ✨`));
       } else if (readModels.length > 0) {
-        console.log(chalk.yellow(`⚠ readModels: section found but no broker is installed. Run 'eva add kafka-client' to generate listener classes.`));
+        console.log(chalk.yellow(`⚠ readModels: section found but no broker is installed. Run 'eva add kafka-client' or 'eva add rabbitmq-client' to generate listener classes.`));
       }
     }
 

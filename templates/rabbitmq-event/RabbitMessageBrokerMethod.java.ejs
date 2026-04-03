@@ -1,0 +1,9 @@
+  @Override
+  public void publish<%= eventClassName %>(<%= eventClassName %> event) {
+    EventEnvelope<<%= eventClassName %>> envelope = EventEnvelope.of(
+      <%= valueFieldName %>,
+      event,
+      MDC.get("correlationId")
+    );
+    rabbitTemplate.convertAndSend(exchange, <%= valueFieldName %>, envelope);
+  }
