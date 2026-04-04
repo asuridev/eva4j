@@ -6,10 +6,13 @@ import <%= packageName %>.shared.infrastructure.eventEnvelope.EventEnvelope;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.rabbitmq.client.Channel;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Map;
@@ -35,6 +38,8 @@ import java.time.LocalTime;
 @Component("<%= moduleName %>.<%= listenerClassName %>")
 public class <%= listenerClassName %> {
 
+    private static final Logger log = LoggerFactory.getLogger(<%= listenerClassName %>.class);
+
     private final UseCaseMediator useCaseMediator;
     private final ObjectMapper objectMapper;
 
@@ -45,9 +50,18 @@ public class <%= listenerClassName %> {
 
     @RabbitListener(queues = "<%= topicSpringProperty %>")
     public void handle(Message message, Channel channel) throws IOException {
-        EventEnvelope<Map<String, Object>> event = objectMapper.readValue(
-                message.getBody(),
-                new TypeReference<EventEnvelope<Map<String, Object>>>() {});
+        long deliveryTag = message.getMessageProperties().getDeliveryTag();
+
+        EventEnvelope<Map<String, Object>> event;
+        try {
+            event = objectMapper.readValue(
+                    message.getBody(),
+                    new TypeReference<EventEnvelope<Map<String, Object>>>() {});
+        } catch (JsonProcessingException e) {
+            log.error("Fatal deserialization error — sending to DLQ: {}", e.getMessage());
+            channel.basicNack(deliveryTag, false, false);
+            return;
+        }
 
 <% (fields || []).forEach(f => { %><%
   const listMatch = f.javaType.match(/^List<(.+)>$/);
@@ -63,6 +77,6 @@ public class <%= listenerClassName %> {
                 <%= f.name %><%= i < fields.length - 1 ? ',' : '' %>
 <% }); %>
         ));
-        channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+        channel.basicAck(deliveryTag, false);
     }
 }

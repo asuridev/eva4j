@@ -12,20 +12,30 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.amqp.rabbit.annotation.EnableRabbit;
-import org.springframework.retry.backoff.FixedBackOffPolicy;
+import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 @Configuration
 @EnableRabbit
 public class RabbitMQConfig {
 
+  private static final Logger log = LoggerFactory.getLogger(RabbitMQConfig.class);
+
   @Value("${spring.rabbitmq.listener.simple.retry.max-attempts}")
   private int maxAttempts;
 
   @Value("${spring.rabbitmq.listener.simple.retry.initial-interval}")
   private long initialInterval;
+
+  @Value("${spring.rabbitmq.listener.simple.retry.multiplier:1.0}")
+  private double multiplier;
+
+  @Value("${spring.rabbitmq.listener.simple.retry.max-interval:10000}")
+  private long maxInterval;
 
   @Bean
   public MessageConverter jackson2JsonMessageConverter() {
@@ -47,6 +57,16 @@ public class RabbitMQConfig {
                                        MessageConverter jackson2JsonMessageConverter) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
     template.setMessageConverter(jackson2JsonMessageConverter);
+    template.setMandatory(true);
+    template.setConfirmCallback((correlationData, ack, cause) -> {
+      if (!ack) {
+        log.error("Message not confirmed by broker: {}", cause);
+      }
+    });
+    template.setReturnsCallback(returned -> {
+      log.error("Message returned — unroutable: exchange={}, routingKey={}, replyText={}",
+          returned.getExchange(), returned.getRoutingKey(), returned.getReplyText());
+    });
     return template;
   }
 
@@ -59,15 +79,18 @@ public class RabbitMQConfig {
     factory.setConnectionFactory(connectionFactory);
     factory.setMessageConverter(jackson2JsonMessageConverter);
     factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+    factory.setDefaultRequeueRejected(false);
 
-    // Retry template
+    // Retry template with exponential backoff
     RetryTemplate retryTemplate = new RetryTemplate();
     SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy();
     retryPolicy.setMaxAttempts(maxAttempts);
     retryTemplate.setRetryPolicy(retryPolicy);
 
-    FixedBackOffPolicy backOffPolicy = new FixedBackOffPolicy();
-    backOffPolicy.setBackOffPeriod(initialInterval);
+    ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
+    backOffPolicy.setInitialInterval(initialInterval);
+    backOffPolicy.setMultiplier(multiplier);
+    backOffPolicy.setMaxInterval(maxInterval);
     retryTemplate.setBackOffPolicy(backOffPolicy);
 
     factory.setRetryTemplate(retryTemplate);

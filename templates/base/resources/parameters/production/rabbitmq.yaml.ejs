@@ -1,15 +1,32 @@
 spring:
   rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
+    host: ${RABBITMQ_HOST}
     port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USERNAME:guest}
-    password: ${RABBITMQ_PASSWORD:guest}
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
     virtual-host: ${RABBITMQ_VHOST:/}
+    connection-timeout: 5000
+    requested-heartbeat: 60
+    channel-rpc-timeout: 10000
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    ssl:
+      enabled: ${RABBITMQ_SSL_ENABLED:false}
+    cache:
+      channel:
+        size: 25
+    template:
+      mandatory: true
     listener:
       simple:
         acknowledge-mode: manual
-        concurrency: 3
+        concurrency: 5
+        max-concurrency: 20
+        prefetch: 10
         retry:
           enabled: true
-          max-attempts: 3
-          initial-interval: 1500
+          max-attempts: 5
+          initial-interval: 2000
+          multiplier: 2.0
+          max-interval: 30000
+          stateless: true
