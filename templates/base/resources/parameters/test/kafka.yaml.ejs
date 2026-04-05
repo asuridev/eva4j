@@ -1,15 +1,15 @@
 spring:
   kafka:
     bootstrap-servers:
-      - localhost:9092 # Lista de brokers Kafka
+      - localhost:9092
     producer:
       properties:
         spring.json.add.type.headers: false
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      retries: 3
+      retries: 1
     consumer:
-      group-id: <%= projectName %>-api-group
+      group-id: <%= projectName %>-test-group
       auto-offset-reset: earliest
       enable-auto-commit: false
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -18,9 +18,15 @@ spring:
         spring.json.trusted.packages: "*"
         spring.json.use.type.headers: false
         spring.json.value.default.type: <%= packageName %>.shared.infrastructure.eventEnvelope.EventEnvelope
+        max.poll.records: 10
     listener:
       ack-mode: manual
-      concurrency: 3
+      concurrency: 1
       retry:
-        max-attempts: 2
-        backoff-delay: 1500
+        max-attempts: 1
+        backoff-delay: 100
+
+kafka:
+  topic-defaults:
+    partitions: 1
+    replicas: 1

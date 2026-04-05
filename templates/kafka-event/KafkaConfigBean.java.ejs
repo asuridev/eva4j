@@ -3,5 +3,5 @@
 
   @Bean
   public NewTopic <%= beanMethodName %>() {
-    return new NewTopic(<%= valueFieldName %>, <%= partitions %>, (short) <%= replicas %>);
+    return new NewTopic(<%= valueFieldName %>, defaultPartitions, defaultReplicas);
   }

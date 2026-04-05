@@ -12,7 +12,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.util.backoff.ExponentialBackOff;
 
 
 @Configuration
@@ -20,10 +20,22 @@ import org.springframework.util.backoff.FixedBackOff;
 public class KafkaConfig {
 
   @Value("${spring.kafka.listener.retry.max-attempts}")
-  private long maxAttempts;
+  private int maxAttempts;
 
   @Value("${spring.kafka.listener.retry.backoff-delay}")
   private long backoffDelay;
+
+  @Value("${spring.kafka.listener.retry.backoff-multiplier:1.0}")
+  private double backoffMultiplier;
+
+  @Value("${spring.kafka.listener.retry.backoff-max-delay:30000}")
+  private long backoffMaxDelay;
+
+  @Value("${kafka.topic-defaults.partitions:3}")
+  private int defaultPartitions;
+
+  @Value("${kafka.topic-defaults.replicas:1}")
+  private short defaultReplicas;
 
   @Bean
   public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
@@ -39,8 +51,10 @@ public class KafkaConfig {
         // Redirige al topic original + ".DLT"
         (record, ex) -> new TopicPartition(record.topic() + ".DLT", record.partition())
     );
-    // Configura reintentos:
-    FixedBackOff backOff = new FixedBackOff(backoffDelay, maxAttempts);
+    // Configura reintentos con backoff exponencial
+    ExponentialBackOff backOff = new ExponentialBackOff(backoffDelay, backoffMultiplier);
+    backOff.setMaxInterval(backoffMaxDelay);
+    backOff.setMaxAttempts(maxAttempts);
     // Manejador de errores
     DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
     factory.setCommonErrorHandler(errorHandler);
