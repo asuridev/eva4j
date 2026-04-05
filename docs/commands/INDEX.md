@@ -74,6 +74,25 @@ Commands for integrating with external services and messaging systems.
   - Manual acknowledgment control
   - Integration with UseCaseMediator
 
+- **[generate rabbitmq-event](./GENERATE_RABBITMQ_EVENT.md)** (`g rabbitmq-event`) - Setup RabbitMQ event publishing
+  - Event-driven architecture with topic exchanges
+  - Asynchronous communication via routing keys
+  - Domain event publishing with DLQ support
+  - RabbitMQ producer configuration
+  - Exchange + Queue + Binding auto-generation
+
+- **[generate rabbitmq-listener](./GENERATE_RABBITMQ_LISTENER.md)** (`g rabbitmq-listener`) - Create RabbitMQ event consumer
+  - Event consumption from queues
+  - Spring AMQP listener with manual acknowledgment
+  - Dead-letter queue routing on failure
+  - Integration with UseCaseMediator
+
+- **[add rabbitmq-client](./ADD_RABBITMQ_CLIENT.md)** - Add RabbitMQ dependencies
+  - Spring AMQP installation
+  - RabbitMQConfig with retry + DLQ
+  - Docker Compose service
+  - Multi-environment configuration
+
 - **add kafka-client** - Add Kafka dependencies
   - *Documentation coming soon*
   - Kafka dependencies installation
@@ -152,8 +171,10 @@ Commands for transitioning from monolith to microservices.
 
 ### Integrating Services
 1. [generate http-exchange](./GENERATE_HTTP_EXCHANGE.md) - External APIs
-2. [generate kafka-event](./GENERATE_KAFKA_EVENT.md) - Event publishing
-3. [generate kafka-listener](./GENERATE_KAFKA_LISTENER.md) - Event consumption
+2. [generate kafka-event](./GENERATE_KAFKA_EVENT.md) - Kafka event publishing
+3. [generate kafka-listener](./GENERATE_KAFKA_LISTENER.md) - Kafka event consumption
+4. [generate rabbitmq-event](./GENERATE_RABBITMQ_EVENT.md) - RabbitMQ event publishing
+5. [generate rabbitmq-listener](./GENERATE_RABBITMQ_LISTENER.md) - RabbitMQ event consumption
 
 ### Orchestrating Workflows
 1. [add temporal-client](./INDEX.md) - Install Temporal infrastructure
@@ -176,6 +197,7 @@ Commands for transitioning from monolith to microservices.
 ### Medium Impact, Low Effort ⭐⭐
 - **[generate resource](./GENERATE_RESOURCE.md)** - Quick REST API exposure
 - **[generate kafka-event](./GENERATE_KAFKA_EVENT.md)** - Event publishing setup
+- **[generate rabbitmq-event](./GENERATE_RABBITMQ_EVENT.md)** - Event publishing setup
 - **[generate http-exchange](./GENERATE_HTTP_EXCHANGE.md)** - External service integration
 
 ### Low Impact, Low Effort ⭐
@@ -219,7 +241,7 @@ Commands for transitioning from monolith to microservices.
 ### Intermediate Track
 1. [generate usecase](./GENERATE_USECASE.md) - Custom business logic
 2. [generate http-exchange](./GENERATE_HTTP_EXCHANGE.md) - External integrations
-3. [generate kafka-event](./GENERATE_KAFKA_EVENT.md) - Event-driven patterns
+3. [generate kafka-event](./GENERATE_KAFKA_EVENT.md) / [generate rabbitmq-event](./GENERATE_RABBITMQ_EVENT.md) - Event-driven patterns
 
 ### Advanced Track
 1. [detach](./DETACH.md) - Microservices extraction
@@ -241,6 +263,8 @@ eva g record <name>             # generate record
 eva g http <name>               # generate http-exchange
 eva g kafka-event <name>        # generate kafka-event
 eva g kafka-listener <name>     # generate kafka-listener
+eva g rabbitmq-event <name>     # generate rabbitmq-event
+eva g rabbitmq-listener <name>  # generate rabbitmq-listener
 eva g temporal-flow <module>    # generate temporal-flow
 eva g temporal-activity <module># generate temporal-activity
 ```
