@@ -15,7 +15,7 @@ public class <%= modulePascalCase %>RabbitMessageBroker implements MessageBroker
   private String exchange;
 
   @Value("${routing-keys.<%= topicNameKebab %>}")
-  private String <%= topicNameKebab.replace(/-/g, '') %>RoutingKey;
+  private String <%= topicNameCamel %>RoutingKey;
 
   private final RabbitTemplate rabbitTemplate;
 
@@ -26,10 +26,10 @@ public class <%= modulePascalCase %>RabbitMessageBroker implements MessageBroker
   @Override
   public void publish<%= eventClassName %>(<%= eventClassName %> event) {
     EventEnvelope<<%= eventClassName %>> envelope = EventEnvelope.of(
-      <%= topicNameKebab.replace(/-/g, '') %>RoutingKey,
+      <%= topicNameCamel %>RoutingKey,
       event,
       MDC.get("correlationId")
     );
-    rabbitTemplate.convertAndSend(exchange, <%= topicNameKebab.replace(/-/g, '') %>RoutingKey, envelope);
+    rabbitTemplate.convertAndSend(exchange, <%= topicNameCamel %>RoutingKey, envelope);
   }
 }

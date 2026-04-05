@@ -439,6 +439,39 @@ async function buildCommand(options = {}) {
       }
     }
 
+    // ── Clean up stale mock adapter files ──────────────────────────────────────
+    // Mock mode always generates adapters under kafkaMessageBroker/ regardless of
+    // the installed broker. When the real broker is RabbitMQ, those files would
+    // coexist with the real rabbitmqMessageBroker/ adapters after restore,
+    // causing a ConflictingBeanDefinitionException. Remove them proactively.
+    if (await configManager.featureExists('rabbitmq')) {
+      const { packageName: pkgCleanup } = projectConfig;
+      const pkgPathCleanup = toPackagePath(pkgCleanup);
+      const modules = projectConfig.modules || [];
+      for (const mod of modules) {
+        const mockAdapterDir = path.join(
+          projectDir, 'src', 'main', 'java', pkgPathCleanup,
+          mod, 'infrastructure', 'adapters', 'kafkaMessageBroker'
+        );
+        if (await fs.pathExists(mockAdapterDir)) {
+          // Safety check: only remove if the files are mock implementations
+          const files = await fs.readdir(mockAdapterDir);
+          const isMockDir = files.length > 0 && await (async () => {
+            for (const f of files) {
+              const content = await fs.readFile(path.join(mockAdapterDir, f), 'utf-8');
+              if (content.includes('ApplicationEventPublisher') && !content.includes('KafkaTemplate')) {
+                return true;
+              }
+            }
+            return false;
+          })();
+          if (isMockDir) {
+            await fs.remove(mockAdapterDir);
+          }
+        }
+      }
+    }
+
     console.log(chalk.green('   ✅ Configuration restored to original.\n'));
   }
 

@@ -12,7 +12,7 @@ import org.slf4j.MDC;
 public class <%= modulePascalCase %>KafkaMessageBroker implements MessageBroker {
 
   @Value("<%= topicSpringProperty %>")
-  private String <%= topicNameKebab.replace(/-/g, '') %>Topic;
+  private String <%= topicNameCamel %>Topic;
 
   private final KafkaTemplate<String, Object> kafkaTemplate;
 
@@ -23,10 +23,10 @@ public class <%= modulePascalCase %>KafkaMessageBroker implements MessageBroker 
   @Override
   public void publish<%= eventClassName %>(<%= eventClassName %> event) {
     EventEnvelope<<%= eventClassName %>> envelope = EventEnvelope.of(
-      <%= topicNameKebab.replace(/-/g, '') %>Topic,
+      <%= topicNameCamel %>Topic,
       event,
       MDC.get("correlationId")
     );
-    kafkaTemplate.send(<%= topicNameKebab.replace(/-/g, '') %>Topic, envelope);
+    kafkaTemplate.send(<%= topicNameCamel %>Topic, envelope);
   }
 }
