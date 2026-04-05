@@ -279,6 +279,32 @@ public NewTopic orderPlacedTopic() {
 }
 ```
 
+### Dimensionamiento de particiones
+
+El número de particiones determina el **paralelismo máximo** de consumo. Cada partición es asignada a exactamente un consumer dentro del mismo group.
+
+| Particiones | Consumers | Resultado |
+|---|---|---|
+| 3 | 1 | 1 consumer lee las 3 particiones (sin paralelismo) |
+| 3 | 3 | 1 consumer por partición (óptimo) |
+| 3 | 5 | 3 activos + **2 ociosos** (desperdicio de recursos) |
+| 6 | 3 | 2 particiones por consumer (balanceado) |
+
+> **Regla:** `particiones ≥ consumers`. Consumers que exceden el número de particiones quedan idle.
+
+#### Guía de sizing por volumen
+
+| Volumen de mensajes | Particiones recomendadas | Razón |
+|---|---|---|
+| < 100 msg/s | 3 | Mínimo para HA con 3 brokers |
+| 100–1,000 msg/s | 3–6 | Balance entre paralelismo y overhead |
+| 1,000–10,000 msg/s | 6–12 | Distribuir carga entre más consumers |
+| > 10,000 msg/s | 12–30+ | Alto throughput, dimensionar según latencia objetivo |
+
+> **Advertencia:** Las particiones de un topic **no se pueden reducir** después de crearlo — solo incrementar. Sobre-particionar (ej: 20 particiones para 50 msg/s) causa overhead innecesario: más file handles en los brokers, mayor uso de memoria, rebalanceos más lentos, y más leader elections. Empezar con 3–6 y escalar cuando las métricas de consumer lag lo justifiquen.
+>
+> Si los mensajes usan **keyed partitioning** (misma key → misma partición), cambiar el número de particiones redistribuye las keys — lo cual puede romper el ordenamiento por entidad.
+
 ---
 
 ## Seguridad (SSL/SASL)
