@@ -911,17 +911,76 @@
     }
 
     // ─── DiagramPanel ────────────────────────────────────────────────────────────────
-    function DiagramPanel({ moduleKey, diagramText }) {
+    // Props:
+    //   moduleKey   — unique key for re-render detection
+    //   diagramText — Mermaid syntax string
+    //   onNodeClick  — optional callback(nodeLabel) when a click-enabled node is clicked
+    function DiagramPanel({ moduleKey, diagramText, onNodeClick }) {
       const containerRef = useRef(null);
       const wrapperRef = useRef(null);
       const [renderState, setRenderState] = useState('idle');
       const [errorMsg, setErrorMsg] = useState('');
-      const [wrapperJustify, setWrapperJustify] = useState('flex-start');
+      const [zoom, setZoom] = useState(1);
+      const [isPanning, setIsPanning] = useState(false);
+      const [panOrigin, setPanOrigin] = useState({ x: 0, y: 0 });
+      const [scrollOrigin, setScrollOrigin] = useState({ x: 0, y: 0 });
+
+      function zoomIn()  { setZoom(function(z) { return Math.min(z + 0.2, 3); }); }
+      function zoomOut() { setZoom(function(z) { return Math.max(z - 0.2, 0.3); }); }
+      function zoomFit() {
+        if (!wrapperRef.current || !containerRef.current) return;
+        var svgEl = containerRef.current.querySelector('svg');
+        if (!svgEl) return;
+        var vb = svgEl.getAttribute('viewBox');
+        if (!vb) { setZoom(1); return; }
+        var intrinsicW = parseFloat(vb.split(/\s+/)[2]);
+        var containerW = wrapperRef.current.clientWidth - 40;
+        if (intrinsicW > 0 && containerW > 0) {
+          setZoom(Math.min(containerW / intrinsicW, 2));
+        }
+      }
+      function zoomReset() { setZoom(1); }
+
+      // Wheel zoom — use native listener via useEffect so we can set { passive: false }
+      // (React onWheel is passive by default, so preventDefault is ignored)
+      useEffect(function() {
+        var el = wrapperRef.current;
+        if (!el) return;
+        function onWheel(e) {
+          if (!e.ctrlKey && !e.metaKey) return;
+          e.preventDefault();
+          setZoom(function(z) {
+            var delta = e.deltaY > 0 ? -0.1 : 0.1;
+            return Math.max(0.3, Math.min(z + delta, 3));
+          });
+        }
+        el.addEventListener('wheel', onWheel, { passive: false });
+        return function() { el.removeEventListener('wheel', onWheel); };
+      });
+
+      // Pan via mouse drag
+      function handleMouseDown(e) {
+        if (e.button !== 0) return;
+        setIsPanning(true);
+        setPanOrigin({ x: e.clientX, y: e.clientY });
+        setScrollOrigin({
+          x: wrapperRef.current ? wrapperRef.current.scrollLeft : 0,
+          y: wrapperRef.current ? wrapperRef.current.scrollTop : 0,
+        });
+      }
+      function handleMouseMove(e) {
+        if (!isPanning || !wrapperRef.current) return;
+        wrapperRef.current.scrollLeft = scrollOrigin.x - (e.clientX - panOrigin.x);
+        wrapperRef.current.scrollTop = scrollOrigin.y - (e.clientY - panOrigin.y);
+      }
+      function handleMouseUp() { setIsPanning(false); }
 
       useEffect(() => {
         if (!diagramText) return;
         let cancelled = false;
         setRenderState('loading');
+        setZoom(1);
+
         (async () => {
           try {
             // Wait up to 4s for mermaid to load (deferred script)
@@ -931,31 +990,57 @@
               waited += 100;
             }
             if (!ensureMermaid()) throw new Error('Mermaid no está disponible');
+
+            // Enable click callbacks via securityLevel loose
+            window.mermaid.initialize({
+              startOnLoad: false,
+              theme: 'dark',
+              securityLevel: 'loose',
+              themeVariables: {
+                background: '#0a0a0f',
+                primaryColor: '#1e1e2e',
+                primaryBorderColor: '#4a4a8a',
+                lineColor: '#8c8caa',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '13px',
+              },
+            });
+            _mermaidReady = true;
+
             if (cancelled) return;
             const id = 'mmd-' + moduleKey.replace(/[^a-zA-Z0-9]/g, '-') + '-' + Date.now();
             const { svg } = await window.mermaid.render(id, diagramText);
             if (cancelled || !containerRef.current) return;
             containerRef.current.innerHTML = svg;
+
+            // Manually bind click handlers to CMD_ and Q_ nodes in the SVG.
+            // Mermaid v11 click directives are unreliable across versions,
+            // so we bypass them and attach listeners directly to the DOM.
+            if (onNodeClick) {
+              containerRef.current.querySelectorAll('[id*="flowchart-CMD_"], [id*="flowchart-Q_"]').forEach(function(node) {
+                var match = (node.id || '').match(/flowchart-(CMD|Q)_([^-]+)/);
+                if (match) {
+                  var ucName = match[2];
+                  node.style.cursor = 'pointer';
+                  node.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    onNodeClick(ucName);
+                  });
+                }
+              });
+            }
+
             const svgEl = containerRef.current.querySelector('svg');
             if (svgEl) {
               svgEl.removeAttribute('height');
               svgEl.removeAttribute('width');
 
-              // Measure intrinsic width from viewBox to decide sizing strategy
+              // Render at natural intrinsic size; zoom handles scaling
               const vb = svgEl.getAttribute('viewBox');
               const intrinsicW = vb ? parseFloat(vb.split(/\s+/)[2]) : 0;
-              const containerW = wrapperRef.current ? wrapperRef.current.clientWidth - 40 : 0;
-
-              if (intrinsicW > 0 && intrinsicW < containerW * 0.65) {
-                // Small diagram (1-2 classes): render at natural size and center
+              if (intrinsicW > 0) {
                 svgEl.style.width = intrinsicW + 'px';
-                svgEl.style.maxWidth = '100%';
-                setWrapperJustify('center');
-              } else {
-                // Large diagram: expand to fill; overflow: auto handles horizontal scroll
-                svgEl.style.width = Math.max(intrinsicW, containerW) + 'px';
                 svgEl.style.maxWidth = 'none';
-                setWrapperJustify('flex-start');
               }
             }
             setRenderState('done');
@@ -976,26 +1061,293 @@
           </div>
         );
       }
+
+      var zoomPct = Math.round(zoom * 100) + '%';
+
       return (
-        <div
-          ref={wrapperRef}
-          style={{
-            background: '#0d0d15', borderRadius: 10, padding: 20,
-            overflow: 'auto', border: `1px solid ${C.border}`, minHeight: 200,
-            display: 'flex', justifyContent: wrapperJustify,
-          }}
-        >
-          {renderState === 'loading' && (
-            <div style={{ color: C.textMuted, fontSize: 13, textAlign: 'center', padding: 30, width: '100%' }}>
-              ⏳ Renderizando diagrama...
+        <div style={{ position: 'relative' }}>
+          {/* Zoom toolbar */}
+          {renderState === 'done' && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8,
+              background: C.surface, border: '1px solid ' + C.border,
+              borderRadius: 6, padding: '4px 8px', width: 'fit-content',
+            }}>
+              <button onClick={zoomOut} title="Zoom out" style={{
+                background: 'transparent', color: C.textMuted,
+                border: '1px solid ' + C.border, borderRadius: 4,
+                padding: '3px 10px', fontSize: 13, cursor: 'pointer',
+                fontFamily: 'inherit', fontWeight: 600,
+              }}>−</button>
+              <button onClick={zoomReset} title="Reset zoom" style={{
+                background: 'transparent', color: C.textMuted,
+                border: '1px solid ' + C.border, borderRadius: 4,
+                padding: '3px 10px', fontSize: 13, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", fontWeight: 600,
+                minWidth: 48, textAlign: 'center',
+              }}>{zoomPct}</button>
+              <button onClick={zoomIn} title="Zoom in" style={{
+                background: 'transparent', color: C.textMuted,
+                border: '1px solid ' + C.border, borderRadius: 4,
+                padding: '3px 10px', fontSize: 13, cursor: 'pointer',
+                fontFamily: 'inherit', fontWeight: 600,
+              }}>+</button>
+              <button onClick={zoomFit} title="Fit to width" style={{
+                background: 'transparent', color: C.textMuted,
+                border: '1px solid ' + C.border, borderRadius: 4,
+                padding: '3px 10px', fontSize: 13, cursor: 'pointer',
+                fontFamily: 'inherit', fontWeight: 600,
+              }}>⤢</button>
+              <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 8 }}>Ctrl+scroll · drag to pan</span>
             </div>
           )}
-          {renderState === 'error' && (
-            <div style={{ color: C.accent, fontSize: 12, padding: 10, fontFamily: "'JetBrains Mono', monospace" }}>
-              ⚠ {errorMsg}
+
+          {/* Diagram viewport */}
+          <div
+            ref={wrapperRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            style={{
+              background: '#0d0d15', borderRadius: 10, padding: 20,
+              overflow: 'auto', border: '1px solid ' + C.border, minHeight: 200,
+              cursor: isPanning ? 'grabbing' : 'grab',
+            }}
+          >
+            {renderState === 'loading' && (
+              <div style={{ color: C.textMuted, fontSize: 13, textAlign: 'center', padding: 30, width: '100%' }}>
+                ⏳ Renderizando diagrama...
+              </div>
+            )}
+            {renderState === 'error' && (
+              <div style={{ color: C.accent, fontSize: 12, padding: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+                ⚠ {errorMsg}
+              </div>
+            )}
+            <div
+              ref={containerRef}
+              style={{
+                display: renderState === 'done' ? 'block' : 'none',
+                transform: 'scale(' + zoom + ')',
+                transformOrigin: 'top left',
+                transition: isPanning ? 'none' : 'transform 0.15s ease',
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    // ─── UseCaseModal ─────────────────────────────────────────────────────────────
+    function UseCaseModal({ uc, onClose }) {
+      if (!uc) return null;
+
+      var typeColor = uc.type === 'command' ? '#E67E22' : '#4A90D9';
+      var typeLabel = uc.type === 'command' ? '⚙️ Command' : '🔍 Query';
+      var badgeBg = uc.isStandard ? '#27AE6033' : '#E67E2233';
+      var badgeBorder = uc.isStandard ? '#27AE6066' : '#E67E2266';
+      var badgeColor = uc.isStandard ? '#27AE60' : '#E67E22';
+      var badgeText = uc.isStandard ? 'Estándar' : 'Custom';
+
+      return (
+        <div onClick={onClose} style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.65)', zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          animation: 'fadeIn 0.15s ease',
+        }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{
+            background: '#12121f', border: '1px solid #2a2a4a',
+            borderRadius: 14, padding: 0, maxWidth: 560, width: '90%',
+            maxHeight: '80vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '20px 24px 16px', borderBottom: '1px solid #1e1e3a',
+              display: 'flex', alignItems: 'flex-start', gap: 12,
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ color: typeColor, fontSize: 12, fontWeight: 700,
+                    background: typeColor + '22', border: '1px solid ' + typeColor + '44',
+                    borderRadius: 4, padding: '2px 10px',
+                  }}>{typeLabel}</span>
+                  <span style={{ color: badgeColor, fontSize: 11, fontWeight: 600,
+                    background: badgeBg, border: '1px solid ' + badgeBorder,
+                    borderRadius: 4, padding: '2px 8px',
+                  }}>{badgeText}</span>
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#e2e2f0',
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>{uc.name}</div>
+                <div style={{ fontSize: 12, color: '#8c8caa', marginTop: 4,
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>{uc.name + (uc.type === 'command' ? 'CommandHandler' : 'QueryHandler')}</div>
+              </div>
+              <button onClick={onClose} style={{
+                background: 'transparent', border: '1px solid #2a2a4a', borderRadius: 6,
+                color: '#8c8caa', fontSize: 16, cursor: 'pointer', padding: '4px 10px',
+                fontFamily: 'inherit',
+              }}>✕</button>
             </div>
-          )}
-          <div ref={containerRef} style={{ display: renderState === 'done' ? 'block' : 'none' }} />
+
+            {/* Body */}
+            <div style={{ padding: '16px 24px 20px' }}>
+              {/* Description */}
+              <div style={{
+                background: '#0d0d18', borderRadius: 8, padding: '12px 16px', marginBottom: 16,
+                border: '1px solid #1e1e3a', fontSize: 13, color: '#b0b0cc', lineHeight: 1.6,
+              }}>{uc.description}</div>
+
+              {/* Endpoint */}
+              {uc.endpoint && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: '#8c8caa', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Endpoint</div>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    background: '#0d0d18', borderRadius: 6, padding: '8px 12px', border: '1px solid #1e1e3a',
+                  }}>
+                    <span style={{
+                      fontWeight: 800, fontSize: 12, color: uc.endpoint.method === 'GET' ? '#4A90D9' : uc.endpoint.method === 'POST' ? '#27AE60' : uc.endpoint.method === 'DELETE' ? '#E74C3C' : '#E67E22',
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}>{uc.endpoint.method}</span>
+                    <span style={{ fontSize: 13, color: '#e2e2f0', fontFamily: "'JetBrains Mono', monospace" }}>{uc.endpoint.path}</span>
+                    {uc.endpoint.version && (
+                      <span style={{ fontSize: 11, color: '#8c8caa', marginLeft: 'auto',
+                        background: '#1e1e3a', borderRadius: 4, padding: '1px 6px',
+                      }}>{uc.endpoint.version}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Triggered by event */}
+              {uc.triggeredBy && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: '#8c8caa', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Disparado por evento</div>
+                  <div style={{
+                    background: '#0d0d18', borderRadius: 6, padding: '8px 12px', border: '1px solid #1e1e3a',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <span style={{ color: '#27AE60', fontSize: 13 }}>📥</span>
+                    <span style={{ fontSize: 13, color: '#e2e2f0', fontFamily: "'JetBrains Mono', monospace" }}>{uc.triggeredBy.event}</span>
+                    {uc.triggeredBy.producer && (
+                      <span style={{ fontSize: 11, color: '#8c8caa', marginLeft: 'auto' }}>← {uc.triggeredBy.producer}</span>
+                    )}
+                  </div>
+                  {uc.triggeredBy.topic && (
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>topic: {uc.triggeredBy.topic}</div>
+                  )}
+                </div>
+              )}
+
+              {/* State transitions */}
+              {uc.stateTransitions && uc.stateTransitions.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: '#8c8caa', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Transiciones de estado</div>
+                  {uc.stateTransitions.map(function(t, i) {
+                    return (
+                      <div key={i} style={{
+                        background: '#0d0d18', borderRadius: 6, padding: '8px 12px', border: '1px solid #1e1e3a',
+                        marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, flexWrap: 'wrap',
+                      }}>
+                        <span style={{ color: '#B07CC6', fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{t.method}()</span>
+                        <span style={{ color: '#8c8caa' }}>:</span>
+                        <span style={{ color: '#E67E22', fontFamily: "'JetBrains Mono', monospace" }}>{t.from}</span>
+                        <span style={{ color: '#8c8caa' }}>→</span>
+                        <span style={{ color: '#27AE60', fontFamily: "'JetBrains Mono', monospace" }}>{t.to}</span>
+                        {t.guard && (
+                          <span style={{ fontSize: 11, color: '#E74C3C', marginLeft: 'auto' }}>guard: {t.guard}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Events emitted */}
+              {uc.eventsEmitted && uc.eventsEmitted.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: '#8c8caa', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Eventos emitidos</div>
+                  {uc.eventsEmitted.map(function(ev, i) {
+                    return (
+                      <div key={i} style={{
+                        background: '#0d0d18', borderRadius: 6, padding: '8px 12px', border: '1px solid #1e1e3a',
+                        marginBottom: 4,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ color: '#E67E22', fontSize: 13 }}>📤</span>
+                          <span style={{ fontSize: 13, color: '#e2e2f0', fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{ev.name}</span>
+                        </div>
+                        {ev.fields.length > 0 && (
+                          <div style={{ marginTop: 4, fontSize: 11, color: '#8c8caa', fontFamily: "'JetBrains Mono', monospace" }}>
+                            {ev.fields.join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Request fields */}
+              {uc.requestFields && uc.requestFields.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: '#8c8caa', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Campos del request</div>
+                  <div style={{
+                    background: '#0d0d18', borderRadius: 6, padding: '8px 12px', border: '1px solid #1e1e3a',
+                  }}>
+                    {uc.requestFields.map(function(f, i) {
+                      return (
+                        <div key={i} style={{
+                          display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0',
+                          borderBottom: i < uc.requestFields.length - 1 ? '1px solid #1a1a2e' : 'none',
+                        }}>
+                          <span style={{ fontSize: 12, color: '#e2e2f0', fontFamily: "'JetBrains Mono', monospace", flex: 1 }}>{f.name}</span>
+                          <span style={{ fontSize: 11, color: '#8c8caa', fontFamily: "'JetBrains Mono', monospace" }}>{f.type}</span>
+                          {f.required && (
+                            <span style={{ fontSize: 10, color: '#E74C3C', fontWeight: 700 }}>REQ</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Available ports */}
+              {uc.availablePorts && uc.availablePorts.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: '#8c8caa', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Puertos síncronos disponibles</div>
+                  {uc.availablePorts.map(function(p, i) {
+                    return (
+                      <div key={i} style={{
+                        background: '#0d0d18', borderRadius: 6, padding: '8px 12px', border: '1px solid #1e1e3a',
+                        marginBottom: 4,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ color: '#16A085', fontSize: 13 }}>🔗</span>
+                          <span style={{ fontSize: 13, color: '#e2e2f0', fontWeight: 600 }}>{p.service}</span>
+                          {p.target && (
+                            <span style={{ fontSize: 11, color: '#8c8caa', marginLeft: 'auto' }}>→ {p.target}</span>
+                          )}
+                        </div>
+                        <div style={{ marginTop: 4, fontSize: 11, color: '#8c8caa', fontFamily: "'JetBrains Mono', monospace" }}>
+                          {p.methods.join(' · ')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Aggregate */}
+              <div style={{ fontSize: 11, color: '#666', borderTop: '1px solid #1e1e3a', paddingTop: 12, marginTop: 8 }}>
+                Agregado: <strong style={{ color: '#B07CC6' }}>{uc.aggregate}</strong>
+              </div>
+            </div>
+          </div>
         </div>
       );
     }
@@ -1005,16 +1357,19 @@
       const [expandedChecks, setExpandedChecks] = useState({});
       const [selectedModule, setSelectedModule] = useState('all');
       const [view, setView] = useState('findings');
+      const [selectedUC, setSelectedUC] = useState(null); // use case detail object for modal
       if (!DOMAIN_VALIDATION) return null;
 
-      const { summary, categories, diagrams } = DOMAIN_VALIDATION;
+      const { summary, categories, diagrams, blueprints, useCaseDetails } = DOMAIN_VALIDATION;
 
       // Collect all unique module names that have at least one finding
-      const allModules = [...new Set(
-        categories.flatMap(cat =>
-          cat.checks.flatMap(check => check.findings.map(f => f.module))
-        )
-      )].sort();
+      // Also include modules that have diagrams/blueprints even without findings
+      const findingsModules = categories.flatMap(cat =>
+        cat.checks.flatMap(check => check.findings.map(f => f.module))
+      );
+      const diagramModules = diagrams ? Object.keys(diagrams).filter(k => diagrams[k]) : [];
+      const blueprintModules = blueprints ? Object.keys(blueprints).filter(k => blueprints[k]) : [];
+      const allModules = [...new Set([...findingsModules, ...diagramModules, ...blueprintModules])].sort();
 
       const SEV_COLOR = {
         error:   C.accent,
@@ -1110,13 +1465,13 @@
             )}
           </div>
 
-          {/* View toggle pill (only rendered when diagrams are available) */}
-          {diagrams && Object.keys(diagrams).length > 0 && (
+          {/* View toggle pill (only rendered when diagrams or blueprints are available) */}
+          {((diagrams && Object.keys(diagrams).length > 0) || (blueprints && Object.keys(blueprints).length > 0)) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 20 }}>
-              {[{ id: 'findings', label: '📋 Hallazgos' }, { id: 'diagram', label: '🗺 Diagrama' }].map(v => (
+              {[{ id: 'findings', label: '📋 Hallazgos' }, { id: 'diagram', label: '🗺 Diagrama' }, { id: 'blueprint', label: '🏗 Blueprint' }].map(v => (
                 <button
                   key={v.id}
-                  onClick={() => setView(v.id)}
+                  onClick={() => { setView(v.id); }}
                   style={{
                     background: view === v.id ? C.purple + '33' : 'transparent',
                     color: view === v.id ? C.purple : C.textMuted,
@@ -1142,6 +1497,31 @@
               )}
             </div>
           )}
+
+          {/* Blueprint view */}
+          {view === 'blueprint' && (
+            <div>
+              {selectedModule === 'all' ? (
+                <div style={{ padding: 32, textAlign: 'center', background: C.surface, borderRadius: 10, border: `1px solid ${C.border}`, color: C.textMuted, fontSize: 13 }}>
+                  Selecciona un módulo en el filtro de arriba para ver su blueprint de bounded context
+                </div>
+              ) : (
+                <DiagramPanel
+                  moduleKey={selectedModule + '-bp'}
+                  diagramText={blueprints && blueprints[selectedModule]}
+                  onNodeClick={function(label) {
+                    var moduleUCs = useCaseDetails && useCaseDetails[selectedModule];
+                    if (moduleUCs && moduleUCs[label]) {
+                      setSelectedUC(moduleUCs[label]);
+                    }
+                  }}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Use case detail modal */}
+          {selectedUC && <UseCaseModal uc={selectedUC} onClose={function() { setSelectedUC(null); }} />}
 
           {/* Category cards */}
           {view === 'findings' && categories.map(cat => {

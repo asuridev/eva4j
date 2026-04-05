@@ -496,7 +496,7 @@ async function writeDomainAssets(domainValidation, cwd) {
   const assetsDir = path.join(cwd, 'assets', 'evaluation');
   await fs.ensureDir(assetsDir);
 
-  const { categories, diagrams, summary } = domainValidation;
+  const { categories, diagrams, blueprints, summary } = domainValidation;
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
   // ── 1. Write per-module .mmd files ──────────────────────────────────────
@@ -504,6 +504,15 @@ async function writeDomainAssets(domainValidation, cwd) {
     for (const [moduleName, diagramText] of Object.entries(diagrams)) {
       if (diagramText) {
         await fs.writeFile(path.join(assetsDir, `${moduleName}.mmd`), diagramText, 'utf-8');
+      }
+    }
+  }
+
+  // ── 1b. Write per-module blueprint .mmd files ───────────────────────────
+  if (blueprints) {
+    for (const [moduleName, blueprintText] of Object.entries(blueprints)) {
+      if (blueprintText) {
+        await fs.writeFile(path.join(assetsDir, `${moduleName}-blueprint.mmd`), blueprintText, 'utf-8');
       }
     }
   }
@@ -569,6 +578,11 @@ async function writeDomainAssets(domainValidation, cwd) {
 
       if (diagrams && diagrams[moduleName]) {
         lines.push(`> 📊 Diagram: [${moduleName}.mmd](./${moduleName}.mmd)`);
+      }
+      if (blueprints && blueprints[moduleName]) {
+        lines.push(`> 🏗 Blueprint: [${moduleName}-blueprint.mmd](./${moduleName}-blueprint.mmd)`);
+      }
+      if ((diagrams && diagrams[moduleName]) || (blueprints && blueprints[moduleName])) {
         lines.push('');
       }
 
@@ -595,7 +609,9 @@ async function writeDomainAssets(domainValidation, cwd) {
       lines.push(`## Clean Modules (no findings)`);
       lines.push('');
       for (const m of cleanModules) {
-        lines.push(`- \`${m}\` — 🟢 no findings · [${m}.mmd](./${m}.mmd)`);
+        const links = [`[${m}.mmd](./${m}.mmd)`];
+        if (blueprints && blueprints[m]) links.push(`[${m}-blueprint.mmd](./${m}-blueprint.mmd)`);
+        lines.push(`- \`${m}\` — 🟢 no findings · ${links.join(' · ')}`);
       }
       lines.push('');
     }
@@ -604,7 +620,8 @@ async function writeDomainAssets(domainValidation, cwd) {
   await fs.writeFile(path.join(assetsDir, 'evaluation.md'), lines.join('\n'), 'utf-8');
 
   const mmdFiles = diagrams ? Object.keys(diagrams).filter(m => diagrams[m]) : [];
-  console.log(chalk.gray(`  Domain assets → assets/evaluation/  (evaluation.md + ${mmdFiles.length} .mmd files)`));
+  const bpFiles  = blueprints ? Object.keys(blueprints).filter(m => blueprints[m]) : [];
+  console.log(chalk.gray(`  Domain assets → assets/evaluation/  (evaluation.md + ${mmdFiles.length} .mmd + ${bpFiles.length} blueprint files)`));
 }
 
 module.exports = evaluateSystemCommand;

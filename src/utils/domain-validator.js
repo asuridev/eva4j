@@ -1216,11 +1216,22 @@ function validateDomain(domainConfigs, systemConfig) {
   }
 
   const { generateDomainDiagrams } = require('./domain-diagram');
+  const { generateBlueprintDiagrams } = require('./bounded-context-diagram');
+
+  const blueprintResults = generateBlueprintDiagrams(domainConfigs);
+  const blueprintDiagrams = {};
+  const useCaseDetails = {};
+  for (const [mod, result] of Object.entries(blueprintResults)) {
+    blueprintDiagrams[mod] = result.diagram || '';
+    useCaseDetails[mod] = result.useCases || {};
+  }
 
   return {
     summary: { errors, warnings, info, ok },
     categories,
     diagrams: generateDomainDiagrams(domainConfigs),
+    blueprints: blueprintDiagrams,
+    useCaseDetails,
   };
 }
 
