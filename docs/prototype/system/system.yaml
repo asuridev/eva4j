@@ -1,0 +1,279 @@
+# =============================================================================
+# PROTOTYPE: system.yaml con Temporal como único mecanismo de comunicación
+# =============================================================================
+# Este es un diseño EXPERIMENTAL — eva4j NO genera código desde este formato.
+# Propósito: explorar cómo se vería la arquitectura sin Kafka ni Feign,
+# usando Temporal como bus universal de comunicación entre módulos.
+# =============================================================================
+
+system:
+  name: test-eva
+  groupId: com.example
+  javaVersion: 21
+  springBootVersion: 3.5.5
+  database: postgresql
+
+# ─── Temporal reemplaza tanto messaging (Kafka) como sync (Feign) ────────────
+orchestration:
+  enabled: true
+  engine: temporal
+  temporal:
+    target: localhost:7233
+    namespace: test-eva
+    taskQueues:
+      light: LIGHT_TASK_QUEUE      # Activities rápidas (< 30s)
+      heavy: HEAVY_TASK_QUEUE      # Activities pesadas (hasta 2min)
+
+modules:
+  - name: products
+    description: "Product catalog management for household goods"
+    exposes:
+      - method: GET
+        path: /products/{id}
+        useCase: GetProduct
+      - method: GET
+        path: /products
+        useCase: FindAllProducts
+      - method: POST
+        path: /products
+        useCase: CreateProduct
+      - method: PUT
+        path: /products/{id}
+        useCase: UpdateProduct
+      - method: DELETE
+        path: /products/{id}
+        useCase: DeleteProduct
+
+  - name: customers
+    description: "Customer registration and profile management"
+    exposes:
+      - method: GET
+        path: /customers/{id}
+        useCase: GetCustomer
+      - method: GET
+        path: /customers
+        useCase: FindAllCustomers
+      - method: POST
+        path: /customers
+        useCase: CreateCustomer
+      - method: PUT
+        path: /customers/{id}
+        useCase: UpdateCustomer
+
+  - name: orders
+    description: "Order lifecycle management from placement to completion"
+    exposes:
+      - method: POST
+        path: /orders
+        useCase: CreateOrder
+      - method: GET
+        path: /orders/{id}
+        useCase: GetOrder
+      - method: GET
+        path: /orders
+        useCase: FindAllOrders
+      - method: PUT
+        path: /orders/{id}/cancel
+        useCase: CancelOrder
+
+  - name: payments
+    description: "Payment processing and external payment gateway integration"
+    exposes:
+      - method: POST
+        path: /payments
+        useCase: CreatePayment
+      - method: GET
+        path: /payments/{id}
+        useCase: GetPayment
+      - method: GET
+        path: /payments
+        useCase: FindAllPayments
+      - method: POST
+        path: /payments/{id}/refund
+        useCase: RefundPayment
+
+  - name: inventory
+    description: "Stock level management, reservation, and replenishment"
+    exposes:
+      - method: GET
+        path: /inventory/{productId}
+        useCase: GetStock
+      - method: GET
+        path: /inventory
+        useCase: FindAllStocks
+      - method: PUT
+        path: /inventory/{productId}/adjust
+        useCase: AdjustStock
+      - method: POST
+        path: /inventory/{productId}/reserve
+        useCase: ReserveStock
+      - method: POST
+        path: /inventory/{productId}/release
+        useCase: ReleaseStock
+
+  - name: notifications
+    description: "Notification delivery service for email and SMS alerts"
+
+# =============================================================================
+# WORKFLOWS: Reemplazan integrations.async + integrations.sync
+# =============================================================================
+# Cada workflow orquesta una secuencia de activities cross-module.
+# El productor del evento CONOCE a todos los consumidores (acoplamiento explícito).
+# =============================================================================
+
+workflows:
+
+  # ─── Producto creado: el productor orquesta a TODOS los consumidores ───────
+  - name: ProductCreatedWorkflow
+    trigger:
+      module: products
+      on: create                       # Se dispara al crear un producto
+    taskQueue: LIGHT_TASK_QUEUE
+    steps:
+      - activity: InitializeStock
+        target: inventory              # Antes era: listener en inventory
+        type: sync                     # El workflow espera el resultado
+        input:
+          - productId
+          - name
+        compensation: DeleteStock      # Rollback si falla un paso posterior
+
+      - activity: SyncProductReadModel
+        target: orders                 # Antes era: readModel syncedBy
+        type: async                    # Fire-and-forget dentro del workflow
+        input:
+          - productId
+          - name
+          - price
+          - category
+
+  # ─── Producto actualizado ──────────────────────────────────────────────────
+  - name: ProductUpdatedWorkflow
+    trigger:
+      module: products
+      on: update
+    taskQueue: LIGHT_TASK_QUEUE
+    steps:
+      - activity: SyncProductReadModel
+        target: orders
+        type: async
+        input:
+          - productId
+          - name
+          - price
+          - category
+
+  # ─── Producto desactivado ──────────────────────────────────────────────────
+  - name: ProductDeactivatedWorkflow
+    trigger:
+      module: products
+      on: softDelete
+    taskQueue: LIGHT_TASK_QUEUE
+    steps:
+      - activity: SoftDeleteProductReadModel
+        target: orders
+        type: async
+        input:
+          - productId
+
+  # ─── Cliente creado: sincronizar read models en 2 módulos ──────────────────
+  - name: CustomerCreatedWorkflow
+    trigger:
+      module: customers
+      on: create
+    taskQueue: LIGHT_TASK_QUEUE
+    steps:
+      - activity: SyncCustomerReadModel
+        target: orders
+        type: async
+        input: [customerId, firstName, lastName, email, phone]
+      - activity: SyncCustomerReadModel        # ⚠️ Mismo nombre, distinto target
+        target: notifications                   # → requiere alias o calificación
+        type: async
+        input: [customerId, firstName, lastName, email, phone]
+
+  # ─── Cliente actualizado ───────────────────────────────────────────────────
+  - name: CustomerUpdatedWorkflow
+    trigger:
+      module: customers
+      on: update
+    taskQueue: LIGHT_TASK_QUEUE
+    steps:
+      - activity: SyncCustomerReadModel
+        target: orders
+        type: async
+        input: [customerId, firstName, lastName, email, phone]
+      - activity: SyncCustomerReadModel
+        target: notifications
+        type: async
+        input: [customerId, firstName, lastName, email, phone]
+
+  # ─── Orden creada: SAGA completa (reservar → pagar → confirmar) ────────────
+  # Este es el caso donde Temporal BRILLA — saga con compensación durable.
+  - name: PlaceOrderWorkflow
+    trigger:
+      module: orders
+      on: create
+    taskQueue: HEAVY_TASK_QUEUE
+    saga: true                         # Habilita compensación automática
+    steps:
+      # Paso 1: Reservar stock (sync — necesita consistencia fuerte)
+      - activity: ReserveStock
+        target: inventory
+        type: sync
+        input: [orderId, items]        # items = [{productId, quantity}]
+        compensation: ReleaseStock
+        timeout: 10s
+
+      # Paso 2: Procesar pago (sync — esperamos resultado)
+      - activity: ProcessOrderPayment
+        target: payments
+        type: sync
+        input: [orderId, customerId, totalAmount]
+        compensation: RefundPayment
+        timeout: 30s
+
+      # Paso 3: Confirmar orden (local — mismo módulo)
+      - activity: ConfirmOrder
+        target: orders
+        type: sync
+        input: [orderId]
+
+      # Paso 4: Notificar (async — fire-and-forget, no afecta saga)
+      - activity: NotifyOrderPlaced
+        target: notifications
+        type: async
+        input: [orderId, customerId, totalAmount]
+
+  # ─── Orden cancelada ──────────────────────────────────────────────────────
+  - name: CancelOrderWorkflow
+    trigger:
+      module: orders
+      on: cancel
+    taskQueue: LIGHT_TASK_QUEUE
+    steps:
+      - activity: ReleaseStock
+        target: inventory
+        type: sync
+        input: [orderId, items]
+      - activity: NotifyOrderCancelled
+        target: notifications
+        type: async
+        input: [orderId, customerId]
+
+  # ─── Pago aprobado: antes era un evento Kafka consumido por orders ─────────
+  # Con Temporal, el workflow de PlaceOrderWorkflow ya integra esto
+  # internamente (paso 3: ConfirmOrder). Este workflow separado NO se necesita.
+  # Se deja comentado para comparación:
+  #
+  # - name: PaymentApprovedWorkflow     # ← ELIMINADO, absorbido por saga
+  #   trigger:
+  #     module: payments
+  #     on: approve
+  #   steps:
+  #     - activity: ConfirmOrder
+  #       target: orders
+
+  # ─── Pago fallido: idem, la saga de PlaceOrderWorkflow lo maneja ───────────
+  # Si el paso ProcessOrderPayment falla → saga compensa automáticamente
+  # (ReleaseStock) y marca la orden como PAYMENT_FAILED.

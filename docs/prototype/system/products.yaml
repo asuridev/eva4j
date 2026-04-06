@@ -1,0 +1,130 @@
+# =============================================================================
+# PROTOTYPE: products.yaml — versión Temporal (sin Kafka)
+# =============================================================================
+# Cambios vs original:
+#   - events[] MANTIENE los Domain Events internos (raise() sigue funcionando)
+#   - ELIMINA topic: — ya no hay topics Kafka
+#   - AGREGA notifies: — lista de activities que el workflow debe invocar
+#   - endpoints, aggregates, enums → SIN CAMBIOS
+# =============================================================================
+
+aggregates:
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        tableName: products
+        hasSoftDelete: true
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Product name is required"
+          - name: description
+            type: String
+          - name: price
+            type: BigDecimal
+            validations:
+              - type: Positive
+                message: "Price must be positive"
+              - type: NotNull
+                message: "Price is required"
+          - name: category
+            type: ProductCategory
+          - name: imageUrl
+            type: String
+          - name: sku
+            type: String
+            validations:
+              - type: NotBlank
+                message: "SKU is required"
+          - name: active
+            type: Boolean
+            readOnly: true
+            defaultValue: true
+
+    enums:
+      - name: ProductCategory
+        values:
+          - GRAINS
+          - DAIRY
+          - MEAT
+          - FRUITS
+          - VEGETABLES
+          - BEVERAGES
+          - CLEANING
+          - PERSONAL_CARE
+          - SNACKS
+          - OTHER
+
+    events:
+      # Domain Events internos se mantienen (raise() en la entidad).
+      # La diferencia: ya no generan IntegrationEvent ni MessageBroker.
+      # En su lugar, un WorkflowService los intercepta y lanza el workflow.
+      - name: ProductCreatedEvent
+        lifecycle: create
+        # topic: PRODUCT_CREATED      ← ELIMINADO (no hay Kafka)
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: category
+            type: String
+        # ⚠️ NUEVO: el productor debe saber a quién notificar
+        notifies:
+          - workflow: ProductCreatedWorkflow    # Definido en system.yaml
+
+      - name: ProductUpdatedEvent
+        lifecycle: update
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+          - name: category
+            type: String
+        notifies:
+          - workflow: ProductUpdatedWorkflow
+
+      - name: ProductDeactivatedEvent
+        lifecycle: softDelete
+        fields:
+          - name: productId
+            type: String
+        notifies:
+          - workflow: ProductDeactivatedWorkflow
+
+endpoints:
+  basePath: /products
+  versions:
+    - version: v1
+      operations:
+        - useCase: GetProduct
+          method: GET
+          path: /{id}
+        - useCase: FindAllProducts
+          method: GET
+          path: /
+        - useCase: CreateProduct
+          method: POST
+          path: /
+        - useCase: UpdateProduct
+          method: PUT
+          path: /{id}
+        - useCase: DeleteProduct
+          method: DELETE
+          path: /{id}
+
+# ─── ELIMINADO: No hay listeners (products no consume eventos) ───────────────
+# ─── ELIMINADO: No hay ports (products no llama a otros servicios) ────────────
+# ─── ELIMINADO: No hay readModels (products no proyecta datos ajenos) ─────────

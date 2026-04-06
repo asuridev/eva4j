@@ -1,0 +1,111 @@
+# =============================================================================
+# PROTOTYPE: customers.yaml — versión Temporal (sin Kafka)
+# =============================================================================
+
+aggregates:
+  - name: Customer
+    entities:
+      - name: customer
+        isRoot: true
+        tableName: customers
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: firstName
+            type: String
+            validations:
+              - type: NotBlank
+                message: "First name is required"
+          - name: lastName
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Last name is required"
+          - name: email
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Email is required"
+              - type: Email
+                message: "Invalid email format"
+          - name: phone
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Phone number is required"
+          - name: address
+            type: Address
+
+    valueObjects:
+      - name: Address
+        fields:
+          - name: street
+            type: String
+          - name: city
+            type: String
+          - name: department
+            type: String
+          - name: zipCode
+            type: String
+          - name: neighborhood
+            type: String
+        methods:
+          - name: format
+            returnType: String
+            parameters: []
+            body: "return street + \", \" + neighborhood + \", \" + city + \" (\" + department + \") \" + zipCode;"
+
+    events:
+      - name: CustomerCreatedEvent
+        lifecycle: create
+        fields:
+          - name: customerId
+            type: String
+          - name: firstName
+            type: String
+          - name: lastName
+            type: String
+          - name: email
+            type: String
+          - name: phone
+            type: String
+        notifies:
+          - workflow: CustomerCreatedWorkflow
+          # ⚠️ ACOPLAMIENTO: customers ahora SABE que orders y notifications
+          #    necesitan sus datos. Con Kafka, no necesitaba saberlo.
+
+      - name: CustomerUpdatedEvent
+        lifecycle: update
+        fields:
+          - name: customerId
+            type: String
+          - name: firstName
+            type: String
+          - name: lastName
+            type: String
+          - name: email
+            type: String
+          - name: phone
+            type: String
+        notifies:
+          - workflow: CustomerUpdatedWorkflow
+
+endpoints:
+  basePath: /customers
+  versions:
+    - version: v1
+      operations:
+        - useCase: GetCustomer
+          method: GET
+          path: /{id}
+        - useCase: FindAllCustomers
+          method: GET
+          path: /
+        - useCase: CreateCustomer
+          method: POST
+          path: /
+        - useCase: UpdateCustomer
+          method: PUT
+          path: /{id}

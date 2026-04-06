@@ -1,0 +1,157 @@
+# =============================================================================
+# PROTOTYPE: notifications.yaml — versión Temporal (sin Kafka)
+# =============================================================================
+# Cambios vs original:
+#   - ELIMINA listeners[] (4 listeners de eventos Kafka)
+#   - AGREGA activities[] — cada notificación es una Activity
+#   - readModels.syncedBy cambia de eventos a Activities
+# =============================================================================
+
+aggregates:
+  - name: Notification
+    entities:
+      - name: notification
+        isRoot: true
+        tableName: notifications
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: recipientEmail
+            type: String
+          - name: recipientPhone
+            type: String
+          - name: type
+            type: NotificationType
+          - name: channel
+            type: NotificationChannel
+          - name: status
+            type: NotificationStatus
+            readOnly: true
+          - name: subject
+            type: String
+          - name: body
+            type: String
+          - name: referenceId
+            type: String
+          - name: sentAt
+            type: LocalDateTime
+            readOnly: true
+
+    enums:
+      - name: NotificationType
+        values:
+          - ORDER_PLACED
+          - ORDER_CANCELLED
+          - PAYMENT_APPROVED
+          - PAYMENT_FAILED
+
+      - name: NotificationChannel
+        values:
+          - EMAIL
+          - SMS
+
+      - name: NotificationStatus
+        initialValue: PENDING
+        transitions:
+          - from: PENDING
+            to: SENT
+            method: markAsSent
+          - from: PENDING
+            to: FAILED
+            method: markAsFailed
+        values: [PENDING, SENT, FAILED]
+
+# ─── Activities que este módulo EXPONE ───────────────────────────────────────
+# Antes: 4 KafkaListeners. Ahora: 4 Activities invocables por workflows.
+activities:
+  - name: NotifyOrderPlaced
+    type: light
+    description: "Envía notificación de orden colocada"
+    input:
+      - name: orderId
+        type: String
+      - name: customerId
+        type: String
+      - name: totalAmount
+        type: BigDecimal
+    timeout: 15s
+
+  - name: NotifyOrderCancelled
+    type: light
+    description: "Envía notificación de orden cancelada"
+    input:
+      - name: orderId
+        type: String
+      - name: customerId
+        type: String
+    timeout: 15s
+
+  - name: NotifyPaymentApproved
+    type: light
+    description: "Envía notificación de pago aprobado"
+    input:
+      - name: orderId
+        type: String
+      - name: customerId
+        type: String
+      - name: amount
+        type: BigDecimal
+    timeout: 15s
+
+  - name: NotifyPaymentFailed
+    type: light
+    description: "Envía notificación de pago fallido"
+    input:
+      - name: orderId
+        type: String
+      - name: customerId
+        type: String
+      - name: reason
+        type: String
+    timeout: 15s
+
+  # Activity para sincronizar ReadModel
+  - name: SyncCustomerReadModel
+    type: light
+    description: "Actualiza proyección local de Customer"
+    input:
+      - name: customerId
+        type: String
+      - name: firstName
+        type: String
+      - name: lastName
+        type: String
+      - name: email
+        type: String
+      - name: phone
+        type: String
+    timeout: 5s
+
+# ─── ELIMINADOS: listeners[] ─────────────────────────────────────────────────
+
+readModels:
+  - name: CustomerReadModel
+    source:
+      module: customers
+      aggregate: Customer
+    tableName: rm_notifications_customers
+    fields:
+      - name: id
+        type: String
+      - name: firstName
+        type: String
+      - name: lastName
+        type: String
+      - name: email
+        type: String
+      - name: phone
+        type: String
+    syncedBy:
+      - activity: SyncCustomerReadModel
+        action: UPSERT
+        triggeredBy: CustomerCreatedWorkflow
+      - activity: SyncCustomerReadModel
+        action: UPSERT
+        triggeredBy: CustomerUpdatedWorkflow

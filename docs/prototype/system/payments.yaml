@@ -1,0 +1,217 @@
+# =============================================================================
+# PROTOTYPE: payments.yaml — versión Temporal (sin Kafka)
+# =============================================================================
+# Cambios vs original:
+#   - ELIMINA listeners[] — ya no consume OrderPlacedEvent por Kafka
+#   - ELIMINA events[] con topic: — ya no publica por Kafka
+#   - Los eventos internos siguen existiendo para lógica de dominio
+#   - ports[] SE MANTIENE — PaymentGateway es un servicio EXTERNO (no Temporal)
+#   - ProcessOrderPayment es ahora una Activity invocada por PlaceOrderWorkflow
+# =============================================================================
+
+aggregates:
+  - name: Payment
+    entities:
+      - name: payment
+        isRoot: true
+        tableName: payments
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: orderId
+            type: String
+            reference:
+              aggregate: Order
+              module: orders
+            validations:
+              - type: NotBlank
+                message: "Order ID is required"
+          - name: customerId
+            type: String
+            reference:
+              aggregate: Customer
+              module: customers
+          - name: amount
+            type: BigDecimal
+            validations:
+              - type: Positive
+                message: "Amount must be positive"
+              - type: NotNull
+                message: "Amount is required"
+          - name: currency
+            type: String
+            readOnly: true
+            defaultValue: "COP"
+          - name: status
+            type: PaymentStatus
+            readOnly: true
+          - name: paymentMethod
+            type: PaymentMethod
+          - name: transactionId
+            type: String
+            readOnly: true
+            hidden: true
+          - name: gatewayResponse
+            type: String
+            readOnly: true
+            hidden: true
+
+    enums:
+      - name: PaymentStatus
+        initialValue: PENDING
+        transitions:
+          - from: PENDING
+            to: APPROVED
+            method: approve
+          - from: PENDING
+            to: FAILED
+            method: fail
+          - from: APPROVED
+            to: REFUNDED
+            method: refund
+        values: [PENDING, APPROVED, FAILED, REFUNDED]
+
+      - name: PaymentMethod
+        values:
+          - CREDIT_CARD
+          - DEBIT_CARD
+          - PSE
+          - NEQUI
+          - CASH_ON_DELIVERY
+
+    events:
+      # Domain Events internos — siguen existiendo para la entidad.
+      # PERO ya no generan IntegrationEvent ni MessageBroker.
+      # El resultado del pago lo retorna la Activity directamente al workflow.
+      - name: PaymentApprovedEvent
+        triggers:
+          - approve
+        fields:
+          - name: paymentId
+            type: String
+          - name: orderId
+            type: String
+          - name: customerId
+            type: String
+          - name: amount
+            type: BigDecimal
+          - name: approvedAt
+            type: LocalDateTime
+        # ⚠️ SIN notifies: — el resultado viaja como retorno de Activity,
+        #    no como evento. El workflow ya sabe qué hacer.
+
+      - name: PaymentFailedEvent
+        triggers:
+          - fail
+        fields:
+          - name: paymentId
+            type: String
+          - name: orderId
+            type: String
+          - name: customerId
+            type: String
+          - name: reason
+            type: String
+
+# ─── Activities que este módulo EXPONE a workflows de otros módulos ──────────
+# Concepto nuevo: en Kafka, payments "escuchaba" OrderPlacedEvent.
+# Con Temporal, payments "ofrece" una Activity que el workflow de orders invoca.
+activities:
+  - name: ProcessOrderPayment
+    type: heavy                        # Puede tardar (gateway externo)
+    description: "Crea un pago y cobra al gateway externo"
+    input:
+      - name: orderId
+        type: String
+      - name: customerId
+        type: String
+      - name: totalAmount
+        type: BigDecimal
+    output:
+      - name: paymentId
+        type: String
+      - name: status
+        type: String                   # APPROVED | FAILED
+      - name: reason
+        type: String                   # null si APPROVED
+    timeout: 30s
+    retryPolicy:
+      maxAttempts: 3
+      initialInterval: 1s
+      backoffCoefficient: 2.0
+
+  - name: RefundPayment
+    type: heavy
+    description: "Reembolsa un pago aprobado (compensación de saga)"
+    input:
+      - name: paymentId
+        type: String
+    output:
+      - name: refundId
+        type: String
+      - name: status
+        type: String
+
+# ─── ELIMINADOS: listeners[] ─────────────────────────────────────────────────
+# OrderPlacedEvent ya no se consume. ProcessOrderPayment es una Activity.
+
+# ─── ports[] SE MANTIENE para servicios EXTERNOS (no-Temporal) ───────────────
+# PaymentGateway es un proveedor externo — no corre workers Temporal.
+# Para servicios externos, HTTP sigue siendo necesario.
+ports:
+  - name: processCharge
+    service: PaymentGatewayService
+    target: payment-gateway
+    baseUrl: https://api.payments.example.com
+    http: POST /charges
+    body:
+      - name: amount
+        type: BigDecimal
+      - name: currency
+        type: String
+      - name: paymentMethod
+        type: String
+      - name: description
+        type: String
+    fields:
+      - name: transactionId
+        type: String
+      - name: status
+        type: String
+      - name: message
+        type: String
+
+  - name: processRefund
+    service: PaymentGatewayService
+    target: payment-gateway
+    http: POST /refunds
+    body:
+      - name: transactionId
+        type: String
+      - name: amount
+        type: BigDecimal
+    fields:
+      - name: refundId
+        type: String
+      - name: status
+        type: String
+
+endpoints:
+  basePath: /payments
+  versions:
+    - version: v1
+      operations:
+        - useCase: CreatePayment
+          method: POST
+          path: /
+        - useCase: GetPayment
+          method: GET
+          path: /{id}
+        - useCase: FindAllPayments
+          method: GET
+          path: /
+        - useCase: RefundPayment
+          method: POST
+          path: /{id}/refund

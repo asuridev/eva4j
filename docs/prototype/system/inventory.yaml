@@ -1,0 +1,103 @@
+# =============================================================================
+# PROTOTYPE: inventory.yaml — versión Temporal (sin Kafka)
+# =============================================================================
+# Cambios vs original:
+#   - ELIMINA listeners[] — ya no consume ProductCreatedEvent por Kafka
+#   - AGREGA activities[] — expone Activities para que workflows las invoquen
+#   - endpoints, aggregates → SIN CAMBIOS
+# =============================================================================
+
+aggregates:
+  - name: Stock
+    entities:
+      - name: stock
+        isRoot: true
+        tableName: stock_items
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: productId
+            type: String
+            reference:
+              aggregate: Product
+              module: products
+            validations:
+              - type: NotBlank
+                message: "Product ID is required"
+          - name: quantity
+            type: Integer
+            validations:
+              - type: PositiveOrZero
+                message: "Quantity cannot be negative"
+
+# ─── Activities que este módulo EXPONE ───────────────────────────────────────
+activities:
+  - name: InitializeStock
+    type: light
+    description: "Crea un registro de stock inicial para un producto nuevo"
+    input:
+      - name: productId
+        type: String
+      - name: name
+        type: String
+    timeout: 10s
+
+  - name: ReserveStock
+    type: light
+    description: "Reserva stock para una orden"
+    input:
+      - name: orderId
+        type: String
+      - name: items
+        type: List              # [{productId, quantity}]
+    output:
+      - name: success
+        type: Boolean
+      - name: availableQuantity
+        type: Integer
+    timeout: 10s
+    compensation: ReleaseStock  # Compensación explícita
+
+  - name: ReleaseStock
+    type: light
+    description: "Libera stock reservado (compensación)"
+    input:
+      - name: orderId
+        type: String
+      - name: items
+        type: List
+    timeout: 10s
+
+  - name: DeleteStock
+    type: light
+    description: "Elimina stock de un producto (compensación de InitializeStock)"
+    input:
+      - name: productId
+        type: String
+    timeout: 5s
+
+# ─── ELIMINADOS: listeners[] ─────────────────────────────────────────────────
+# ProductCreatedEvent → ya no se consume. InitializeStock es una Activity.
+
+endpoints:
+  basePath: /inventory
+  versions:
+    - version: v1
+      operations:
+        - useCase: GetStock
+          method: GET
+          path: /{productId}
+        - useCase: FindAllStocks
+          method: GET
+          path: /
+        - useCase: AdjustStock
+          method: PUT
+          path: /{productId}/adjust
+        - useCase: ReserveStock
+          method: POST
+          path: /{productId}/reserve
+        - useCase: ReleaseStock
+          method: POST
+          path: /{productId}/release

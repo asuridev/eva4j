@@ -1,0 +1,235 @@
+# =============================================================================
+# PROTOTYPE: orders.yaml — versión Temporal (sin Kafka)
+# =============================================================================
+# Cambios vs original:
+#   - ELIMINA listeners[] — el workflow ya integra la respuesta del pago
+#   - ELIMINA ports[] — la reserva de stock es una Activity del workflow
+#   - readModels[] SE MANTIENE — pero syncedBy referencia Activities, no eventos
+#   - events[] pierde topic:, gana notifies:
+#   - AGREGA saga: — referencia al workflow definido en system.yaml
+# =============================================================================
+
+aggregates:
+  - name: Order
+    entities:
+      - name: order
+        isRoot: true
+        tableName: orders
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: customerId
+            type: String
+            reference:
+              aggregate: Customer
+              module: customers
+            validations:
+              - type: NotBlank
+                message: "Customer ID is required"
+          - name: status
+            type: OrderStatus
+            readOnly: true
+          - name: totalAmount
+            type: BigDecimal
+            readOnly: true
+            defaultValue: "0.00"
+          - name: itemCount
+            type: Integer
+            readOnly: true
+            defaultValue: 0
+          - name: shippingAddress
+            type: ShippingAddress
+          - name: notes
+            type: String
+        relationships:
+          - type: OneToMany
+            target: OrderItem
+            mappedBy: order
+            cascade: [PERSIST, MERGE, REMOVE]
+            fetch: LAZY
+
+      - name: orderItem
+        tableName: order_items
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: productId
+            type: String
+            reference:
+              aggregate: Product
+              module: products
+          - name: productName
+            type: String
+          - name: quantity
+            type: Integer
+            validations:
+              - type: Min
+                value: 1
+                message: "Quantity must be at least 1"
+          - name: unitPrice
+            type: BigDecimal
+            validations:
+              - type: Positive
+                message: "Unit price must be positive"
+          - name: subtotal
+            type: BigDecimal
+            readOnly: true
+
+    valueObjects:
+      - name: ShippingAddress
+        fields:
+          - name: street
+            type: String
+          - name: city
+            type: String
+          - name: department
+            type: String
+          - name: zipCode
+            type: String
+          - name: neighborhood
+            type: String
+        methods:
+          - name: format
+            returnType: String
+            parameters: []
+            body: "return street + \", \" + neighborhood + \", \" + city + \" (\" + department + \") \" + zipCode;"
+
+    enums:
+      - name: OrderStatus
+        initialValue: PENDING
+        transitions:
+          - from: PENDING
+            to: CONFIRMED
+            method: confirm
+          - from: PENDING
+            to: CANCELLED
+            method: cancel
+          - from: PENDING
+            to: PAYMENT_FAILED
+            method: failPayment
+        values: [PENDING, CONFIRMED, CANCELLED, PAYMENT_FAILED]
+
+    events:
+      - name: OrderPlacedEvent
+        # lifecycle: create  ← No se usa lifecycle aquí porque CreateOrder
+        # lanza el PlaceOrderWorkflow que orquesta todo el flujo
+        fields:
+          - name: orderId
+            type: String
+          - name: customerId
+            type: String
+          - name: totalAmount
+            type: BigDecimal
+          - name: placedAt
+            type: LocalDateTime
+        notifies:
+          - workflow: PlaceOrderWorkflow      # ← La saga completa
+
+      - name: OrderCancelledEvent
+        triggers:
+          - cancel
+        fields:
+          - name: orderId
+            type: String
+          - name: customerId
+            type: String
+        notifies:
+          - workflow: CancelOrderWorkflow
+
+# ─── SAGRADO CAMBIO: Declarar que este módulo participa en una saga ──────────
+# Con Temporal, el flujo de crear orden es un workflow completo.
+# El CreateOrderCommandHandler ya no solo persiste — lanza el workflow.
+saga:
+  workflow: PlaceOrderWorkflow
+  description: "Reservar stock → Procesar pago → Confirmar orden → Notificar"
+
+# ─── ELIMINADO: listeners[] ──────────────────────────────────────────────────
+# PaymentApprovedEvent y PaymentFailedEvent ya no llegan como eventos Kafka.
+# El PlaceOrderWorkflow espera el resultado de ProcessOrderPayment directamente
+# (paso sync en la saga). Si falla → compensa. Si aprueba → confirma.
+# ⚠️ CONSECUENCIA: el módulo payments pierde autonomía — no puede aprobar/fallar
+#    de forma asíncrona. El workflow bloquea esperando el resultado.
+
+# ─── ELIMINADO: ports[] ─────────────────────────────────────────────────────
+# ReserveStock y ReleaseStock ya no son Feign calls.
+# Son Activities ejecutadas por el worker de inventory.
+# ⚠️ CONSECUENCIA: orders necesita que el worker de inventory esté levantado
+#    en la misma infraestructura Temporal. No puede ser un servicio externo
+#    que solo expone HTTP.
+
+# ─── readModels: se mantiene, pero la sincronización cambia ─────────────────
+# En lugar de KafkaListeners, Activities del workflow del productor actualizan
+# las read models directamente.
+readModels:
+  - name: CustomerReadModel
+    source:
+      module: customers
+      aggregate: Customer
+    tableName: rm_orders_customers
+    fields:
+      - name: id
+        type: String
+      - name: firstName
+        type: String
+      - name: lastName
+        type: String
+      - name: email
+        type: String
+      - name: phone
+        type: String
+    syncedBy:
+      # ⚠️ syncedBy ya no referencia eventos Kafka sino Activities
+      - activity: SyncCustomerReadModel     # Activity ejecutada por worker de orders
+        action: UPSERT
+        triggeredBy: CustomerCreatedWorkflow
+      - activity: SyncCustomerReadModel
+        action: UPSERT
+        triggeredBy: CustomerUpdatedWorkflow
+
+  - name: ProductReadModel
+    source:
+      module: products
+      aggregate: Product
+    tableName: rm_orders_products
+    fields:
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+      - name: category
+        type: String
+    syncedBy:
+      - activity: SyncProductReadModel
+        action: UPSERT
+        triggeredBy: ProductCreatedWorkflow
+      - activity: SyncProductReadModel
+        action: UPSERT
+        triggeredBy: ProductUpdatedWorkflow
+      - activity: SoftDeleteProductReadModel
+        action: SOFT_DELETE
+        triggeredBy: ProductDeactivatedWorkflow
+
+endpoints:
+  basePath: /orders
+  versions:
+    - version: v1
+      operations:
+        - useCase: CreateOrder
+          method: POST
+          path: /
+        - useCase: GetOrder
+          method: GET
+          path: /{id}
+        - useCase: FindAllOrders
+          method: GET
+          path: /
+        - useCase: CancelOrder
+          method: PUT
+          path: /{id}/cancel
