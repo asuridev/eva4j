@@ -71,10 +71,10 @@ aggregates:
             type: String
           - name: phone
             type: String
-        notifies:
-          - workflow: CustomerCreatedWorkflow
-          # ⚠️ ACOPLAMIENTO: customers ahora SABE que orders y notifications
-          #    necesitan sus datos. Con Kafka, no necesitaba saberlo.
+        # SIN notifies → Domain Event interno.
+        # Sin read models, no hay workflows de sincronización.
+        # Los workflows que necesitan datos de cliente los obtienen
+        # on-demand via GetCustomerById (Remote Activity).
 
       - name: CustomerUpdatedEvent
         lifecycle: update
@@ -89,8 +89,30 @@ aggregates:
             type: String
           - name: phone
             type: String
-        notifies:
-          - workflow: CustomerUpdatedWorkflow
+        # SIN notifies → Domain Event interno.
+
+# ─── Activities que este módulo EXPONE ───────────────────────────────────────
+# Activity de lectura: permite a PlaceOrderWorkflow y CancelOrderWorkflow
+# obtener datos del cliente on-demand (nombre, email para notificaciones).
+activities:
+  - name: GetCustomerById
+    type: light
+    description: "Obtiene un cliente por su ID"
+    input:
+      - name: customerId
+        type: String
+    output:
+      - name: id
+        type: String
+      - name: firstName
+        type: String
+      - name: lastName
+        type: String
+      - name: email
+        type: String
+      - name: phone
+        type: String
+    timeout: 5s
 
 endpoints:
   basePath: /customers

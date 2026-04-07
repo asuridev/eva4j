@@ -19,7 +19,7 @@ public class <%= flowPascalCase %>WorkFlowImpl implements <%= flowPascalCase %>W
 
     private final ActivityOptions lightActivityOptions = ActivityOptions.newBuilder()
         .setStartToCloseTimeout(Duration.ofSeconds(30))
-        .setTaskQueue("LIGHT_TASK_QUEUE")
+        .setTaskQueue("<%= moduleScreamingSnake %>_LIGHT_TASK_QUEUE")
         .setRetryOptions(
             RetryOptions.newBuilder()
                 .setMaximumAttempts(2)
@@ -31,7 +31,7 @@ public class <%= flowPascalCase %>WorkFlowImpl implements <%= flowPascalCase %>W
 
     private final ActivityOptions heavyActivityOptions = ActivityOptions.newBuilder()
         .setStartToCloseTimeout(Duration.ofSeconds(120))
-        .setTaskQueue("HEAVY_TASK_QUEUE")
+        .setTaskQueue("<%= moduleScreamingSnake %>_HEAVY_TASK_QUEUE")
         .setRetryOptions(
             RetryOptions.newBuilder()
                 .setMaximumAttempts(2)

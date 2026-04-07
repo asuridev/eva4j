@@ -1,10 +1,12 @@
 # =============================================================================
-# PROTOTYPE: notifications.yaml — versión Temporal (sin Kafka)
+# PROTOTYPE: notifications.yaml — versión Temporal (sin Kafka, sin Read Models)
 # =============================================================================
 # Cambios vs original:
 #   - ELIMINA listeners[] (4 listeners de eventos Kafka)
+#   - ELIMINA readModels[] (CustomerReadModel) — datos de cliente llegan como
+#     input de las Activities, inyectados por el workflow caller
 #   - AGREGA activities[] — cada notificación es una Activity
-#   - readModels.syncedBy cambia de eventos a Activities
+#   - Activities reciben customerEmail/customerName directamente (no lookup local)
 # =============================================================================
 
 aggregates:
@@ -64,15 +66,19 @@ aggregates:
         values: [PENDING, SENT, FAILED]
 
 # ─── Activities que este módulo EXPONE ───────────────────────────────────────
-# Antes: 4 KafkaListeners. Ahora: 4 Activities invocables por workflows.
+# Cada activity recibe TODA la data necesaria como input — zero lookups locales.
+# El workflow caller (PlaceOrderWorkflow, CancelOrderWorkflow) obtiene datos
+# del cliente via GetCustomerById y los pasa aquí directamente.
 activities:
   - name: NotifyOrderPlaced
     type: light
-    description: "Envía notificación de orden colocada"
+    description: "Envía notificación de orden colocada al cliente"
     input:
       - name: orderId
         type: String
-      - name: customerId
+      - name: customerEmail
+        type: String
+      - name: customerName
         type: String
       - name: totalAmount
         type: BigDecimal
@@ -80,21 +86,25 @@ activities:
 
   - name: NotifyOrderCancelled
     type: light
-    description: "Envía notificación de orden cancelada"
+    description: "Envía notificación de orden cancelada al cliente"
     input:
       - name: orderId
         type: String
-      - name: customerId
+      - name: customerEmail
+        type: String
+      - name: customerName
         type: String
     timeout: 15s
 
   - name: NotifyPaymentApproved
     type: light
-    description: "Envía notificación de pago aprobado"
+    description: "Envía notificación de pago aprobado al cliente"
     input:
       - name: orderId
         type: String
-      - name: customerId
+      - name: customerEmail
+        type: String
+      - name: customerName
         type: String
       - name: amount
         type: BigDecimal
@@ -102,56 +112,20 @@ activities:
 
   - name: NotifyPaymentFailed
     type: light
-    description: "Envía notificación de pago fallido"
+    description: "Envía notificación de pago fallido al cliente"
     input:
       - name: orderId
         type: String
-      - name: customerId
+      - name: customerEmail
+        type: String
+      - name: customerName
         type: String
       - name: reason
         type: String
     timeout: 15s
 
-  # Activity para sincronizar ReadModel
-  - name: SyncCustomerReadModel
-    type: light
-    description: "Actualiza proyección local de Customer"
-    input:
-      - name: customerId
-        type: String
-      - name: firstName
-        type: String
-      - name: lastName
-        type: String
-      - name: email
-        type: String
-      - name: phone
-        type: String
-    timeout: 5s
-
-# ─── ELIMINADOS: listeners[] ─────────────────────────────────────────────────
-
-readModels:
-  - name: CustomerReadModel
-    source:
-      module: customers
-      aggregate: Customer
-    tableName: rm_notifications_customers
-    fields:
-      - name: id
-        type: String
-      - name: firstName
-        type: String
-      - name: lastName
-        type: String
-      - name: email
-        type: String
-      - name: phone
-        type: String
-    syncedBy:
-      - activity: SyncCustomerReadModel
-        action: UPSERT
-        triggeredBy: CustomerCreatedWorkflow
-      - activity: SyncCustomerReadModel
-        action: UPSERT
-        triggeredBy: CustomerUpdatedWorkflow
+# ─── ELIMINADOS: listeners[], readModels[], SyncCustomerReadModel ────────────
+# CustomerReadModel ELIMINADO — datos del cliente llegan como input directo.
+# SyncCustomerReadModel ELIMINADO — ya no hay proyección local que mantener.
+# Consecuencia: notifications es un módulo stateless para datos cross-module.
+# Solo persiste las notificaciones enviadas (entidad Notification).

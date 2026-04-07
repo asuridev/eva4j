@@ -20,9 +20,11 @@ orchestration:
   temporal:
     target: localhost:7233
     namespace: test-eva
-    taskQueues:
-      light: LIGHT_TASK_QUEUE      # Activities rápidas (< 30s)
-      heavy: HEAVY_TASK_QUEUE      # Activities pesadas (hasta 2min)
+    # Task queues con prefijo de módulo (module-scoped)
+    # Cada módulo tiene su propio set de queues:
+    #   {MODULE}_WORKFLOW_QUEUE    — Workflows del módulo
+    #   {MODULE}_LIGHT_TASK_QUEUE  — Activities rápidas (< 30s)
+    #   {MODULE}_HEAVY_TASK_QUEUE  — Activities pesadas (hasta 2min)
 
 modules:
   - name: products
@@ -115,117 +117,83 @@ modules:
     description: "Notification delivery service for email and SMS alerts"
 
 # =============================================================================
-# WORKFLOWS: Reemplazan integrations.async + integrations.sync
+# WORKFLOWS: Flujos de negocio cross-module orquestados por Temporal
 # =============================================================================
-# Cada workflow orquesta una secuencia de activities cross-module.
-# El productor del evento CONOCE a todos los consumidores (acoplamiento explícito).
+# Solo flujos de negocio REALES — no hay workflows de sincronización de datos.
+# Datos cross-module se obtienen on-demand con Remote Activities de lectura.
+# Patrones usados (ver TEMPORAL_COMMUNICATION_PATTERNS.md):
+#   - Remote Activity: operación atómica cross-service
+#   - Remote Activity + Async.function(): operaciones independientes en paralelo
 # =============================================================================
 
 workflows:
 
-  # ─── Producto creado: el productor orquesta a TODOS los consumidores ───────
+  # ─── Producto creado: inicializar stock en inventory ───────────────────────
+  # Único consumer real de ProductCreatedEvent.
+  # Sin read models, ya no hay steps de sincronización.
   - name: ProductCreatedWorkflow
     trigger:
       module: products
-      on: create                       # Se dispara al crear un producto
-    taskQueue: LIGHT_TASK_QUEUE
-    steps:
-      - activity: InitializeStock
-        target: inventory              # Antes era: listener en inventory
-        type: sync                     # El workflow espera el resultado
-        input:
-          - productId
-          - name
-        compensation: DeleteStock      # Rollback si falla un paso posterior
-
-      - activity: SyncProductReadModel
-        target: orders                 # Antes era: readModel syncedBy
-        type: async                    # Fire-and-forget dentro del workflow
-        input:
-          - productId
-          - name
-          - price
-          - category
-
-  # ─── Producto actualizado ──────────────────────────────────────────────────
-  - name: ProductUpdatedWorkflow
-    trigger:
-      module: products
-      on: update
-    taskQueue: LIGHT_TASK_QUEUE
-    steps:
-      - activity: SyncProductReadModel
-        target: orders
-        type: async
-        input:
-          - productId
-          - name
-          - price
-          - category
-
-  # ─── Producto desactivado ──────────────────────────────────────────────────
-  - name: ProductDeactivatedWorkflow
-    trigger:
-      module: products
-      on: softDelete
-    taskQueue: LIGHT_TASK_QUEUE
-    steps:
-      - activity: SoftDeleteProductReadModel
-        target: orders
-        type: async
-        input:
-          - productId
-
-  # ─── Cliente creado: sincronizar read models en 2 módulos ──────────────────
-  - name: CustomerCreatedWorkflow
-    trigger:
-      module: customers
       on: create
-    taskQueue: LIGHT_TASK_QUEUE
+    taskQueue: PRODUCT_WORKFLOW_QUEUE
     steps:
-      - activity: SyncCustomerReadModel
-        target: orders
-        type: async
-        input: [customerId, firstName, lastName, email, phone]
-      - activity: SyncCustomerReadModel        # ⚠️ Mismo nombre, distinto target
-        target: notifications                   # → requiere alias o calificación
-        type: async
-        input: [customerId, firstName, lastName, email, phone]
+      - activity: InitializeStock              # Remote Activity → inventory
+        target: inventory
+        type: sync
+        input:
+          - productId
+          - name
+        compensation: DeleteStock
+        timeout: 10s
 
-  # ─── Cliente actualizado ───────────────────────────────────────────────────
-  - name: CustomerUpdatedWorkflow
-    trigger:
-      module: customers
-      on: update
-    taskQueue: LIGHT_TASK_QUEUE
-    steps:
-      - activity: SyncCustomerReadModel
-        target: orders
-        type: async
-        input: [customerId, firstName, lastName, email, phone]
-      - activity: SyncCustomerReadModel
-        target: notifications
-        type: async
-        input: [customerId, firstName, lastName, email, phone]
-
-  # ─── Orden creada: SAGA completa (reservar → pagar → confirmar) ────────────
-  # Este es el caso donde Temporal BRILLA — saga con compensación durable.
+  # ─── Orden creada: SAGA completa ───────────────────────────────────────────
+  # El caso estrella de Temporal — saga con compensación durable.
+  # Sin read models: customer y product data se obtienen on-demand
+  # mediante Remote Activities de lectura.
   - name: PlaceOrderWorkflow
     trigger:
       module: orders
       on: create
-    taskQueue: HEAVY_TASK_QUEUE
-    saga: true                         # Habilita compensación automática
+    taskQueue: ORDER_WORKFLOW_QUEUE
+    saga: true
     steps:
-      # Paso 1: Reservar stock (sync — necesita consistencia fuerte)
+      # Paso 1: Obtener datos del cliente (Remote Activity → customers)
+      # Valida existencia y obtiene email/nombre para notificaciones.
+      - activity: GetCustomerById
+        target: customers
+        type: sync
+        input: [customerId]
+        output: [customerId, firstName, lastName, email, phone]
+        timeout: 5s
+
+      # Paso 2: Obtener info de productos (Remote Activity → products)
+      # Valida que los productos existen y obtiene precios actuales.
+      # ───────────────────────────────────────────────────────────
+      # Paso 3: Reservar stock (Remote Activity → inventory)
+      # ⚡ Pasos 2 y 3 son INDEPENDIENTES → Async.function() en paralelo
+      #    Promise<ProductList> productPromise = Async.function(
+      #        productActivities::getProductsByIds, productIds);
+      #    Promise<ReserveResult> stockPromise = Async.function(
+      #        inventoryActivities::reserveStock, orderId, items);
+      #    Promise.allOf(productPromise, stockPromise).get();
+      - activity: GetProductsByIds
+        target: products
+        type: sync                             # async dentro del workflow
+        input: [productIds]
+        output: [products]                     # [{id, name, price, category}]
+        parallel: true                         # ← ejecutar con Async.function()
+        timeout: 5s
+
       - activity: ReserveStock
         target: inventory
         type: sync
-        input: [orderId, items]        # items = [{productId, quantity}]
+        input: [orderId, items]
         compensation: ReleaseStock
+        parallel: true                         # ← ejecutar junto con GetProductsByIds
         timeout: 10s
 
-      # Paso 2: Procesar pago (sync — esperamos resultado)
+      # Paso 4: Procesar pago (Remote Activity → payments)
+      # Después de obtener productos y reservar stock.
       - activity: ProcessOrderPayment
         target: payments
         type: sync
@@ -233,47 +201,70 @@ workflows:
         compensation: RefundPayment
         timeout: 30s
 
-      # Paso 3: Confirmar orden (local — mismo módulo)
+      # Paso 5: Confirmar orden (Remote Activity → orders, local)
       - activity: ConfirmOrder
         target: orders
         type: sync
         input: [orderId]
 
-      # Paso 4: Notificar (async — fire-and-forget, no afecta saga)
+      # Paso 6: Notificar (Remote Activity → notifications)
+      # ⚡ Async.function() — fire-and-forget, NO bloquea la saga.
+      # Recibe customerEmail y customerName del paso 1 (GetCustomerById).
       - activity: NotifyOrderPlaced
         target: notifications
         type: async
-        input: [orderId, customerId, totalAmount]
+        input: [orderId, customerEmail, customerName, totalAmount]
 
   # ─── Orden cancelada ──────────────────────────────────────────────────────
   - name: CancelOrderWorkflow
     trigger:
       module: orders
       on: cancel
-    taskQueue: LIGHT_TASK_QUEUE
+    taskQueue: ORDER_WORKFLOW_QUEUE
     steps:
+      # Paso 1: Obtener datos del cliente (para email de notificación)
+      - activity: GetCustomerById
+        target: customers
+        type: sync
+        input: [customerId]
+        output: [customerId, firstName, lastName, email, phone]
+        timeout: 5s
+
+      # Paso 2: Liberar stock reservado
       - activity: ReleaseStock
         target: inventory
         type: sync
         input: [orderId, items]
+        timeout: 10s
+
+      # Paso 3: Reembolsar pago (si hubo pago previo)
+      - activity: RefundPayment
+        target: payments
+        type: sync
+        input: [paymentId]
+        timeout: 30s
+        optional: true                         # No falla si no hubo pago
+
+      # Paso 4: Notificar cancelación (async, non-blocking)
       - activity: NotifyOrderCancelled
         target: notifications
         type: async
-        input: [orderId, customerId]
+        input: [orderId, customerEmail, customerName]
 
-  # ─── Pago aprobado: antes era un evento Kafka consumido por orders ─────────
-  # Con Temporal, el workflow de PlaceOrderWorkflow ya integra esto
-  # internamente (paso 3: ConfirmOrder). Este workflow separado NO se necesita.
-  # Se deja comentado para comparación:
+  # ─── ELIMINADOS: Workflows de sincronización de datos ──────────────────────
+  # Antes había 4 workflows que SOLO sincronizaban read models:
+  #   - ProductUpdatedWorkflow     → SyncProductReadModel en orders
+  #   - ProductDeactivatedWorkflow → SoftDeleteProductReadModel en orders
+  #   - CustomerCreatedWorkflow    → SyncCustomerReadModel en orders + notifications
+  #   - CustomerUpdatedWorkflow    → SyncCustomerReadModel en orders + notifications
   #
-  # - name: PaymentApprovedWorkflow     # ← ELIMINADO, absorbido por saga
-  #   trigger:
-  #     module: payments
-  #     on: approve
-  #   steps:
-  #     - activity: ConfirmOrder
-  #       target: orders
+  # ELIMINADOS porque:
+  #   1. Read models eliminados — datos se obtienen on-demand via Remote Activity
+  #   2. GetCustomerById y GetProductsByIds reemplazan las proyecciones locales
+  #   3. Menos acoplamiento productor→consumidor (customers/products ya no saben
+  #      quién los consume)
 
-  # ─── Pago fallido: idem, la saga de PlaceOrderWorkflow lo maneja ───────────
-  # Si el paso ProcessOrderPayment falla → saga compensa automáticamente
-  # (ReleaseStock) y marca la orden como PAYMENT_FAILED.
+  # ─── ABSORBIDOS por PlaceOrderWorkflow (saga) ─────────────────────────────
+  # PaymentApprovedWorkflow / PaymentFailedWorkflow → la saga integra el
+  # resultado de ProcessOrderPayment directamente. Si falla → compensa.
+  # Si aprueba → ConfirmOrder.

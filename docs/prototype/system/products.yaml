@@ -68,7 +68,6 @@ aggregates:
       # En su lugar, un WorkflowService los intercepta y lanza el workflow.
       - name: ProductCreatedEvent
         lifecycle: create
-        # topic: PRODUCT_CREATED      ← ELIMINADO (no hay Kafka)
         fields:
           - name: productId
             type: String
@@ -78,9 +77,8 @@ aggregates:
             type: BigDecimal
           - name: category
             type: String
-        # ⚠️ NUEVO: el productor debe saber a quién notificar
         notifies:
-          - workflow: ProductCreatedWorkflow    # Definido en system.yaml
+          - workflow: ProductCreatedWorkflow    # → InitializeStock en inventory
 
       - name: ProductUpdatedEvent
         lifecycle: update
@@ -93,16 +91,52 @@ aggregates:
             type: BigDecimal
           - name: category
             type: String
-        notifies:
-          - workflow: ProductUpdatedWorkflow
+        # SIN notifies → Domain Event interno.
+        # Sin read models, no hay consumers cross-module para updates.
+        # Los workflows que necesitan datos de producto los obtienen
+        # on-demand via GetProductById / GetProductsByIds.
 
       - name: ProductDeactivatedEvent
         lifecycle: softDelete
         fields:
           - name: productId
             type: String
-        notifies:
-          - workflow: ProductDeactivatedWorkflow
+        # SIN notifies → Domain Event interno.
+        # Mismo razonamiento: sin read models, no hay consumers.
+
+# ─── Activities que este módulo EXPONE ───────────────────────────────────────
+# Activities de lectura: permiten a workflows de otros módulos obtener datos
+# de producto on-demand (Remote Activity), eliminando la necesidad de read models.
+activities:
+  - name: GetProductById
+    type: light
+    description: "Obtiene un producto por su ID"
+    input:
+      - name: productId
+        type: String
+    output:
+      - name: id
+        type: String
+      - name: name
+        type: String
+      - name: price
+        type: BigDecimal
+      - name: category
+        type: String
+      - name: sku
+        type: String
+    timeout: 5s
+
+  - name: GetProductsByIds
+    type: light
+    description: "Obtiene múltiples productos por sus IDs (batch)"
+    input:
+      - name: productIds
+        type: List                     # List<String>
+    output:
+      - name: products
+        type: List                     # List<{id, name, price, category, sku}>
+    timeout: 10s
 
 endpoints:
   basePath: /products
@@ -128,3 +162,7 @@ endpoints:
 # ─── ELIMINADO: No hay listeners (products no consume eventos) ───────────────
 # ─── ELIMINADO: No hay ports (products no llama a otros servicios) ────────────
 # ─── ELIMINADO: No hay readModels (products no proyecta datos ajenos) ─────────
+# ─── DESACOPLAMIENTO: products ya no necesita saber quién consume sus datos ──
+#     ProductUpdatedEvent y ProductDeactivatedEvent son Domain Events internos.
+#     Solo ProductCreatedEvent notifica ProductCreatedWorkflow (→ InitializeStock)
+#     porque es un efecto de negocio real, no sincronización de datos.

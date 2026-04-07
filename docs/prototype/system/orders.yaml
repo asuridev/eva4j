@@ -1,12 +1,13 @@
 # =============================================================================
-# PROTOTYPE: orders.yaml — versión Temporal (sin Kafka)
+# PROTOTYPE: orders.yaml — versión Temporal (sin Kafka, sin Read Models)
 # =============================================================================
 # Cambios vs original:
 #   - ELIMINA listeners[] — el workflow ya integra la respuesta del pago
 #   - ELIMINA ports[] — la reserva de stock es una Activity del workflow
-#   - readModels[] SE MANTIENE — pero syncedBy referencia Activities, no eventos
-#   - events[] pierde topic:, gana notifies:
-#   - AGREGA saga: — referencia al workflow definido en system.yaml
+#   - ELIMINA readModels[] — datos cross-module se obtienen on-demand via
+#     Remote Activities de lectura (GetCustomerById, GetProductsByIds)
+#   - ELIMINA saga: — la saga se define en system.yaml workflows
+#   - events[].notifies referencia workflows definidos en system.yaml
 # =============================================================================
 
 aggregates:
@@ -141,80 +142,32 @@ aggregates:
         notifies:
           - workflow: CancelOrderWorkflow
 
-# ─── SAGRADO CAMBIO: Declarar que este módulo participa en una saga ──────────
-# Con Temporal, el flujo de crear orden es un workflow completo.
-# El CreateOrderCommandHandler ya no solo persiste — lanza el workflow.
-saga:
-  workflow: PlaceOrderWorkflow
-  description: "Reservar stock → Procesar pago → Confirmar orden → Notificar"
-
 # ─── ELIMINADO: listeners[] ──────────────────────────────────────────────────
 # PaymentApprovedEvent y PaymentFailedEvent ya no llegan como eventos Kafka.
 # El PlaceOrderWorkflow espera el resultado de ProcessOrderPayment directamente
 # (paso sync en la saga). Si falla → compensa. Si aprueba → confirma.
-# ⚠️ CONSECUENCIA: el módulo payments pierde autonomía — no puede aprobar/fallar
-#    de forma asíncrona. El workflow bloquea esperando el resultado.
 
 # ─── ELIMINADO: ports[] ─────────────────────────────────────────────────────
 # ReserveStock y ReleaseStock ya no son Feign calls.
-# Son Activities ejecutadas por el worker de inventory.
-# ⚠️ CONSECUENCIA: orders necesita que el worker de inventory esté levantado
-#    en la misma infraestructura Temporal. No puede ser un servicio externo
-#    que solo expone HTTP.
+# Son Activities ejecutadas por el worker de inventory via Temporal.
 
-# ─── readModels: se mantiene, pero la sincronización cambia ─────────────────
-# En lugar de KafkaListeners, Activities del workflow del productor actualizan
-# las read models directamente.
-readModels:
-  - name: CustomerReadModel
-    source:
-      module: customers
-      aggregate: Customer
-    tableName: rm_orders_customers
-    fields:
-      - name: id
-        type: String
-      - name: firstName
-        type: String
-      - name: lastName
-        type: String
-      - name: email
-        type: String
-      - name: phone
-        type: String
-    syncedBy:
-      # ⚠️ syncedBy ya no referencia eventos Kafka sino Activities
-      - activity: SyncCustomerReadModel     # Activity ejecutada por worker de orders
-        action: UPSERT
-        triggeredBy: CustomerCreatedWorkflow
-      - activity: SyncCustomerReadModel
-        action: UPSERT
-        triggeredBy: CustomerUpdatedWorkflow
+# ─── ELIMINADO: readModels[] ────────────────────────────────────────────────
+# CustomerReadModel y ProductReadModel ELIMINADOS.
+# Datos cross-module se obtienen ON-DEMAND en los workflows:
+#   - PlaceOrderWorkflow Paso 1: GetCustomerById → customers (Remote Activity)
+#     Valida existencia, obtiene email/nombre para notificaciones.
+#   - PlaceOrderWorkflow Paso 2: GetProductsByIds → products (Remote Activity)
+#     Valida existencia, obtiene precios actuales.
+#   - CancelOrderWorkflow Paso 1: GetCustomerById → customers
+#     Obtiene email para notificación de cancelación.
+#
+# Trade-off: cada orden requiere una llamada a customers y products.
+# Aceptable para este volumen. Si performance fuera problema, se pueden
+# agregar caches con TTL en las Activities (no read models persistentes).
 
-  - name: ProductReadModel
-    source:
-      module: products
-      aggregate: Product
-    tableName: rm_orders_products
-    fields:
-      - name: id
-        type: String
-      - name: name
-        type: String
-      - name: price
-        type: BigDecimal
-      - name: category
-        type: String
-    syncedBy:
-      - activity: SyncProductReadModel
-        action: UPSERT
-        triggeredBy: ProductCreatedWorkflow
-      - activity: SyncProductReadModel
-        action: UPSERT
-        triggeredBy: ProductUpdatedWorkflow
-      - activity: SoftDeleteProductReadModel
-        action: SOFT_DELETE
-        triggeredBy: ProductDeactivatedWorkflow
+# ─── ELIMINADO: saga: ───────────────────────────────────────────────────────
+# La saga (PlaceOrderWorkflow) se define en system.yaml, no en el módulo.
+# El CreateOrderCommandHandler persiste la orden y lanza el workflow.
 
 endpoints:
   basePath: /orders

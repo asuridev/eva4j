@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject, moduleExists } = require('../utils/validator');
-const { toPackagePath, toPascalCase, toCamelCase } = require('../utils/naming');
+const { toPackagePath, toPascalCase, toCamelCase, toScreamingSnakeCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const ChecksumManager = require('../utils/checksum-manager');
 
@@ -108,7 +108,9 @@ async function generateTemporalActivityCommand(moduleName, activityName, options
   const spinner = ora(`Generating ${activityPascalCase}Activity...`).start();
 
   try {
-    const context = { packageName, moduleName, activityPascalCase, activityCategory };
+    const modulePascalCase = toPascalCase(moduleName);
+    const moduleActivityCategory = `${modulePascalCase}${activityCategory}`;
+    const context = { packageName, moduleName, activityPascalCase, activityCategory: moduleActivityCategory, modulePascalCase };
     const templatesDir = path.join(__dirname, '..', '..', 'templates', 'temporal-activity');
     const writeOptions = { force: options.force, checksumManager };
 

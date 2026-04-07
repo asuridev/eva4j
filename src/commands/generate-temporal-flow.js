@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject, moduleExists } = require('../utils/validator');
-const { toPackagePath, toPascalCase, toCamelCase } = require('../utils/naming');
+const { toPackagePath, toPascalCase, toCamelCase, toScreamingSnakeCase } = require('../utils/naming');
 const { renderAndWrite } = require('../utils/template-engine');
 const ChecksumManager = require('../utils/checksum-manager');
 
@@ -75,6 +75,8 @@ async function generateTemporalFlowCommand(moduleName, flowName, options = {}) {
   }
 
   const flowPascalCase = toPascalCase(flowName);
+  const modulePascalCase = toPascalCase(moduleName);
+  const moduleScreamingSnake = toScreamingSnakeCase(moduleName);
 
   const moduleBasePath = path.join(
     projectDir,
@@ -95,6 +97,9 @@ async function generateTemporalFlowCommand(moduleName, flowName, options = {}) {
       packageName,
       moduleName,
       flowPascalCase,
+      modulePascalCase,
+      moduleCamelCase: moduleName,
+      moduleScreamingSnake,
     };
 
     const templatesDir = path.join(__dirname, '..', '..', 'templates', 'temporal-flow');
@@ -128,9 +133,42 @@ async function generateTemporalFlowCommand(moduleName, flowName, options = {}) {
       writeOptions
     );
 
-    // 4. Register workflow implementation in TemporalConfig.java
-    spinner.text = 'Registering workflow in TemporalConfig...';
-    await registerWorkflowInTemporalConfig(projectDir, packagePath, packageName, moduleName, flowPascalCase);
+    // 4. Generate module-scoped marker interfaces (idempotent)
+    spinner.text = `Generating ${modulePascalCase} Temporal interfaces...`;
+    const interfacesDir = path.join(moduleBasePath, 'domain', 'interfaces');
+    await renderAndWrite(
+      path.join(templatesDir, 'ModuleHeavyActivity.java.ejs'),
+      path.join(interfacesDir, `${modulePascalCase}HeavyActivity.java`),
+      context,
+      writeOptions
+    );
+    await renderAndWrite(
+      path.join(templatesDir, 'ModuleLightActivity.java.ejs'),
+      path.join(interfacesDir, `${modulePascalCase}LightActivity.java`),
+      context,
+      writeOptions
+    );
+
+    // 5. Generate ModuleTemporalWorkerConfig (idempotent)
+    spinner.text = `Generating ${modulePascalCase}TemporalWorkerConfig...`;
+    const configDir = path.join(moduleBasePath, 'infrastructure', 'configurations');
+    await renderAndWrite(
+      path.join(templatesDir, 'ModuleTemporalWorkerConfig.java.ejs'),
+      path.join(configDir, `${modulePascalCase}TemporalWorkerConfig.java`),
+      context,
+      writeOptions
+    );
+
+    // 6. Register workflow in module worker config
+    spinner.text = 'Registering workflow in module worker config...';
+    await registerWorkflowInModuleWorkerConfig(
+      path.join(configDir, `${modulePascalCase}TemporalWorkerConfig.java`),
+      packageName, moduleName, flowPascalCase, modulePascalCase
+    );
+
+    // 7. Append module queue section to temporal.yaml (idempotent)
+    spinner.text = 'Updating temporal.yaml with module queues...';
+    await appendModuleQueues(projectDir, moduleName, moduleScreamingSnake);
 
     spinner.succeed(chalk.green(`✅ ${flowPascalCase}WorkFlow generated successfully`));
 
@@ -138,8 +176,13 @@ async function generateTemporalFlowCommand(moduleName, flowName, options = {}) {
     console.log(chalk.gray(`  ${moduleName}/application/usecases/${flowPascalCase}WorkFlow.java`));
     console.log(chalk.gray(`  ${moduleName}/application/usecases/${flowPascalCase}WorkFlowImpl.java`));
     console.log(chalk.gray(`  ${moduleName}/application/usecases/${flowPascalCase}WorkFlowService.java`));
-    console.log(chalk.blue('\n📝 Updated files:'));
-    console.log(chalk.gray('  shared/infrastructure/configurations/temporalConfig/TemporalConfig.java'));
+    console.log(chalk.gray(`  ${moduleName}/domain/interfaces/${modulePascalCase}HeavyActivity.java`));
+    console.log(chalk.gray(`  ${moduleName}/domain/interfaces/${modulePascalCase}LightActivity.java`));
+    console.log(chalk.gray(`  ${moduleName}/infrastructure/configurations/${modulePascalCase}TemporalWorkerConfig.java`));
+    console.log(chalk.blue('\n📝 Queue names:'));
+    console.log(chalk.gray(`  Flow:  ${moduleScreamingSnake}_WORKFLOW_QUEUE`));
+    console.log(chalk.gray(`  Heavy: ${moduleScreamingSnake}_HEAVY_TASK_QUEUE`));
+    console.log(chalk.gray(`  Light: ${moduleScreamingSnake}_LIGHT_TASK_QUEUE`));
 
     await checksumManager.save();
   } catch (error) {
@@ -149,22 +192,9 @@ async function generateTemporalFlowCommand(moduleName, flowName, options = {}) {
   }
 }
 
-async function registerWorkflowInTemporalConfig(projectDir, packagePath, packageName, moduleName, flowPascalCase) {
-  const configPath = path.join(
-    projectDir,
-    'src',
-    'main',
-    'java',
-    packagePath,
-    'shared',
-    'infrastructure',
-    'configurations',
-    'temporalConfig',
-    'TemporalConfig.java'
-  );
-
+async function registerWorkflowInModuleWorkerConfig(configPath, packageName, moduleName, flowPascalCase, modulePascalCase) {
   if (!(await fs.pathExists(configPath))) {
-    console.warn(chalk.yellow('\n⚠️  TemporalConfig.java not found — skipping auto-registration'));
+    console.warn(chalk.yellow(`\n⚠️  ${modulePascalCase}TemporalWorkerConfig.java not found — skipping auto-registration`));
     return;
   }
 
@@ -175,45 +205,72 @@ async function registerWorkflowInTemporalConfig(projectDir, packagePath, package
 
   // Add import if not already present
   if (!content.includes(importLine)) {
-    const importBlockMatch = content.match(/^import .+;(\r?\n)/m);
-    if (importBlockMatch) {
-      // Find position after last import line
-      const allImports = [...content.matchAll(/^import .+;/gm)];
-      if (allImports.length > 0) {
-        const lastImport = allImports[allImports.length - 1];
-        const insertPos = lastImport.index + lastImport[0].length;
-        content = content.slice(0, insertPos) + '\n' + importLine + content.slice(insertPos);
-      }
+    const allImports = [...content.matchAll(/^import .+;/gm)];
+    if (allImports.length > 0) {
+      const lastImport = allImports[allImports.length - 1];
+      const insertPos = lastImport.index + lastImport[0].length;
+      content = content.slice(0, insertPos) + '\n' + importLine + content.slice(insertPos);
     }
   }
-
-  // Remove TODO comment and commented-out example placeholder
-  content = content.replace(/[ \t]*\/\/ TODO: register your workflow implementation types here\r?\n/g, '');
-  content = content.replace(/[ \t]*\/\/ workflowWorker\.registerWorkflowImplementationTypes\(MyWorkflowImpl\.class\);\r?\n?/g, '');
 
   // Check if there is already an active registerWorkflowImplementationTypes call
   const activeRegisterRegex = /workflowWorker\.registerWorkflowImplementationTypes\(([^)]+)\);/;
   if (activeRegisterRegex.test(content)) {
-    // Add the new class, filtering out the stale MyWorkflowImpl example if still present
     content = content.replace(activeRegisterRegex, (match, classes) => {
       const classList = classes
         .split(',')
         .map((c) => c.trim())
-        .filter((c) => c !== 'MyWorkflowImpl.class');
+        .filter((c) => c.length > 0);
       if (!classList.includes(`${implClass}.class`)) {
         classList.push(`${implClass}.class`);
       }
       return `workflowWorker.registerWorkflowImplementationTypes(${classList.join(', ')});`;
     });
   } else {
-    // Insert active registration after the workflowWorker declaration line
+    // Insert active registration after the comment marker
     content = content.replace(
-      /(Worker workflowWorker = workerFactory\.newWorker\([^;]+;\r?\n)/,
+      /(\/\/ registered by eva g temporal-flow\r?\n)/,
       `$1        workflowWorker.registerWorkflowImplementationTypes(${implClass}.class);\n`
     );
   }
 
   await fs.writeFile(configPath, content, 'utf-8');
+}
+
+/**
+ * Append module-specific queue configuration to temporal.yaml files (idempotent)
+ */
+async function appendModuleQueues(projectDir, moduleName, moduleScreamingSnake) {
+  const environments = ['local', 'develop', 'test', 'production'];
+  const resourcesDir = path.join(projectDir, 'src', 'main', 'resources', 'parameters');
+
+  const moduleSection = [
+    `    ${moduleName}:`,
+    `      flow-queue: ${moduleScreamingSnake}_WORKFLOW_QUEUE`,
+    `      heavy-queue: ${moduleScreamingSnake}_HEAVY_TASK_QUEUE`,
+    `      light-queue: ${moduleScreamingSnake}_LIGHT_TASK_QUEUE`,
+  ].join('\n');
+
+  for (const env of environments) {
+    const yamlPath = path.join(resourcesDir, env, 'temporal.yaml');
+
+    if (!(await fs.pathExists(yamlPath))) continue;
+
+    let content = await fs.readFile(yamlPath, 'utf-8');
+
+    // Skip if module already registered
+    if (content.includes(`${moduleName}:`)) continue;
+
+    // Add modules: section if not present
+    if (!content.includes('modules:')) {
+      content = content.trimEnd() + '\n  modules:\n' + moduleSection + '\n';
+    } else {
+      // Append under existing modules: section
+      content = content.trimEnd() + '\n' + moduleSection + '\n';
+    }
+
+    await fs.writeFile(yamlPath, content, 'utf-8');
+  }
 }
 
 module.exports = generateTemporalFlowCommand;

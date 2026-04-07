@@ -120,13 +120,17 @@ eva detach order
 
 ## 🧩 Temporal Queue Model
 
+Queues are **module-scoped** — each module gets its own set of queues prefixed with the module name in SCREAMING_SNAKE_CASE:
+
 | Queue | Purpose | ActivityOptions var |
 |-------|---------|---------------------|
-| `FLOW_QUEUE` | Workflow orchestration | — |
-| `LIGHT_TASK_QUEUE` | Fast activities < 30 s | `lightActivityOptions` |
-| `HEAVY_TASK_QUEUE` | Long-running ≤ 2 min | `heavyActivityOptions` |
+| `{MODULE}_WORKFLOW_QUEUE` | Workflow orchestration | — |
+| `{MODULE}_LIGHT_TASK_QUEUE` | Fast activities < 30 s | `lightActivityOptions` |
+| `{MODULE}_HEAVY_TASK_QUEUE` | Long-running ≤ 2 min | `heavyActivityOptions` |
 
-Activities are registered automatically via Spring DI (`LightActivity` / `HeavyActivity` marker interfaces). No manual `TemporalConfig.java` patching needed.
+Example for module `order`: `ORDER_WORKFLOW_QUEUE`, `ORDER_LIGHT_TASK_QUEUE`, `ORDER_HEAVY_TASK_QUEUE`.
+
+Activities are registered automatically via Spring DI (`{Module}LightActivity` / `{Module}HeavyActivity` marker interfaces). Each module has its own `{Module}TemporalWorkerConfig.java` — no shared `TemporalConfig.java` patching needed.
 
 ---
 

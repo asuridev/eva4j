@@ -36,7 +36,10 @@ eva g temporal-flow order
 - `application/usecases/ProcessOrderWorkFlow.java` — `@WorkflowInterface`
 - `application/usecases/ProcessOrderWorkFlowImpl.java` — implementation with Saga
 - `application/usecases/ProcessOrderWorkFlowService.java` — Spring service facade
-- Patches `shared/infrastructure/configurations/TemporalConfig.java` to register `ProcessOrderWorkFlowImpl`
+- `domain/interfaces/OrderHeavyActivity.java` — module-scoped marker interface
+- `domain/interfaces/OrderLightActivity.java` — module-scoped marker interface
+- `infrastructure/configurations/OrderTemporalWorkerConfig.java` — module worker registration
+- Appends `ORDER` queue section to `temporal.yaml`
 
 ### Example 2: Payment workflow
 
@@ -49,7 +52,10 @@ eva g temporal-flow payment
 - `application/usecases/ProcessPaymentWorkFlow.java`
 - `application/usecases/ProcessPaymentWorkFlowImpl.java`
 - `application/usecases/ProcessPaymentWorkFlowService.java`
-- Patches `TemporalConfig.java`
+- `domain/interfaces/PaymentHeavyActivity.java`
+- `domain/interfaces/PaymentLightActivity.java`
+- `infrastructure/configurations/PaymentTemporalWorkerConfig.java`
+- Appends `PAYMENT` queue section to `temporal.yaml`
 
 ### Example 3: Multiple workflows in the same module
 
@@ -63,7 +69,7 @@ eva g temporal-flow order
 # refund-order  → generates RefundOrder files
 ```
 
-Each run appends a new `registerWorkflowImplementationTypes(...)` entry to `TemporalConfig.java` without duplicating existing registrations.
+Each run appends a new `registerWorkflowImplementationTypes(...)` entry to `OrderTemporalWorkerConfig.java` without duplicating existing registrations.
 
 ## 📦 Generated Code Structure
 
@@ -113,10 +119,10 @@ public class ProcessOrderWorkFlowImpl implements ProcessOrderWorkFlow {
 
     private Saga saga = new Saga(sagaOptions);
 
-    // Light activities (<30 s) — routed to LIGHT_TASK_QUEUE
+    // Light activities (<30 s) — routed to ORDER_LIGHT_TASK_QUEUE
     private final ActivityOptions lightActivityOptions = ActivityOptions.newBuilder()
         .setStartToCloseTimeout(Duration.ofSeconds(30))
-        .setTaskQueue("LIGHT_TASK_QUEUE")
+        .setTaskQueue("ORDER_LIGHT_TASK_QUEUE")
         .setRetryOptions(
             RetryOptions.newBuilder()
                 .setMaximumAttempts(2)
@@ -126,10 +132,10 @@ public class ProcessOrderWorkFlowImpl implements ProcessOrderWorkFlow {
                 .build()
         ).build();
 
-    // Heavy activities (up to 2 min) — routed to HEAVY_TASK_QUEUE
+    // Heavy activities (up to 2 min) — routed to ORDER_HEAVY_TASK_QUEUE
     private final ActivityOptions heavyActivityOptions = ActivityOptions.newBuilder()
         .setStartToCloseTimeout(Duration.ofSeconds(120))
-        .setTaskQueue("HEAVY_TASK_QUEUE")
+        .setTaskQueue("ORDER_HEAVY_TASK_QUEUE")
         .setRetryOptions(
             RetryOptions.newBuilder()
                 .setMaximumAttempts(2)
@@ -179,7 +185,7 @@ public class ProcessOrderWorkFlowService {
 
     private final WorkflowClient workflowClient;
 
-    @Value("${temporal.flow-queue}")
+    @Value("${temporal.modules.order.flow-queue}")
     private String flowQueue;
 
     // ... constructor injection
@@ -214,7 +220,7 @@ public class ProcessOrderWorkFlowService {
 }
 ```
 
-### TemporalConfig.java — Auto-patched Entry
+### OrderTemporalWorkerConfig.java — Auto-generated
 
 ```java
 // registered automatically by eva g temporal-flow
@@ -223,11 +229,45 @@ workflowWorker.registerWorkflowImplementationTypes(ProcessOrderWorkFlowImpl.clas
 
 ## 🏗️ Queue Architecture
 
+Queues are **module-scoped** — each module gets its own set of queues prefixed with the module name in SCREAMING_SNAKE_CASE:
+
 | Queue | Purpose |
 |-------|---------|
-| `FLOW_QUEUE` | Workflow orchestration (WorkFlowImpl runs here) |
-| `LIGHT_TASK_QUEUE` | Fast activities (< 30 s), injected via `lightActivityOptions` |
-| `HEAVY_TASK_QUEUE` | Long-running activities (up to 2 min), injected via `heavyActivityOptions` |
+| `{MODULE}_WORKFLOW_QUEUE` | Workflow orchestration (WorkFlowImpl runs here) |
+| `{MODULE}_LIGHT_TASK_QUEUE` | Fast activities (< 30 s), injected via `lightActivityOptions` |
+| `{MODULE}_HEAVY_TASK_QUEUE` | Long-running activities (up to 2 min), injected via `heavyActivityOptions` |
+
+For example, the `order` module generates:
+- `ORDER_WORKFLOW_QUEUE`
+- `ORDER_LIGHT_TASK_QUEUE`
+- `ORDER_HEAVY_TASK_QUEUE`
+
+The `payment` module generates:
+- `PAYMENT_WORKFLOW_QUEUE`
+- `PAYMENT_LIGHT_TASK_QUEUE`
+- `PAYMENT_HEAVY_TASK_QUEUE`
+
+This ensures each module's workers are isolated and can be scaled independently.
+
+### temporal.yaml (auto-updated)
+
+```yaml
+temporal:
+  service-url: localhost:7233
+  namespace: default
+  number-flow-worker: 10
+  number-heavy-worker: 10
+  number-light-worker: 10
+  modules:
+    order:
+      flow-queue: ORDER_WORKFLOW_QUEUE
+      heavy-queue: ORDER_HEAVY_TASK_QUEUE
+      light-queue: ORDER_LIGHT_TASK_QUEUE
+    payment:
+      flow-queue: PAYMENT_WORKFLOW_QUEUE
+      heavy-queue: PAYMENT_HEAVY_TASK_QUEUE
+      light-queue: PAYMENT_LIGHT_TASK_QUEUE
+```
 
 Activity stubs created inside the workflow must pass the matching options object — see [GENERATE_TEMPORAL_ACTIVITY.md](./GENERATE_TEMPORAL_ACTIVITY.md).
 

@@ -80,6 +80,10 @@ async function addTemporalClientCommand() {
     spinner.text = 'Generating TemporalConfig class...';
     await generateTemporalConfigClass(projectDir, context);
 
+    // 5b. Generate TemporalWorkerFactoryLifecycle.java
+    spinner.text = 'Generating TemporalWorkerFactoryLifecycle class...';
+    await generateTemporalLifecycleClass(projectDir, context);
+
     // 6. Update docker-compose.yaml if it exists
     spinner.text = 'Updating docker-compose.yaml...';
     await updateDockerCompose(projectDir, context);
@@ -99,13 +103,14 @@ async function addTemporalClientCommand() {
     console.log(chalk.gray('  │   └── production/temporal.yaml'));
     console.log(chalk.gray('  ├── shared/domain/interfaces/HeavyActivity.java'));
     console.log(chalk.gray('  ├── shared/domain/interfaces/LightActivity.java'));
-    console.log(chalk.gray('  └── shared/infrastructure/configurations/temporalConfig/TemporalConfig.java'));
+    console.log(chalk.gray('  ├── shared/infrastructure/configurations/temporalConfig/TemporalConfig.java'));
+    console.log(chalk.gray('  └── shared/infrastructure/configurations/temporalConfig/TemporalWorkerFactoryLifecycle.java'));
 
     console.log(chalk.blue('\n✅ Temporal client configured successfully!'));
     console.log(chalk.white('\n   Service URL:  localhost:7233'));
     console.log(chalk.white('   Namespace:    default'));
     console.log(chalk.white('   Temporal UI:  http://localhost:8088'));
-    console.log(chalk.yellow('\n   ⚠️  Register your workflow implementation types in TemporalConfig.java'));
+    console.log(chalk.yellow('\n   ⚠️  Run "eva g temporal-flow <module>" to create workflows with module-scoped queues'));
     console.log(chalk.gray('   Run "docker-compose up -d" to start the Temporal cluster'));
     console.log(chalk.gray('   Update temporal.yaml files to customize service URLs per environment'));
     console.log();
@@ -230,6 +235,21 @@ async function generateTemporalConfigClass(projectDir, context) {
   const outputPath = path.join(
     projectDir, 'src', 'main', 'java', context.packagePath,
     'shared', 'infrastructure', 'configurations', 'temporalConfig', 'TemporalConfig.java'
+  );
+
+  await renderAndWrite(templatePath, outputPath, context);
+}
+
+/**
+ * Generate TemporalWorkerFactoryLifecycle.java class
+ */
+async function generateTemporalLifecycleClass(projectDir, context) {
+  const templatePath = path.join(
+    __dirname, '..', '..', 'templates', 'shared', 'configurations', 'temporalConfig', 'TemporalWorkerFactoryLifecycle.java.ejs'
+  );
+  const outputPath = path.join(
+    projectDir, 'src', 'main', 'java', context.packagePath,
+    'shared', 'infrastructure', 'configurations', 'temporalConfig', 'TemporalWorkerFactoryLifecycle.java'
   );
 
   await renderAndWrite(templatePath, outputPath, context);

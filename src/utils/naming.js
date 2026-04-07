@@ -48,6 +48,15 @@ function toKebabCase(str) {
 }
 
 /**
+ * Convert string to SCREAMING_SNAKE_CASE
+ * @param {string} str - Input string
+ * @returns {string} SCREAMING_SNAKE_CASE string
+ */
+function toScreamingSnakeCase(str) {
+  return toSnakeCase(str).toUpperCase();
+}
+
+/**
  * Pluralize a word
  * @param {string} word - Word to pluralize
  * @returns {string} Pluralized word
@@ -137,6 +146,7 @@ module.exports = {
   toCamelCase,
   toSnakeCase,
   toKebabCase,
+  toScreamingSnakeCase,
   pluralizeWord,
   singularizeWord,
   toPackagePath,

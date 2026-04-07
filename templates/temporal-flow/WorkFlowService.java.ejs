@@ -13,7 +13,7 @@ public class <%= flowPascalCase %>WorkFlowService {
 
     public <%= flowPascalCase %>WorkFlowService(
         WorkflowClient workflowClient,
-        @Value("${temporal.flow-queue}") String flowQueue
+        @Value("${temporal.modules.<%= moduleName %>.flow-queue}") String flowQueue
     ) {
         this.workflowClient = workflowClient;
         this.flowQueue = flowQueue;

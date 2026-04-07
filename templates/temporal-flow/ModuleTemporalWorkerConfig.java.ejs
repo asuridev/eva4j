@@ -1,0 +1,58 @@
+package <%= packageName %>.<%= moduleName %>.infrastructure.configurations;
+
+import <%= packageName %>.<%= moduleName %>.domain.interfaces.<%= modulePascalCase %>HeavyActivity;
+import <%= packageName %>.<%= moduleName %>.domain.interfaces.<%= modulePascalCase %>LightActivity;
+import io.temporal.worker.Worker;
+import io.temporal.worker.WorkerFactory;
+import io.temporal.worker.WorkerOptions;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
+
+@Configuration
+public class <%= modulePascalCase %>TemporalWorkerConfig {
+
+    @Value("${temporal.number-flow-worker}")
+    private Integer numberFlowWorker;
+
+    @Value("${temporal.number-heavy-worker}")
+    private Integer numberHeavyWorker;
+
+    @Value("${temporal.number-light-worker}")
+    private Integer numberLightWorker;
+
+    public static final String FLOW_QUEUE = "<%= moduleScreamingSnake %>_WORKFLOW_QUEUE";
+    public static final String HEAVY_QUEUE = "<%= moduleScreamingSnake %>_HEAVY_TASK_QUEUE";
+    public static final String LIGHT_QUEUE = "<%= moduleScreamingSnake %>_LIGHT_TASK_QUEUE";
+
+    @Bean
+    public Worker <%= moduleCamelCase %>WorkflowWorker(WorkerFactory workerFactory,
+                                          List<<%= modulePascalCase %>HeavyActivity> heavyActivities,
+                                          List<<%= modulePascalCase %>LightActivity> lightActivities) {
+
+        // 1. WORKER DE FLUJO (Orquestador)
+        WorkerOptions workflowOptions = WorkerOptions.newBuilder()
+            .setMaxConcurrentWorkflowTaskExecutionSize(numberFlowWorker)
+            .build();
+        Worker workflowWorker = workerFactory.newWorker(FLOW_QUEUE, workflowOptions);
+        // registered by eva g temporal-flow
+
+        // 2. WORKER PESADO (tareas complejas)
+        WorkerOptions heavyOptions = WorkerOptions.newBuilder()
+            .setMaxConcurrentActivityExecutionSize(numberHeavyWorker)
+            .build();
+        Worker heavyWorker = workerFactory.newWorker(HEAVY_QUEUE, heavyOptions);
+        heavyWorker.registerActivitiesImplementations(heavyActivities.toArray());
+
+        // 3. WORKER LIGERO (tareas rápidas)
+        WorkerOptions lightOptions = WorkerOptions.newBuilder()
+            .setMaxConcurrentActivityExecutionSize(numberLightWorker)
+            .build();
+        Worker lightWorker = workerFactory.newWorker(LIGHT_QUEUE, lightOptions);
+        lightWorker.registerActivitiesImplementations(lightActivities.toArray());
+
+        return workflowWorker;
+    }
+}
