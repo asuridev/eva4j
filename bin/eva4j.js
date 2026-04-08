@@ -19,6 +19,7 @@ const generateRecordCommand = require('../src/commands/generate-record');
 const generateEntitiesCommand = require('../src/commands/generate-entities');
 const generateTemporalFlowCommand = require('../src/commands/generate-temporal-flow');
 const generateTemporalActivityCommand = require('../src/commands/generate-temporal-activity');
+const generateTemporalSystemCommand = require('../src/commands/generate-temporal-system');
 const buildCommand = require('../src/commands/build');
 const evaluateSystemCommand = require('../src/commands/evaluate-system');
 const infoCommand = require('../src/commands/info');
@@ -289,6 +290,16 @@ program
       return;
     }
 
+    if (type === 'temporal-system') {
+      try {
+        await generateTemporalSystemCommand(options);
+      } catch (error) {
+        console.error(chalk.red('Error:'), error.message);
+        process.exit(1);
+      }
+      return;
+    }
+
     if (type === 'resource') {
       if (!module) {
         console.error(chalk.red('❌ Module name is required'));
@@ -317,6 +328,7 @@ program
     console.log(chalk.gray('  eva4j generate rabbitmq-listener <module>'));
     console.log(chalk.gray('  eva4j generate temporal-flow <module> [workflow-name]'));
     console.log(chalk.gray('  eva4j generate temporal-activity <module> [activity-name]'));
+    console.log(chalk.gray('  eva4j generate temporal-system'));
     console.log(chalk.gray('  eva4j generate resource <module>'));
     console.log(chalk.gray('  eva4j generate record'));
     console.log(chalk.gray('  eva4j generate entities <module>'));
@@ -329,6 +341,7 @@ program
     console.log(chalk.gray('  eva4j g rabbitmq-listener user'));
     console.log(chalk.gray('  eva4j g temporal-flow order process-order'));
     console.log(chalk.gray('  eva4j g temporal-activity order register-order'));
+    console.log(chalk.gray('  eva4j g temporal-system  # Reads from system/system.yaml'));
     console.log(chalk.gray('  eva4j g resource product'));
     console.log(chalk.gray('  eva4j g record  # Reads JSON from clipboard'));
     console.log(chalk.gray('  eva4j g entities order  # Generates from domain.yaml\n'));

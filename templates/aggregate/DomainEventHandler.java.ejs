@@ -3,67 +3,117 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 import <%= packageName %>.shared.domain.annotations.ApplicationComponent;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
-<% domainEvents.forEach(event => { %>
+<% domainEvents.forEach(event => { -%>
 import <%= packageName %>.<%= moduleName %>.domain.models.events.<%= event.name %>;
-<% }); %>
-<% if (broker) { %>
-<% domainEvents.forEach(event => { %>
+<% }); -%>
+<% if (broker) { -%>
+<% domainEvents.forEach(event => { -%>
 import <%= packageName %>.<%= moduleName %>.application.events.<%= event.integrationEventClassName %>;
-<% }); %>
+<% }); -%>
 import <%= packageName %>.<%= moduleName %>.application.ports.MessageBroker;
-<% } %>
+<% } -%>
+<%
+  // Collect unique workflow names from events with notifies (Temporal bridge)
+  const _workflowSet = new Set();
+  if (typeof temporal !== 'undefined' && temporal) {
+    domainEvents.forEach(event => {
+      (event.notifies || []).forEach(n => {
+        if (n.workflow) _workflowSet.add(n.workflow);
+      });
+    });
+  }
+  const _workflows = Array.from(_workflowSet);
+  const _hasTemporalBridge = _workflows.length > 0;
+-%>
+<% if (_hasTemporalBridge) { -%>
+<% _workflows.forEach(wf => { -%>
+import <%= packageName %>.<%= moduleName %>.application.usecases.<%= wf %>WorkFlowService;
+<% }); -%>
+<% } -%>
 
 /**
  * <%= aggregateName %>DomainEventHandler — Domain Event Bridge
  *
- * Connects the internal Spring event bus (ApplicationEventPublisher) with the
- * external messaging port (MessageBroker).
+ * Connects the internal Spring event bus (ApplicationEventPublisher) with<% if (broker && _hasTemporalBridge) { %>
+ * the external messaging port (MessageBroker) and Temporal workflow orchestration.<% } else if (broker) { %>
+ * the external messaging port (MessageBroker).<% } else if (_hasTemporalBridge) { %>
+ * the Temporal workflow orchestration layer.<% } else { %>
+ * external side effects.<% } %>
  *
  * Architecture:
  *   AggregateRepositoryImpl.save()
  *     → eventPublisher.publishEvent(domainEvent)        [internal Spring bus]
  *       → @TransactionalEventListener(AFTER_COMMIT)     [this class]
+<% if (broker) { -%>
  *         → messageBroker.publish*(integrationEvent)    [port — broker-agnostic]
+<% } -%>
+<% if (_hasTemporalBridge) { -%>
+ *         → workFlowService.startAsync(workflowId)     [Temporal workflow launch]
+<% } -%>
  *
  * AFTER_COMMIT guarantees that external events are published only when the
  * database transaction committed successfully, preventing ghost events from
  * rolled-back operations.
  *
  * Domain Events  (domain/models/events/)  — internal signals scoped to this bounded context.
+<% if (broker) { -%>
  * Integration Events (application/events/) — broker-facing projections; changing broker
  *   technology (Kafka → RabbitMQ → SNS) only requires changing the MessageBroker adapter.
  *   Domain Events — and therefore this class — never need modification.
+<% } -%>
  */
 @ApplicationComponent
 public class <%= aggregateName %>DomainEventHandler {
-<% if (broker) { %>
-
-    private final MessageBroker messageBroker;
-
-    public <%= aggregateName %>DomainEventHandler(MessageBroker messageBroker) {
-        this.messageBroker = messageBroker;
+<%
+  // Determine constructor dependencies
+  const _deps = [];
+  if (broker)              _deps.push({ type: 'MessageBroker', name: 'messageBroker' });
+  _workflows.forEach(wf => {
+    const svcName = wf.charAt(0).toLowerCase() + wf.slice(1) + 'WorkFlowService';
+    _deps.push({ type: wf + 'WorkFlowService', name: svcName });
+  });
+-%>
+<% if (_deps.length > 0) { %>
+<% _deps.forEach(dep => { -%>
+    private final <%= dep.type %> <%= dep.name %>;
+<% }); %>
+    public <%= aggregateName %>DomainEventHandler(<%= _deps.map(d => d.type + ' ' + d.name).join(', ') %>) {
+<% _deps.forEach(dep => { -%>
+        this.<%= dep.name %> = <%= dep.name %>;
+<% }); -%>
     }
-<% } %>
-<% domainEvents.forEach(event => { %>
+<% } -%>
+<% domainEvents.forEach(event => {
+    const _eventNotifies = (typeof temporal !== 'undefined' && temporal)
+      ? (event.notifies || []).filter(n => n.workflow)
+      : [];
+    const _hasBrokerAction = !!broker;
+    const _hasWorkflowAction = _eventNotifies.length > 0;
+-%>
 
     /**
-     * Handles {@link <%= event.name %>} after the wrapping transaction commits.<% if (!broker) { %>
+     * Handles {@link <%= event.name %>} after the wrapping transaction commits.<% if (!_hasBrokerAction && !_hasWorkflowAction) { %>
      * <p>
      * TODO: Implement the side effect for this event (e.g., send notification,
      *       update a read model, trigger a saga step, etc.).<% } %>
      */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void on<%= event.name %>(<%= event.name %> event) {
-    <% if (broker) { %>
-        <%
+<% if (_hasBrokerAction) {
           const _aggrIdField = aggregateName.charAt(0).toLowerCase() + aggregateName.slice(1) + 'Id';
-        %>
+-%>
         messageBroker.publish<%= event.integrationEventClassName %>(new <%= event.integrationEventClassName %>(<% if (event.fields && event.fields.length > 0) { event.fields.forEach(function(field, idx) { %><%= field.name === _aggrIdField ? 'event.getAggregateId()' : 'event.get' + field.name.charAt(0).toUpperCase() + field.name.slice(1) + '()' %><%= idx < event.fields.length - 1 ? ', ' : '' %><% }); } %>));
-    <% } else { %>
+<% } -%>
+<% if (_hasWorkflowAction) { _eventNotifies.forEach(n => {
+          const _svcName = n.workflow.charAt(0).toLowerCase() + n.workflow.slice(1) + 'WorkFlowService';
+-%>
+        <%= _svcName %>.startAsync(event.getAggregateId());
+<% }); } -%>
+<% if (!_hasBrokerAction && !_hasWorkflowAction) { -%>
         // TODO: handle <%= event.name %> — add your side-effect logic here
         //   e.g.:  notificationService.notify(event);
         //          readModelUpdater.on(event);
-    <% } %>
+<% } -%>
     }
 <% }); %>
 }

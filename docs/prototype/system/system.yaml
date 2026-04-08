@@ -1,9 +1,9 @@
 # =============================================================================
 # PROTOTYPE: system.yaml con Temporal como único mecanismo de comunicación
 # =============================================================================
-# Este es un diseño EXPERIMENTAL — eva4j NO genera código desde este formato.
-# Propósito: explorar cómo se vería la arquitectura sin Kafka ni Feign,
-# usando Temporal como bus universal de comunicación entre módulos.
+# Este es el formato target para generación de código con Temporal.
+# eva4j leerá este archivo para generar workflows cross-module
+# y contratos compartidos entre módulos.
 # =============================================================================
 
 system:

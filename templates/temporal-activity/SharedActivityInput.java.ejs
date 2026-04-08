@@ -1,0 +1,12 @@
+package <%= packageName %>.shared.domain.contracts.<%= targetModule %>;
+<% if (imports.length > 0) { %>
+
+<%= imports.join('\n') %>
+<% } %>
+
+public record <%= activityPascalCase %>Input(
+<% inputFields.forEach((field, index) => { %>
+    <%= field.javaType %> <%= field.name %><%= index < inputFields.length - 1 ? ',' : '' %>
+<% }); %>
+) {
+}

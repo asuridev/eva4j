@@ -10,6 +10,7 @@ public class <%= flowPascalCase %>WorkFlowService {
 
     private final WorkflowClient workflowClient;
     private final String flowQueue;
+<% const hasTypedInput = typeof inputFields !== 'undefined' && inputFields.length > 0; -%>
 
     public <%= flowPascalCase %>WorkFlowService(
         WorkflowClient workflowClient,
@@ -19,29 +20,56 @@ public class <%= flowPascalCase %>WorkFlowService {
         this.flowQueue = flowQueue;
     }
 
+<% if (hasTypedInput) { -%>
+    /**
+     * Starts the workflow asynchronously with the full typed input.
+     */
+    public void startAsync(String workflowId, <%= flowPascalCase %>Input input) {
+        <%= flowPascalCase %>WorkFlow workflow = getWorkflow(workflowId);
+        WorkflowClient.start(workflow::start, input);
+    }
+
+    /**
+     * Starts the workflow synchronously with the full typed input.
+     */
+    public void startSync(String workflowId, <%= flowPascalCase %>Input input) {
+        <%= flowPascalCase %>WorkFlow workflow = getWorkflow(workflowId);
+        workflow.start(input);
+    }
+
+    /**
+     * Bridge method — starts the workflow from a DomainEventHandler using only
+     * the aggregate ID as workflow identifier.
+     * <p>
+     * TODO: construct {@link <%= flowPascalCase %>Input} from available context
+     * and call {@link #startAsync(String, <%= flowPascalCase %>Input)} instead.
+     */
+    public void startAsync(String workflowId) {
+        // TODO: replace with startAsync(workflowId, new <%= flowPascalCase %>Input(...))
+        throw new UnsupportedOperationException(
+            "Build <%= flowPascalCase %>Input for workflow " + workflowId
+                + " — see startAsync(String, <%= flowPascalCase %>Input)");
+    }
+<% } else { -%>
     public void startAsync(String flowId) {
-        <%= flowPascalCase %>WorkFlow workflow = get<%= flowPascalCase %>WorkFlow(flowId);
+        <%= flowPascalCase %>WorkFlow workflow = getWorkflow(flowId);
         WorkflowClient.start(workflow::start, flowId);
     }
 
     public void startSync(String flowId) {
-        <%= flowPascalCase %>WorkFlow workflow = get<%= flowPascalCase %>WorkFlow(flowId);
+        <%= flowPascalCase %>WorkFlow workflow = getWorkflow(flowId);
         workflow.start(flowId);
     }
+<% } -%>
 
-    public void confirm(String flowId) {
-        <%= flowPascalCase %>WorkFlow workflow = get<%= flowPascalCase %>WorkFlow(flowId);
-        workflow.confirm();
-    }
-
-    public String getStatus(String flowId) {
-        <%= flowPascalCase %>WorkFlow workflow = get<%= flowPascalCase %>WorkFlow(flowId);
+    public String getStatus(String workflowId) {
+        <%= flowPascalCase %>WorkFlow workflow = getWorkflow(workflowId);
         return workflow.getStatus();
     }
 
-    private <%= flowPascalCase %>WorkFlow get<%= flowPascalCase %>WorkFlow(String flowId) {
+    private <%= flowPascalCase %>WorkFlow getWorkflow(String workflowId) {
         WorkflowOptions options = WorkflowOptions.newBuilder()
-            .setWorkflowId(flowId)
+            .setWorkflowId(workflowId)
             .setTaskQueue(flowQueue)
             .build();
         return workflowClient.newWorkflowStub(<%= flowPascalCase %>WorkFlow.class, options);

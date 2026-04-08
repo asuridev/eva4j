@@ -1,0 +1,11 @@
+package <%= packageName %>.<%= moduleName %>.application.usecases;
+<% if (inputImports && inputImports.length > 0) { %>
+<% inputImports.forEach(imp => { -%>
+<%= imp %>
+<% }); -%>
+<% } %>
+public record <%= flowPascalCase %>Input(
+<% inputFields.forEach((field, i) => { -%>
+    <%= field.javaType %> <%= field.name %><%= i < inputFields.length - 1 ? ',' : '' %>
+<% }); -%>
+) {}

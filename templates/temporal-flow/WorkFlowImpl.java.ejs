@@ -1,10 +1,159 @@
 package <%= packageName %>.<%= moduleName %>.application.usecases;
+<%
+// ─── Dual mode: rich (from temporal-system) or simple (from temporal-flow) ──
+const isRichMode = typeof stubActivities !== 'undefined' && Array.isArray(stubActivities);
+-%>
+<% if (isRichMode) { -%>
+<%
+// ─── Helper: parse timeout string to Duration call ──────────────────────────
+function durationOf(t) {
+    if (!t) return 'Duration.ofSeconds(30)';
+    return `Duration.of${t.unit}(${t.value})`;
+}
+-%>
+
+import io.temporal.activity.ActivityOptions;
+import io.temporal.common.RetryOptions;
+<% if (isSaga) { -%>
+import io.temporal.workflow.Saga;
+<% } -%>
+<% if (hasParallelSteps || hasAsyncSteps) { -%>
+import io.temporal.workflow.Async;
+<% } -%>
+<% if (hasParallelSteps) { -%>
+import io.temporal.workflow.Promise;
+<% } -%>
+import io.temporal.workflow.Workflow;
+
+import java.time.Duration;
+<% /* Collect imports for all shared + local activity interfaces and DTOs */ -%>
+<% const importLines = new Set(); -%>
+<% for (const stub of stubActivities) { -%>
+<%   if (stub.isLocal) { -%>
+<%     importLines.add(`import ${packageName}.${moduleName}.application.ports.${stub.interfaceName};`); -%>
+<%     if (stub.hasInput) importLines.add(`import ${packageName}.${moduleName}.application.dtos.temporal.${stub.activityName}Input;`); -%>
+<%     if (stub.hasOutput) importLines.add(`import ${packageName}.${moduleName}.application.dtos.temporal.${stub.activityName}Output;`); -%>
+<%   } else { -%>
+<%     importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.interfaceName};`); -%>
+<%     if (stub.hasInput) importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.activityName}Input;`); -%>
+<%     if (stub.hasOutput) importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.activityName}Output;`); -%>
+<%   } -%>
+<% } -%>
+<%= Array.from(importLines).sort().join('\n') %>
+
+public class <%= flowPascalCase %>WorkFlowImpl implements <%= flowPascalCase %>WorkFlow {
+
+    // ─── Activity stubs ─────────────────────────────────────────────────────
+<% for (const stub of stubActivities) { %>
+    private final <%= stub.interfaceName %> <%= stub.stubVarName %> = Workflow.newActivityStub(
+        <%= stub.interfaceName %>.class,
+        ActivityOptions.newBuilder()
+            .setTaskQueue("<%= stub.queue %>")
+            .setStartToCloseTimeout(<%= durationOf(stub.timeout) %>)
+            .setRetryOptions(
+                RetryOptions.newBuilder()
+                    .setMaximumAttempts(2)
+                    .setInitialInterval(Duration.ofSeconds(1))
+                    .setMaximumInterval(Duration.ofSeconds(10))
+                    .setBackoffCoefficient(2.0)
+                    .build()
+            ).build());
+<% } -%>
+
+    private String status = "PENDING";
+
+    @Override
+    public void start(<%= flowPascalCase %>Input input) {
+<% if (isSaga) { -%>
+        Saga saga = new Saga(new Saga.Options.Builder().setParallelCompensation(false).build());
+        try {
+<% } -%>
+<%
+// ─── Render blocks ──────────────────────────────────────────────────────────
+const indent = isSaga ? '            ' : '        ';
+for (const block of renderBlocks) {
+    if (block.type === 'sequential') {
+        const step = block.step;
+-%>
+<%= indent %>// Step <%= step.index + 1 %>: <%= step.activityName %><%= step.isLocal ? ' (local)' : ` (→ ${step.targetModule})` %><%= step.isOptional ? ' [optional]' : '' %>
+<% if (step.isOptional) { -%>
+<%= indent %>try {
+<% } -%>
+<% const optIndent = step.isOptional ? indent + '    ' : indent; -%>
+<% if (step.hasOutput) { -%>
+<%= optIndent %>var <%= step.activityCamel %>Result = <%= step.activityCamel %>Activity.execute(<% if (step.hasInput) { %>
+<%= optIndent %>    new <%= step.activityName %>Input(<%= step.inputSources.map(src => src.source === 'input' ? `input.${src.fieldName}()` : `${src.varName}.${src.fieldName}()`).join(', ') %>)<% } %>);
+<% } else { -%>
+<%= optIndent %><%= step.activityCamel %>Activity.execute(<% if (step.hasInput) { %>
+<%= optIndent %>    new <%= step.activityName %>Input(<%= step.inputSources.map(src => src.source === 'input' ? `input.${src.fieldName}()` : `${src.varName}.${src.fieldName}()`).join(', ') %>)<% } %>);
+<% } -%>
+<% if (step.compensation && isSaga) { -%>
+<%= optIndent %>saga.addCompensation(() -> <%= step.compensation.name.charAt(0).toLowerCase() + step.compensation.name.slice(1) %>Activity.execute(
+<%= optIndent %>    new <%= step.compensation.name %>Input(<%= step.compensation.inputSources.map(src => src.source === 'input' ? `input.${src.fieldName}()` : `${src.varName}.${src.fieldName}()`).join(', ') %>)));
+<% } -%>
+<% if (step.isOptional) { -%>
+<%= indent %>} catch (Exception e) {
+<%= indent %>    // Optional step — continue on failure
+<%= indent %>}
+<% } -%>
+
+<%  } else if (block.type === 'parallel') { -%>
+<%= indent %>// Steps <%= block.steps.map(s => s.index + 1).join('-') %>: Parallel execution
+<% for (const step of block.steps) { -%>
+<% if (step.hasOutput) { -%>
+<%= indent %>Promise<<%= step.activityName %>Output> <%= step.activityCamel %>Promise = Async.function(
+<%= indent %>    () -> <%= step.activityCamel %>Activity.execute(<% if (step.hasInput) { %>new <%= step.activityName %>Input(<%= step.inputSources.map(src => src.source === 'input' ? `input.${src.fieldName}()` : `${src.varName}.${src.fieldName}()`).join(', ') %>)<% } %>));
+<% } else { -%>
+<%= indent %>Promise<Void> <%= step.activityCamel %>Promise = Async.procedure(
+<%= indent %>    () -> <%= step.activityCamel %>Activity.execute(<% if (step.hasInput) { %>new <%= step.activityName %>Input(<%= step.inputSources.map(src => src.source === 'input' ? `input.${src.fieldName}()` : `${src.varName}.${src.fieldName}()`).join(', ') %>)<% } %>));
+<% } -%>
+<% if (step.compensation && isSaga) { -%>
+<%= indent %>saga.addCompensation(() -> <%= step.compensation.name.charAt(0).toLowerCase() + step.compensation.name.slice(1) %>Activity.execute(
+<%= indent %>    new <%= step.compensation.name %>Input(<%= step.compensation.inputSources.map(src => src.source === 'input' ? `input.${src.fieldName}()` : `${src.varName}.${src.fieldName}()`).join(', ') %>)));
+<% } -%>
+<% } -%>
+
+<%= indent %>// Wait for parallel results
+<% for (const step of block.steps) { -%>
+<% if (step.hasOutput) { -%>
+<%= indent %>var <%= step.activityCamel %>Result = <%= step.activityCamel %>Promise.get();
+<% } else { -%>
+<%= indent %><%= step.activityCamel %>Promise.get();
+<% } -%>
+<% } -%>
+
+<%  } else if (block.type === 'async') {
+        const step = block.step;
+-%>
+<%= indent %>// Step <%= step.index + 1 %>: <%= step.activityName %> (fire-and-forget → <%= step.targetModule %>)
+<%= indent %>Async.procedure(() -> <%= step.activityCamel %>Activity.execute(<% if (step.hasInput) { %>
+<%= indent %>    new <%= step.activityName %>Input(<%= step.inputSources.map(src => src.source === 'input' ? `input.${src.fieldName}()` : `${src.varName}.${src.fieldName}()`).join(', ') %>)<% } %>));
+
+<%  }
+} /* end renderBlocks loop */ -%>
+<% if (isSaga) { -%>
+            this.status = "COMPLETED";
+        } catch (Exception e) {
+            saga.compensate();
+            this.status = "COMPENSATED";
+            throw e;
+        }
+<% } else { -%>
+        this.status = "COMPLETED";
+<% } -%>
+    }
+
+    @Override
+    public String getStatus() {
+        return this.status;
+    }
+}
+<% } else { -%>
+<%/* ─── Simple mode (from eva g temporal-flow) ─────────────────────────────── */%>
 
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
 import io.temporal.workflow.Saga;
-import io.temporal.workflow.SignalMethod;
-import io.temporal.workflow.QueryMethod;
 import io.temporal.workflow.Workflow;
 
 import java.time.Duration;
@@ -42,7 +191,7 @@ public class <%= flowPascalCase %>WorkFlowImpl implements <%= flowPascalCase %>W
         ).build();
 
     @Override
-    public void start(String workFlowId) {
+    public void start(String flowId) {
         try {
             //todo: workflow logic
         } catch (Exception e) {
@@ -50,15 +199,9 @@ public class <%= flowPascalCase %>WorkFlowImpl implements <%= flowPascalCase %>W
         }
     }
 
-    @SignalMethod
-    @Override
-    public void confirm() {
-
-    }
-
-    @QueryMethod
     @Override
     public String getStatus() {
         return "";
     }
 }
+<% } -%>

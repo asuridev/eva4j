@@ -286,6 +286,14 @@ async function generateEntitiesCommand(moduleName, options = {}) {
       ? 'mock'
       : installedBroker;
 
+    // Detect Temporal for auto-wiring DomainEvent → Workflow bridge
+    const hasNotifiesInModule = aggregates.some(agg =>
+      (agg.domainEvents || []).some(e => (e.notifies || []).length > 0)
+    );
+    const temporalInstalled = hasNotifiesInModule
+      ? await configManager.featureExists('temporal')
+      : false;
+
     // Generate audit-related shared components if needed
     if (hasAuditableEntities || hasTrackUserEntities) {
       
@@ -608,7 +616,8 @@ async function generateEntitiesCommand(moduleName, options = {}) {
             ...e,
             integrationEventClassName: `${e.name}IntegrationEvent`
           })),
-          broker
+          broker,
+          temporal: temporalInstalled
         };
         await renderAndWrite(
           path.join(__dirname, '..', '..', 'templates', 'aggregate', 'DomainEventHandler.java.ejs'),

@@ -169,6 +169,40 @@ aggregates:
 # La saga (PlaceOrderWorkflow) se define en system.yaml, no en el módulo.
 # El CreateOrderCommandHandler persiste la orden y lanza el workflow.
 
+# ─── Activities del módulo ───────────────────────────────────────────────────
+# Activities LOCALES — invocadas por workflows cross-module (system.yaml)
+# y workflows single-module (definidos abajo).
+activities:
+  - name: ConfirmOrder
+    type: light
+    description: "Confirma la orden tras pago exitoso (invocada por PlaceOrderWorkflow)"
+    input:
+      - name: orderId
+        type: String
+    timeout: 5s
+
+  - name: CancelExpiredOrder
+    type: light
+    description: "Cancela orden pendiente que no recibió pago a tiempo"
+    input:
+      - name: orderId
+        type: String
+    timeout: 5s
+
+# ─── Workflows single-module ────────────────────────────────────────────────
+# Flujos que NO cruzan fronteras de módulo → se definen aquí, no en system.yaml.
+workflows:
+  - name: ExpireOrderWorkflow
+    description: "Cancela la orden si no se recibe pago dentro del timeout"
+    trigger:
+      on: orderCreated
+    taskQueue: ORDER_WORKFLOW_QUEUE
+    steps:
+      - wait: paymentCompleted
+        timeout: 30m
+      - activity: CancelExpiredOrder
+        timeout: 5s
+
 endpoints:
   basePath: /orders
   versions:

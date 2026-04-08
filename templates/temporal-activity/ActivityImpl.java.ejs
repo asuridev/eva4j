@@ -1,6 +1,22 @@
 package <%= packageName %>.<%= moduleName %>.infrastructure.adapters.activities;
 
+<% if (shared) { %>
+import <%= packageName %>.shared.domain.contracts.<%= moduleName %>.<%= activityPascalCase %>Activity;
+<% if (hasInput) { %>
+import <%= packageName %>.shared.domain.contracts.<%= moduleName %>.<%= activityPascalCase %>Input;
+<% } %>
+<% if (hasOutput) { %>
+import <%= packageName %>.shared.domain.contracts.<%= moduleName %>.<%= activityPascalCase %>Output;
+<% } %>
+<% } else { %>
 import <%= packageName %>.<%= moduleName %>.application.ports.<%= activityPascalCase %>Activity;
+<% if (hasInput) { %>
+import <%= packageName %>.<%= moduleName %>.application.dtos.temporal.<%= activityPascalCase %>Input;
+<% } %>
+<% if (hasOutput) { %>
+import <%= packageName %>.<%= moduleName %>.application.dtos.temporal.<%= activityPascalCase %>Output;
+<% } %>
+<% } %>
 import <%= packageName %>.<%= moduleName %>.domain.interfaces.<%= activityCategory %>;
 import org.springframework.stereotype.Component;
 
@@ -8,7 +24,10 @@ import org.springframework.stereotype.Component;
 public class <%= activityPascalCase %>ActivityImpl implements <%= activityPascalCase %>Activity, <%= activityCategory %> {
 
     @Override
-    public void execute(String flowId) {
+    public <%= hasOutput ? activityPascalCase + 'Output' : 'void' %> execute(<%= hasInput ? activityPascalCase + 'Input input' : '' %>) {
         //todo: implement the logic
+<% if (hasOutput) { %>
+        throw new UnsupportedOperationException("Not implemented yet");
+<% } %>
     }
 }

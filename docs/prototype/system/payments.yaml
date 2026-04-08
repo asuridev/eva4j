@@ -154,6 +154,45 @@ activities:
       - name: status
         type: String
 
+  # Activities INTERNAS — solo usadas por workflows single-module de payments
+  - name: RetryCharge
+    type: heavy
+    description: "Reintenta cobro al gateway externo"
+    input:
+      - name: paymentId
+        type: String
+    output:
+      - name: status
+        type: String
+      - name: reason
+        type: String
+    timeout: 30s
+
+  - name: MarkPaymentFailed
+    type: light
+    description: "Marca el pago como fallido definitivamente tras agotar reintentos"
+    input:
+      - name: paymentId
+        type: String
+    timeout: 5s
+
+# ─── Workflows single-module ────────────────────────────────────────────────
+# Flujos internos que NO cruzan fronteras de módulo.
+workflows:
+  - name: RetryChargeWorkflow
+    description: "Reintenta cobro fallido con backoff exponencial"
+    trigger:
+      on: chargeFailed
+    taskQueue: PAYMENT_WORKFLOW_QUEUE
+    steps:
+      - activity: RetryCharge
+        retryPolicy:
+          maxAttempts: 3
+          initialInterval: 2s
+          backoffCoefficient: 2.0
+      - activity: MarkPaymentFailed
+        timeout: 5s
+
 # ─── ELIMINADOS: listeners[] ─────────────────────────────────────────────────
 # OrderPlacedEvent ya no se consume. ProcessOrderPayment es una Activity.
 

@@ -113,7 +113,8 @@ function parseAggregate(aggregateData) {
       fieldName: toCamelCase(eventName),
       fields: eventFields,
       triggers: event.triggers || [],
-      lifecycle: event.lifecycle || null
+      lifecycle: event.lifecycle || null,
+      notifies: event.notifies || []
     };
   });
 

@@ -1,12 +1,10 @@
-package <%= packageName %>.<%= moduleName %>.application.ports;
+package <%= packageName %>.shared.domain.contracts.<%= targetModule %>;
 
 import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityMethod;
 <% if (hasInput) { %>
-import <%= packageName %>.<%= moduleName %>.application.dtos.temporal.<%= activityPascalCase %>Input;
 <% } %>
 <% if (hasOutput) { %>
-import <%= packageName %>.<%= moduleName %>.application.dtos.temporal.<%= activityPascalCase %>Output;
 <% } %>
 
 @ActivityInterface
