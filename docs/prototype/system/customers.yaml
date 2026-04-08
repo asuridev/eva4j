@@ -102,7 +102,7 @@ activities:
       - name: customerId
         type: String
     output:
-      - name: id
+      - name: customerId
         type: String
       - name: firstName
         type: String

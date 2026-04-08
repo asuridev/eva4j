@@ -119,12 +119,23 @@ async function parseCrossModuleActivities(projectDir) {
 
   for (const wf of data.workflows) {
     if (!Array.isArray(wf.steps)) continue;
+    const hostModule = wf.trigger && wf.trigger.module
+      ? toCamelCase(wf.trigger.module)
+      : null;
     for (const step of wf.steps) {
       if (step.activity && step.target) {
-        crossModuleSet.add(toPascalCase(step.activity));
+        const targetModule = toCamelCase(step.target);
+        // Only mark as cross-module if target differs from the workflow host
+        if (targetModule !== hostModule) {
+          crossModuleSet.add(toPascalCase(step.activity));
+        }
       }
       if (step.compensation) {
-        crossModuleSet.add(toPascalCase(step.compensation));
+        // Compensation targets same module as the step it compensates
+        const compTarget = step.target ? toCamelCase(step.target) : hostModule;
+        if (compTarget !== hostModule) {
+          crossModuleSet.add(toPascalCase(step.compensation));
+        }
       }
     }
   }
@@ -274,6 +285,9 @@ async function generateFromYaml(yamlActivities, activityName, ctx) {
       process.exit(1);
     }
     activitiesToGenerate = [match];
+  } else if (ctx.options && ctx.options.generateAll) {
+    // Non-interactive: generate all activities (used by eva build)
+    activitiesToGenerate = yamlActivities;
   } else {
     // Prompt: generate all or select
     const { selection } = await inquirer.prompt([{

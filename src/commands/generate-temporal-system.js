@@ -95,10 +95,13 @@ async function generateTemporalSystemCommand(options = {}) {
     // Collect all cross-module activity names from workflows
     for (const wf of workflows) {
       for (const step of wf.steps) {
-        await processActivity(step.activityName, activityRegistry, packageName, processedActivities, generatedShared, sharedBasePath, sharedWriteOptions);
+        // Only generate shared contracts for cross-module activities
+        if (!step.isLocal) {
+          await processActivity(step.activityName, activityRegistry, packageName, processedActivities, generatedShared, sharedBasePath, sharedWriteOptions);
+        }
 
-        // Also handle compensation activities
-        if (step.compensation) {
+        // Also handle compensation activities (only cross-module)
+        if (step.compensation && step.compensation.module !== wf.hostModule) {
           await processActivity(step.compensation.name, activityRegistry, packageName, processedActivities, generatedShared, sharedBasePath, sharedWriteOptions);
         }
       }
@@ -572,3 +575,4 @@ async function appendModuleQueues(projectDir, moduleName, moduleScreamingSnake) 
 }
 
 module.exports = generateTemporalSystemCommand;
+module.exports.computeWorkflowInputFields = computeWorkflowInputFields;

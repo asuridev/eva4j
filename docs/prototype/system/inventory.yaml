@@ -51,7 +51,7 @@ activities:
       - name: orderId
         type: String
       - name: items
-        type: List              # [{productId, quantity}]
+        type: List<String>      # [{productId, quantity}]
     output:
       - name: success
         type: Boolean
@@ -67,7 +67,7 @@ activities:
       - name: orderId
         type: String
       - name: items
-        type: List
+        type: List<String>
     timeout: 10s
 
   - name: DeleteStock

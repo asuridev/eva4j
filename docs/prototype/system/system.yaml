@@ -198,6 +198,7 @@ workflows:
         target: payments
         type: sync
         input: [orderId, customerId, totalAmount]
+        output: [paymentId]
         compensation: RefundPayment
         timeout: 30s
 
@@ -209,11 +210,11 @@ workflows:
 
       # Paso 6: Notificar (Remote Activity → notifications)
       # ⚡ Async.function() — fire-and-forget, NO bloquea la saga.
-      # Recibe customerEmail y customerName del paso 1 (GetCustomerById).
+      # Recibe email y firstName del paso 1 (GetCustomerById).
       - activity: NotifyOrderPlaced
         target: notifications
         type: async
-        input: [orderId, customerEmail, customerName, totalAmount]
+        input: [orderId, email, firstName, totalAmount]
 
   # ─── Orden cancelada ──────────────────────────────────────────────────────
   - name: CancelOrderWorkflow
@@ -249,7 +250,7 @@ workflows:
       - activity: NotifyOrderCancelled
         target: notifications
         type: async
-        input: [orderId, customerEmail, customerName]
+        input: [orderId, email, firstName]
 
   # ─── ELIMINADOS: Workflows de sincronización de datos ──────────────────────
   # Antes había 4 workflows que SOLO sincronizaban read models:

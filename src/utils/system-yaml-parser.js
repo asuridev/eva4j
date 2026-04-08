@@ -36,7 +36,12 @@ function resolveFieldImports(fields) {
 }
 
 function mapField(field) {
-  return { name: field.name, javaType: field.type || 'String' };
+  let javaType = field.type || 'String';
+  // Default bare collection types to generic <String>
+  if (javaType === 'List' || javaType === 'Set') {
+    javaType = javaType + '<String>';
+  }
+  return { name: field.name, javaType };
 }
 
 /**

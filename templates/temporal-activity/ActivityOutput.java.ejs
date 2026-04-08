@@ -6,7 +6,7 @@ package <%= packageName %>.<%= moduleName %>.application.dtos.temporal;
 
 public record <%= activityPascalCase %>Output(
 <% outputFields.forEach((field, index) => { %>
-    <%= field.javaType %> <%= field.name %><%= index < outputFields.length - 1 ? ',' : '' %>
+    <%- field.javaType %> <%= field.name %><%= index < outputFields.length - 1 ? ',' : '' %>
 <% }); %>
 ) {
 }

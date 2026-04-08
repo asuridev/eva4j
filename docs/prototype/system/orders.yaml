@@ -117,8 +117,7 @@ aggregates:
 
     events:
       - name: OrderPlacedEvent
-        # lifecycle: create  ← No se usa lifecycle aquí porque CreateOrder
-        # lanza el PlaceOrderWorkflow que orquesta todo el flujo
+        lifecycle: create
         fields:
           - name: orderId
             type: String

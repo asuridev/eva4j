@@ -13,21 +13,43 @@ import <%= packageName %>.<%= moduleName %>.application.events.<%= event.integra
 import <%= packageName %>.<%= moduleName %>.application.ports.MessageBroker;
 <% } -%>
 <%
-  // Collect unique workflow names from events with notifies (Temporal bridge)
-  const _workflowSet = new Set();
+  // Collect unique workflow flowPascal names from events with notifies (Temporal bridge)
+  // flowPascal = workflow name with "Workflow" suffix stripped (e.g. PlaceOrderWorkflow → PlaceOrder)
+  // The generated service class is {flowPascal}WorkFlowService (e.g. PlaceOrderWorkFlowService)
+  const _flowPascalSet = new Set();
+  const _inputClassSet = new Set();
+  let _needsLocalDateTimeImport = false;
   if (typeof temporal !== 'undefined' && temporal) {
     domainEvents.forEach(event => {
+      const _evFieldNames = new Set((event.fields || []).map(f => f.name));
+      const _aggrIdWf = aggregateName.charAt(0).toLowerCase() + aggregateName.slice(1) + 'Id';
       (event.notifies || []).forEach(n => {
-        if (n.workflow) _workflowSet.add(n.workflow);
+        if (n.workflow && n.flowPascal) _flowPascalSet.add(n.flowPascal);
+        if (n.inputFields && n.inputFields.length > 0 && n.flowPascal) {
+          _inputClassSet.add(n.flowPascal + 'Input');
+          // Check if any unresolvable field uses LocalDateTime.now()
+          n.inputFields.forEach(f => {
+            if (f.name !== _aggrIdWf && !_evFieldNames.has(f.name)
+                && f.name.endsWith('At') && f.javaType === 'LocalDateTime') {
+              _needsLocalDateTimeImport = true;
+            }
+          });
+        }
       });
     });
   }
-  const _workflows = Array.from(_workflowSet);
-  const _hasTemporalBridge = _workflows.length > 0;
+  const _flowPascals = Array.from(_flowPascalSet);
+  const _hasTemporalBridge = _flowPascals.length > 0;
 -%>
 <% if (_hasTemporalBridge) { -%>
-<% _workflows.forEach(wf => { -%>
-import <%= packageName %>.<%= moduleName %>.application.usecases.<%= wf %>WorkFlowService;
+<% if (_needsLocalDateTimeImport) { -%>
+import java.time.LocalDateTime;
+<% } -%>
+<% _flowPascals.forEach(fp => { -%>
+import <%= packageName %>.<%= moduleName %>.application.usecases.<%= fp %>WorkFlowService;
+<% }); -%>
+<% _inputClassSet.forEach(cls => { -%>
+import <%= packageName %>.<%= moduleName %>.application.usecases.<%= cls %>;
 <% }); -%>
 <% } -%>
 
@@ -68,9 +90,10 @@ public class <%= aggregateName %>DomainEventHandler {
   // Determine constructor dependencies
   const _deps = [];
   if (broker)              _deps.push({ type: 'MessageBroker', name: 'messageBroker' });
-  _workflows.forEach(wf => {
-    const svcName = wf.charAt(0).toLowerCase() + wf.slice(1) + 'WorkFlowService';
-    _deps.push({ type: wf + 'WorkFlowService', name: svcName });
+  _flowPascals.forEach(fp => {
+    const svcType = fp + 'WorkFlowService';
+    const svcName = fp.charAt(0).toLowerCase() + fp.slice(1) + 'WorkFlowService';
+    _deps.push({ type: svcType, name: svcName });
   });
 -%>
 <% if (_deps.length > 0) { %>
@@ -105,9 +128,30 @@ public class <%= aggregateName %>DomainEventHandler {
         messageBroker.publish<%= event.integrationEventClassName %>(new <%= event.integrationEventClassName %>(<% if (event.fields && event.fields.length > 0) { event.fields.forEach(function(field, idx) { %><%= field.name === _aggrIdField ? 'event.getAggregateId()' : 'event.get' + field.name.charAt(0).toUpperCase() + field.name.slice(1) + '()' %><%= idx < event.fields.length - 1 ? ', ' : '' %><% }); } %>));
 <% } -%>
 <% if (_hasWorkflowAction) { _eventNotifies.forEach(n => {
-          const _svcName = n.workflow.charAt(0).toLowerCase() + n.workflow.slice(1) + 'WorkFlowService';
+          const _svcName = n.flowPascal.charAt(0).toLowerCase() + n.flowPascal.slice(1) + 'WorkFlowService';
+          const _aggrIdFieldWf = aggregateName.charAt(0).toLowerCase() + aggregateName.slice(1) + 'Id';
+          const _eventFieldNames = new Set((event.fields || []).map(f => f.name));
+          const _hasTypedInput = n.inputFields && n.inputFields.length > 0;
 -%>
+<% if (_hasTypedInput) { -%>
+        <%= _svcName %>.startAsync(
+            event.getAggregateId(),
+            new <%= n.flowPascal %>Input(<% n.inputFields.forEach(function(inputF, idx) {
+              let _arg;
+              if (inputF.name === _aggrIdFieldWf) {
+                _arg = 'event.getAggregateId()';
+              } else if (_eventFieldNames.has(inputF.name)) {
+                _arg = 'event.get' + inputF.name.charAt(0).toUpperCase() + inputF.name.slice(1) + '()';
+              } else if (inputF.name.endsWith('At') && inputF.javaType === 'LocalDateTime') {
+                _arg = 'LocalDateTime.now()';
+              } else {
+                _arg = 'null /* TODO: provide ' + inputF.name + ' */';
+              }
+%><%= idx > 0 ? ', ' : '' %><%= _arg %><% }); %>)
+        );
+<% } else { -%>
         <%= _svcName %>.startAsync(event.getAggregateId());
+<% } -%>
 <% }); } -%>
 <% if (!_hasBrokerAction && !_hasWorkflowAction) { -%>
         // TODO: handle <%= event.name %> — add your side-effect logic here

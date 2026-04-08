@@ -1,5 +1,7 @@
 'use strict';
 
+const { toPascalCase, toCamelCase } = require('./naming');
+
 /**
  * Validates a parsed system.yaml object against the S1–S5 static evaluation rules.
  *
@@ -405,6 +407,142 @@ function validateSystem(systemConfig, domainConfigs = {}) {
       syncIntegrations.some((s) => s.caller === mod.name || s.calls === mod.name);
     if (!hasAnyConnection) {
       info.push(`[S5-004] Módulo '${mod.name}' no tiene ninguna conexión al grafo del sistema — ni async ni sync`);
+    }
+  }
+
+  // ── T1 — Temporal Workflow Integrity ──────────────────────────────────────
+  const orchestration = systemConfig.orchestration || {};
+  if (orchestration.enabled && Array.isArray(systemConfig.workflows)) {
+    // Build activity registry from domainConfigs: PascalCase name → { module, input[], output[] }
+    const activityMap = new Map();
+    for (const [modName, domainCfg] of Object.entries(domainConfigs)) {
+      if (!domainCfg || !Array.isArray(domainCfg.activities)) continue;
+      const modCamel = toCamelCase(modName);
+      for (const act of domainCfg.activities) {
+        const actPascal = toPascalCase(act.name);
+        const inputNames = Array.isArray(act.input) ? act.input.map((f) => f.name || f) : [];
+        const outputNames = Array.isArray(act.output) ? act.output.map((f) => f.name || f) : [];
+        activityMap.set(`${modCamel}::${actPascal}`, { module: modCamel, inputNames, outputNames });
+      }
+    }
+
+    let t1_001_found = false;
+    let t1_002_found = false;
+    let t1_004_found = false;
+    let t1_006_found = false;
+
+    for (const wf of systemConfig.workflows) {
+      const wfName = wf.name || '(unnamed)';
+      const hostModule = wf.trigger && wf.trigger.module ? toCamelCase(wf.trigger.module) : null;
+      const rawSteps = Array.isArray(wf.steps) ? wf.steps : [];
+
+      // Track available output names from prior steps for T1-002
+      const availableOutputNames = new Set();
+
+      // Compute workflow-level input names: step inputs not satisfied by prior step outputs
+      // (first pass to collect all step outputs)
+      const allStepOutputs = new Map(); // stepIndex → rawOutputNames
+      for (let i = 0; i < rawSteps.length; i++) {
+        const rawOut = Array.isArray(rawSteps[i].output) ? rawSteps[i].output : [];
+        allStepOutputs.set(i, new Set(rawOut));
+      }
+
+      // Compute workflow-level inputs: inputs not provided by any prior step's output
+      const workflowInputNames = new Set();
+      const priorOutputs = new Set();
+      for (let i = 0; i < rawSteps.length; i++) {
+        const stepInputs = Array.isArray(rawSteps[i].input) ? rawSteps[i].input : [];
+        for (const inName of stepInputs) {
+          if (!priorOutputs.has(inName)) {
+            workflowInputNames.add(inName);
+          }
+        }
+        const stepOutputs = allStepOutputs.get(i) || new Set();
+        for (const outName of stepOutputs) {
+          priorOutputs.add(outName);
+        }
+      }
+
+      for (let i = 0; i < rawSteps.length; i++) {
+        const step = rawSteps[i];
+        const actName = step.activity ? toPascalCase(step.activity) : null;
+        if (!actName) continue;
+
+        const targetModule = step.target ? toCamelCase(step.target) : hostModule;
+        const key = `${targetModule}::${actName}`;
+        const registered = activityMap.get(key);
+
+        // T1-004: Activity not found in target module
+        if (!registered) {
+          warnings.push(`[T1-004] Workflow '${wfName}' paso ${i + 1}: actividad '${actName}' no encontrada en activities[] de '${targetModule}'`);
+          t1_004_found = true;
+        }
+
+        // T1-001: Step output name not in activity's formal output fields
+        const rawOutputNames = Array.isArray(step.output) ? step.output : [];
+        if (registered && rawOutputNames.length > 0) {
+          const formalOutputSet = new Set(registered.outputNames);
+          for (const outName of rawOutputNames) {
+            if (!formalOutputSet.has(outName)) {
+              errors.push(`[T1-001] Workflow '${wfName}' paso ${i + 1} (${actName}): output '${outName}' no existe en los campos de salida de la actividad — campos disponibles: [${registered.outputNames.join(', ')}]`);
+              t1_001_found = true;
+            }
+          }
+
+          // T1-003: Step output count exceeds activity formal output count
+          if (rawOutputNames.length > registered.outputNames.length) {
+            warnings.push(`[T1-003] Workflow '${wfName}' paso ${i + 1} (${actName}): declara ${rawOutputNames.length} outputs pero la actividad solo define ${registered.outputNames.length} campos de salida`);
+          }
+        }
+
+        // T1-002: Step input name not resolvable
+        const rawInputNames = Array.isArray(step.input) ? step.input : [];
+        if (rawInputNames.length > 0) {
+          for (const inName of rawInputNames) {
+            if (!availableOutputNames.has(inName)) {
+              // Not from a prior step — must come from workflow input (OK, no error)
+              // But if we detect it's truly orphaned, we'd need full data-flow analysis.
+              // For now, we skip pure workflow-input names (they're always valid).
+            }
+          }
+        }
+
+        // T1-005: Sync step with no output declaration
+        if (step.type !== 'async' && rawOutputNames.length === 0 && registered && registered.outputNames.length > 0) {
+          info.push(`[T1-005] Workflow '${wfName}' paso ${i + 1} (${actName}): paso síncrono sin output: declarado — la actividad define ${registered.outputNames.length} campo(s) de salida que no se propagan`);
+        }
+
+        // Add this step's outputs to available set for subsequent steps
+        for (const outName of rawOutputNames) {
+          availableOutputNames.add(outName);
+        }
+
+        // T1-006: Compensation input field not resolvable
+        if (step.compensation) {
+          const compName = toPascalCase(step.compensation);
+          const compTarget = step.target ? toCamelCase(step.target) : hostModule;
+          const compKey = `${compTarget}::${compName}`;
+          const compRegistered = activityMap.get(compKey);
+          if (compRegistered) {
+            for (const compIn of compRegistered.inputNames) {
+              if (!availableOutputNames.has(compIn) && !workflowInputNames.has(compIn)) {
+                errors.push(`[T1-006] Workflow '${wfName}' paso ${i + 1} (${actName}): compensación '${compName}' requiere input '${compIn}' pero no está disponible en outputs de pasos previos ni en inputs del workflow`);
+                t1_006_found = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (!t1_001_found) {
+      ok.push('[T1-001] Todos los outputs de pasos de workflow coinciden con campos formales de la actividad ✓');
+    }
+    if (!t1_004_found) {
+      ok.push('[T1-004] Todas las actividades referenciadas en workflows existen en sus módulos target ✓');
+    }
+    if (!t1_006_found) {
+      ok.push('[T1-006] Todos los inputs de compensaciones son resolubles desde outputs de pasos previos o inputs del workflow ✓');
     }
   }
 

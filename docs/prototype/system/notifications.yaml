@@ -6,7 +6,7 @@
 #   - ELIMINA readModels[] (CustomerReadModel) — datos de cliente llegan como
 #     input de las Activities, inyectados por el workflow caller
 #   - AGREGA activities[] — cada notificación es una Activity
-#   - Activities reciben customerEmail/customerName directamente (no lookup local)
+#   - Activities reciben datos del cliente directamente (no lookup local)
 # =============================================================================
 
 aggregates:
@@ -76,9 +76,9 @@ activities:
     input:
       - name: orderId
         type: String
-      - name: customerEmail
+      - name: email
         type: String
-      - name: customerName
+      - name: firstName
         type: String
       - name: totalAmount
         type: BigDecimal
@@ -90,9 +90,9 @@ activities:
     input:
       - name: orderId
         type: String
-      - name: customerEmail
+      - name: email
         type: String
-      - name: customerName
+      - name: firstName
         type: String
     timeout: 15s
 

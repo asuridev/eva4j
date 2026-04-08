@@ -16,6 +16,8 @@ const { getInstalledBroker, generateSingleKafkaEvent, buildKafkaEventContext, up
         generateEventRecord, createOrUpdateMessageBroker, updateDomainEventHandler } = require('./generate-kafka-event');
 const { generateSingleRabbitEvent, buildRabbitEventContext, updateRabbitMQYml, updateRabbitMQYmlQueue,
         createOrUpdateRabbitMessageBroker, updateRabbitMQConfigForConsumer, updateRabbitMQYmlForConsumer } = require('./generate-rabbitmq-event');
+const { parseSystemYaml } = require('../utils/system-yaml-parser');
+const { computeWorkflowInputFields } = require('./generate-temporal-system');
 
 // Maximum depth for recursive relationship traversal
 const MAX_DEPTH = 5;
@@ -293,6 +295,25 @@ async function generateEntitiesCommand(moduleName, options = {}) {
     const temporalInstalled = hasNotifiesInModule
       ? await configManager.featureExists('temporal')
       : false;
+
+    // Build workflow → inputFields map for typed DomainEvent → Workflow bridge
+    const workflowInputMap = new Map();
+    if (temporalInstalled) {
+      try {
+        const systemDir = path.join(projectDir, 'system');
+        if (await fs.pathExists(path.join(systemDir, 'system.yaml'))) {
+          const { workflows } = await parseSystemYaml(systemDir);
+          for (const wf of workflows) {
+            const inputFields = computeWorkflowInputFields(wf.steps);
+            const flowPascal = wf.namePascal.replace(/Workflow$/, '');
+            workflowInputMap.set(wf.namePascal, { inputFields, flowPascal });
+            workflowInputMap.set(wf.name, { inputFields, flowPascal });
+          }
+        }
+      } catch (_) {
+        // system.yaml not required — standalone modules work without it
+      }
+    }
 
     // Generate audit-related shared components if needed
     if (hasAuditableEntities || hasTrackUserEntities) {
@@ -614,7 +635,16 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           aggregateName,
           domainEvents: aggregateDomainEvents.map(e => ({
             ...e,
-            integrationEventClassName: `${e.name}IntegrationEvent`
+            integrationEventClassName: `${e.name}IntegrationEvent`,
+            notifies: (e.notifies || []).map(n => {
+              const wfKey = toPascalCase(n.workflow || '');
+              const meta = workflowInputMap.get(wfKey);
+              return {
+                ...n,
+                inputFields: meta ? meta.inputFields : [],
+                flowPascal: meta ? meta.flowPascal : wfKey.replace(/Workflow$/, ''),
+              };
+            }),
           })),
           broker,
           temporal: temporalInstalled

@@ -6,6 +6,6 @@ package <%= packageName %>.<%= moduleName %>.application.usecases;
 <% } %>
 public record <%= flowPascalCase %>Input(
 <% inputFields.forEach((field, i) => { -%>
-    <%= field.javaType %> <%= field.name %><%= i < inputFields.length - 1 ? ',' : '' %>
+    <%- field.javaType %> <%= field.name %><%= i < inputFields.length - 1 ? ',' : '' %>
 <% }); -%>
 ) {}

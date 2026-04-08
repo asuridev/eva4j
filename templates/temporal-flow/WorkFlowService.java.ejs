@@ -38,17 +38,19 @@ public class <%= flowPascalCase %>WorkFlowService {
     }
 
     /**
-     * Bridge method — starts the workflow from a DomainEventHandler using only
-     * the aggregate ID as workflow identifier.
+     * Bridge method — starts the workflow using only the aggregate ID.
      * <p>
-     * TODO: construct {@link <%= flowPascalCase %>Input} from available context
-     * and call {@link #startAsync(String, <%= flowPascalCase %>Input)} instead.
+     * The generated {@code DomainEventHandler} calls
+     * {@link #startAsync(String, <%= flowPascalCase %>Input)} directly with a
+     * typed input constructed from the domain event fields. Use this overload
+     * only from custom code that can build the input by other means.
+     *
+     * @throws UnsupportedOperationException always — override or call the typed variant
      */
     public void startAsync(String workflowId) {
-        // TODO: replace with startAsync(workflowId, new <%= flowPascalCase %>Input(...))
         throw new UnsupportedOperationException(
-            "Build <%= flowPascalCase %>Input for workflow " + workflowId
-                + " — see startAsync(String, <%= flowPascalCase %>Input)");
+            "Use startAsync(workflowId, " + "<%= flowPascalCase %>Input) — "
+                + "the DomainEventHandler already calls the typed variant");
     }
 <% } else { -%>
     public void startAsync(String flowId) {

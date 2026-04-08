@@ -132,10 +132,10 @@ activities:
     description: "Obtiene múltiples productos por sus IDs (batch)"
     input:
       - name: productIds
-        type: List                     # List<String>
+        type: List<String>
     output:
       - name: products
-        type: List                     # List<{id, name, price, category, sku}>
+        type: List<String>             # List<{id, name, price, category, sku}>
     timeout: 10s
 
 endpoints:

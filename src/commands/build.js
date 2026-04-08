@@ -7,14 +7,18 @@ const yaml = require('js-yaml');
 
 const ConfigManager = require('../utils/config-manager');
 const { isEva4jProject } = require('../utils/validator');
-const { toCamelCase, toPackagePath } = require('../utils/naming');
+const { toCamelCase, toPascalCase, toScreamingSnakeCase, toPackagePath } = require('../utils/naming');
 const SharedGenerator = require('../generators/shared-generator');
 const { renderAndWrite } = require('../utils/template-engine');
 const addModuleCommand = require('./add-module');
 const addKafkaClientCommand = require('./add-kafka-client');
 const addRabbitMQClientCommand = require('./add-rabbitmq-client');
+const addTemporalClientCommand = require('./add-temporal-client');
 const generateEntitiesCommand = require('./generate-entities');
+const generateTemporalSystemCommand = require('./generate-temporal-system');
+const generateTemporalActivityCommand = require('./generate-temporal-activity');
 const { generateUnifiedPostmanCollection } = require('../generators/postman-generator');
+const ChecksumManager = require('../utils/checksum-manager');
 
 // ── H2 mock config ─────────────────────────────────────────────────────────────
 const H2_DB_YAML = (packageName) => `spring:
@@ -382,6 +386,38 @@ async function restoreFromH2(configManager) {
   return Object.keys(backups).length;
 }
 
+// ── Temporal module queue helper ─────────────────────────────────────────────
+/**
+ * Append module-specific queue configuration to temporal.yaml files (idempotent).
+ * Same logic as generate-temporal-flow.js appendModuleQueues().
+ */
+async function appendTemporalModuleQueues(projectDir, moduleName, moduleScreamingSnake) {
+  const resourcesDir = path.join(projectDir, 'src', 'main', 'resources', 'parameters');
+
+  const moduleSection = [
+    `    ${moduleName}:`,
+    `      flow-queue: ${moduleScreamingSnake}_WORKFLOW_QUEUE`,
+    `      heavy-queue: ${moduleScreamingSnake}_HEAVY_TASK_QUEUE`,
+    `      light-queue: ${moduleScreamingSnake}_LIGHT_TASK_QUEUE`,
+  ].join('\n');
+
+  for (const env of ENVS) {
+    const yamlPath = path.join(resourcesDir, env, 'temporal.yaml');
+    if (!(await fs.pathExists(yamlPath))) continue;
+
+    let content = await fs.readFile(yamlPath, 'utf-8');
+    if (content.includes(`${moduleName}:`)) continue;
+
+    if (!content.includes('modules:')) {
+      content = content.trimEnd() + '\n  modules:\n' + moduleSection + '\n';
+    } else {
+      content = content.trimEnd() + '\n' + moduleSection + '\n';
+    }
+
+    await fs.writeFile(yamlPath, content, 'utf-8');
+  }
+}
+
 // ── Main build command ──────────────────────────────────────────────────────────
 async function buildCommand(options = {}) {
   const projectDir = process.cwd();
@@ -667,6 +703,8 @@ async function buildCommand(options = {}) {
   }
 
   const { modules = [], messaging } = systemConfig;
+  const orchestration = systemConfig.orchestration;
+  const temporalEnabled = orchestration && orchestration.enabled === true && orchestration.engine === 'temporal';
 
   if (!modules.length) {
     console.log(chalk.yellow('⚠️  No modules defined in system/system.yaml'));
@@ -676,6 +714,9 @@ async function buildCommand(options = {}) {
   console.log(chalk.blue('\n🏗️  eva build\n'));
   console.log(chalk.gray(`  Project : ${projectConfig.projectName || projectConfig.artifactId}`));
   console.log(chalk.gray(`  Modules : ${modules.map(m => m.name).join(', ')}`));
+  if (temporalEnabled) {
+    console.log(chalk.gray(`  Orchestr: Temporal (${orchestration.temporal && orchestration.temporal.namespace || 'default'})`));
+  }
   console.log();
 
   // ── STEP 1: Create modules ───────────────────────────────────────────────
@@ -730,6 +771,21 @@ async function buildCommand(options = {}) {
 
     console.log();
 
+    // ── STEP 2b: Install Temporal client (if orchestration configured) ──────
+    if (temporalEnabled) {
+      console.log(chalk.blue('━━━ Step 2b: Installing Temporal client ━━━━━━━━━━━━━━━━━━━━━━'));
+
+      if (await configManager.featureExists('temporal')) {
+        console.log(chalk.gray('  ⏭  temporal-client — already installed, skipping'));
+      } else {
+        console.log(chalk.cyan('  ➕ Installing temporal-client'));
+        await addTemporalClientCommand();
+        await configManager.loadProjectConfig();
+      }
+
+      console.log();
+    }
+
     // ── STEP 3: Copy domain.yaml files ──────────────────────────────────────
     console.log(chalk.blue('━━━ Step 3: Copying domain.yaml files ━━━━━━━━━━━━━━━━━━━━━━━'));
 
@@ -774,6 +830,115 @@ async function buildCommand(options = {}) {
     }
 
     console.log();
+
+    // ── STEP 4b+4c: Generate Temporal infrastructure & workflows ─────────────
+    if (temporalEnabled && (await configManager.featureExists('temporal'))) {
+      const rawWorkflows = Array.isArray(systemConfig.workflows) ? systemConfig.workflows : [];
+
+      // Collect all modules that participate in Temporal (trigger or target)
+      const temporalModulesSet = new Set();
+      for (const wf of rawWorkflows) {
+        if (wf.trigger && wf.trigger.module) temporalModulesSet.add(toCamelCase(wf.trigger.module));
+        for (const step of wf.steps || []) {
+          if (step.target) temporalModulesSet.add(toCamelCase(step.target));
+        }
+      }
+      // Also include modules with activities: in domain.yaml
+      for (const mod of modules) {
+        const modCamel = toCamelCase(mod.name);
+        const domYaml = path.join(projectDir, 'src', 'main', 'java', packagePath, modCamel, 'domain.yaml');
+        if (await fs.pathExists(domYaml)) {
+          const data = yaml.load(await fs.readFile(domYaml, 'utf-8'));
+          if (data && Array.isArray(data.activities) && data.activities.length > 0) {
+            temporalModulesSet.add(modCamel);
+          }
+        }
+      }
+
+      if (temporalModulesSet.size > 0) {
+        // ── Step 4b: Module-level Temporal infrastructure ────────────────────
+        console.log(chalk.blue('━━━ Step 4b: Generating Temporal module infrastructure ━━━━━━━'));
+
+        const temporalFlowTemplates = path.join(__dirname, '..', '..', 'templates', 'temporal-flow');
+
+        for (const modCamel of temporalModulesSet) {
+          const modPascal = toPascalCase(modCamel);
+          const modScreamingSnake = toScreamingSnakeCase(modCamel);
+          const moduleBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, modCamel);
+          if (!(await fs.pathExists(moduleBasePath))) continue;
+
+          const checksumMgr = new ChecksumManager(moduleBasePath);
+          await checksumMgr.load();
+          const wOpts = { force: generateOptions.force, checksumManager: checksumMgr };
+
+          const ctx = {
+            packageName,
+            moduleName: modCamel,
+            modulePascalCase: modPascal,
+            moduleCamelCase: modCamel,
+            moduleScreamingSnake: modScreamingSnake,
+          };
+
+          // Marker interfaces (idempotent)
+          const interfacesDir = path.join(moduleBasePath, 'domain', 'interfaces');
+          await renderAndWrite(
+            path.join(temporalFlowTemplates, 'ModuleHeavyActivity.java.ejs'),
+            path.join(interfacesDir, `${modPascal}HeavyActivity.java`),
+            ctx, wOpts
+          );
+          await renderAndWrite(
+            path.join(temporalFlowTemplates, 'ModuleLightActivity.java.ejs'),
+            path.join(interfacesDir, `${modPascal}LightActivity.java`),
+            ctx, wOpts
+          );
+
+          // Worker config (idempotent)
+          const configDir = path.join(moduleBasePath, 'infrastructure', 'configurations');
+          await renderAndWrite(
+            path.join(temporalFlowTemplates, 'ModuleTemporalWorkerConfig.java.ejs'),
+            path.join(configDir, `${modPascal}TemporalWorkerConfig.java`),
+            ctx, wOpts
+          );
+
+          // temporal.yaml queues
+          await appendTemporalModuleQueues(projectDir, modCamel, modScreamingSnake);
+
+          await checksumMgr.save();
+          console.log(chalk.green(`  ✅ ${modCamel} — Temporal worker infrastructure`));
+        }
+
+        // Generate activities per module (YAML-driven, non-interactive)
+        for (const mod of modules) {
+          const modCamel = toCamelCase(mod.name);
+          if (!temporalModulesSet.has(modCamel)) continue;
+
+          const domYaml = path.join(projectDir, 'src', 'main', 'java', packagePath, modCamel, 'domain.yaml');
+          if (!(await fs.pathExists(domYaml))) continue;
+          const data = yaml.load(await fs.readFile(domYaml, 'utf-8'));
+          if (!data || !Array.isArray(data.activities) || data.activities.length === 0) continue;
+
+          console.log(chalk.cyan(`  ⚙️  Generating activities for: ${mod.name}`));
+          try {
+            await generateTemporalActivityCommand(modCamel, null, { force: generateOptions.force, generateAll: true });
+          } catch (err) {
+            console.log(chalk.yellow(`  ⚠️  Activity generation failed for ${mod.name}: ${err.message}`));
+          }
+        }
+
+        console.log();
+      }
+
+      // ── Step 4c: Cross-module workflows from system.yaml ──────────────────
+      if (rawWorkflows.length > 0) {
+        console.log(chalk.blue('━━━ Step 4c: Generating Temporal workflows ━━━━━━━━━━━━━━━━━━'));
+        try {
+          await generateTemporalSystemCommand({ force: generateOptions.force });
+        } catch (err) {
+          console.log(chalk.yellow(`  ⚠️  Temporal workflow generation failed: ${err.message}`));
+        }
+        console.log();
+      }
+    }
 
     // ── STEP 5: Generate unified Postman collection ─────────────────────────
     console.log(chalk.blue('━━━ Step 5: Generating unified Postman collection ━━━━━━━━━━━━'));
