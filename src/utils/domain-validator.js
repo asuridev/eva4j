@@ -13,9 +13,10 @@ const { pluralizeWord, singularizeWord } = require('./naming');
  *
  * Categories:
  *   C1 — Kafka Event Contracts
- *   C4 — Behavior Gaps
- *   C5 — Cross-Reference Integrity
- *   C6 — Audit & Traceability
+ *   C2 — Behavior Gaps
+ *   C3 — Cross-Reference Integrity
+ *   C4 — Audit & Traceability
+ *   C5 — Temporal Workflow Integrity
  */
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -1151,6 +1152,225 @@ function runC4(domainConfigs, systemConfig) {
   return checks;
 }
 
+// ─── C5 — Temporal Workflow Integrity ────────────────────────────────────────
+
+function runC5(domainConfigs, systemConfig) {
+  const checks = {
+    'C5-001': { label: 'Tipo de input de actividad de compensación incompatible con actividad padre', severity: 'ok', findings: [] },
+    'C5-002': { label: 'Step de workflow referencia actividad no declarada en módulo destino', severity: 'ok', findings: [] },
+    'C5-003': { label: 'Compensación de workflow referencia actividad no declarada en módulo destino', severity: 'ok', findings: [] },
+    'C5-004': { label: 'Tipo de input en step incompatible con el output del step que lo provee', severity: 'ok', findings: [] },
+  };
+
+  const workflows = systemConfig.workflows || [];
+  if (workflows.length === 0) return checks;
+
+  // Build map: moduleName → { activityName → activityDef }
+  const moduleActivities = {};
+  for (const [moduleName, config] of Object.entries(domainConfigs)) {
+    const acts = {};
+    for (const act of config.activities || []) {
+      acts[act.name] = act;
+    }
+    moduleActivities[moduleName] = acts;
+  }
+
+  for (const wf of workflows) {
+    for (const step of wf.steps || []) {
+      const target = step.target;
+      const acts = moduleActivities[target] || {};
+
+      // C5-002: activity not found in target module
+      if (step.activity && !acts[step.activity]) {
+        checks['C5-002'].findings.push(
+          finding(
+            target,
+            `Workflow '${wf.name}' step '${step.activity}' no se encuentra en activities de '${target}'`,
+            `Declarar la actividad '${step.activity}' en ${target}.yaml activities[]`
+          )
+        );
+      }
+
+      // C5-003: compensation activity not found in target module
+      if (step.compensation && !acts[step.compensation]) {
+        checks['C5-003'].findings.push(
+          finding(
+            target,
+            `Workflow '${wf.name}' compensación '${step.compensation}' no se encuentra en activities de '${target}'`,
+            `Declarar la actividad '${step.compensation}' en ${target}.yaml activities[]`
+          )
+        );
+      }
+
+      // C5-001: compensation input type mismatch with parent activity
+      if (step.activity && step.compensation && acts[step.activity] && acts[step.compensation]) {
+        const parentAct = acts[step.activity];
+        const compAct = acts[step.compensation];
+        const parentInputs = parentAct.input || [];
+        const compInputs = compAct.input || [];
+
+        // Compare each input field by position and type
+        const maxLen = Math.max(parentInputs.length, compInputs.length);
+        for (let i = 0; i < maxLen; i++) {
+          const pField = parentInputs[i];
+          const cField = compInputs[i];
+
+          if (!pField || !cField) {
+            // Different number of input fields
+            checks['C5-001'].findings.push(
+              finding(
+                target,
+                `Workflow '${wf.name}': '${step.compensation}' tiene ${compInputs.length} campo(s) de input pero '${step.activity}' tiene ${parentInputs.length}`,
+                `La compensación recibe el mismo input que la actividad padre — deben coincidir en cantidad y tipos`
+              )
+            );
+            break; // report once per pair
+          }
+
+          const pType = normalizeType(pField.type);
+          const cType = normalizeType(cField.type);
+          if (pType !== cType && !typesCompatible(pField.type, cField.type)) {
+            checks['C5-001'].findings.push(
+              finding(
+                target,
+                `Workflow '${wf.name}': input '${cField.name}' de compensación '${step.compensation}' es '${cField.type}' pero la actividad padre '${step.activity}' usa '${pField.type}'`,
+                `Campo '${pField.name}' (pos ${i}). La compensación recibe el mismo input en runtime — usar un tipo neutral compartido (ej: nestedType con los campos mínimos necesarios)`
+              )
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // C5-004: workflow data-flow type mismatch
+  // Trace variable types through the step chain: each step's output feeds the pool,
+  // each subsequent step's input is checked against the pool types.
+  for (const wf of workflows) {
+    const pool = {}; // varName → { type, producerStep }
+
+    for (const step of wf.steps || []) {
+      if (!step.activity) continue; // skip non-activity steps (e.g. wait)
+      const target = step.target;
+      const acts = moduleActivities[target] || {};
+      const actDef = acts[step.activity];
+      if (!actDef) continue; // caught by C5-002
+
+      const actInputs = actDef.input || [];
+      const stepInputs = step.input || [];
+
+      // Check each step input against pool (positional: step.input[i] → activity.input[i])
+      for (let i = 0; i < stepInputs.length && i < actInputs.length; i++) {
+        const varName = stepInputs[i];
+        const poolEntry = pool[varName];
+        if (!poolEntry) continue; // workflow-level param with no prior producer — skip
+
+        const expectedType = actInputs[i].type;
+        if (!expectedType) continue;
+
+        const poolType = normalizeType(poolEntry.type);
+        const expType = normalizeType(expectedType);
+        if (poolType !== expType && !typesCompatible(poolEntry.type, expectedType)) {
+          checks['C5-004'].findings.push(
+            finding(
+              target,
+              `Workflow '${wf.name}': step '${step.activity}' espera '${varName}' como '${expectedType}' pero '${poolEntry.producerStep}' lo produce como '${poolEntry.type}'`,
+              `Variable '${varName}' fluye de '${poolEntry.producerStep}' → '${step.activity}'. Los tipos deben coincidir — agregar un campo de proyección con el tipo correcto en el output del productor`
+            )
+          );
+        }
+      }
+
+      // Register step outputs in pool (positional: step.output[i] → activity.output[i])
+      const actOutputs = actDef.output || [];
+      const stepOutputs = step.output || [];
+      for (let i = 0; i < stepOutputs.length && i < actOutputs.length; i++) {
+        pool[stepOutputs[i]] = {
+          type: actOutputs[i].type,
+          producerStep: step.activity,
+        };
+      }
+    }
+  }
+
+  // Also validate domain-level compensation references (activity.compensation within same module)
+  for (const [moduleName, config] of Object.entries(domainConfigs)) {
+    const acts = moduleActivities[moduleName] || {};
+    for (const act of config.activities || []) {
+      if (!act.compensation) continue;
+      const compAct = acts[act.compensation];
+
+      if (!compAct) {
+        // Compensation activity not found — only report if not already caught by C5-003
+        const alreadyCaught = checks['C5-003'].findings.some(
+          (f) => f.module === moduleName && f.message.includes(`'${act.compensation}'`)
+        );
+        if (!alreadyCaught) {
+          checks['C5-003'].findings.push(
+            finding(
+              moduleName,
+              `Actividad '${act.name}' declara compensation: '${act.compensation}' pero no existe en activities de '${moduleName}'`,
+              `Declarar la actividad '${act.compensation}' en ${moduleName}.yaml activities[]`
+            )
+          );
+        }
+        continue;
+      }
+
+      // Type mismatch check at domain level
+      const parentInputs = act.input || [];
+      const compInputs = compAct.input || [];
+      const maxLen = Math.max(parentInputs.length, compInputs.length);
+      for (let i = 0; i < maxLen; i++) {
+        const pField = parentInputs[i];
+        const cField = compInputs[i];
+
+        if (!pField || !cField) {
+          const alreadyCaught = checks['C5-001'].findings.some(
+            (f) => f.module === moduleName && f.message.includes(`'${act.compensation}'`) && f.message.includes(`'${act.name}'`)
+          );
+          if (!alreadyCaught) {
+            checks['C5-001'].findings.push(
+              finding(
+                moduleName,
+                `Actividad '${act.compensation}' tiene ${compInputs.length} campo(s) de input pero '${act.name}' tiene ${parentInputs.length}`,
+                `La compensación recibe el mismo input que la actividad padre — deben coincidir en cantidad y tipos`
+              )
+            );
+          }
+          break;
+        }
+
+        const pType = normalizeType(pField.type);
+        const cType = normalizeType(cField.type);
+        if (pType !== cType && !typesCompatible(pField.type, cField.type)) {
+          const alreadyCaught = checks['C5-001'].findings.some(
+            (f) => f.module === moduleName && f.message.includes(`'${cField.name}'`) && f.message.includes(`'${act.compensation}'`)
+          );
+          if (!alreadyCaught) {
+            checks['C5-001'].findings.push(
+              finding(
+                moduleName,
+                `Input '${cField.name}' de compensación '${act.compensation}' es '${cField.type}' pero la actividad padre '${act.name}' usa '${pField.type}'`,
+                `Campo '${pField.name}' (pos ${i}). La compensación recibe el mismo input en runtime — usar un tipo neutral compartido (ej: nestedType con los campos mínimos necesarios)`
+              )
+            );
+          }
+        }
+      }
+    }
+  }
+
+  setDefaultSeverities(checks, {
+    'C5-001': 'error',
+    'C5-002': 'error',
+    'C5-003': 'error',
+    'C5-004': 'error',
+  });
+
+  return checks;
+}
+
 // ── Severity finalization ────────────────────────────────────────────────────
 
 /**
@@ -1176,6 +1396,7 @@ function validateDomain(domainConfigs, systemConfig) {
   const c2Checks = runC2(domainConfigs, systemConfig);
   const c3Checks = runC3(domainConfigs, systemConfig);
   const c4Checks = runC4(domainConfigs, systemConfig);
+  const c5Checks = runC5(domainConfigs, systemConfig);
 
   const categories = [
     {
@@ -1201,6 +1422,12 @@ function validateDomain(domainConfigs, systemConfig) {
       label: 'Auditoría y Trazabilidad',
       description: 'Verifica que las entidades críticas tengan mecanismos de trazabilidad de cambios.',
       checks: checksToArray(c4Checks),
+    },
+    {
+      id: 'C5',
+      label: 'Integridad de Workflows Temporal',
+      description: 'Verifica que las actividades, compensaciones y contratos de tipos en workflows Temporal sean coherentes.',
+      checks: checksToArray(c5Checks),
     },
   ];
 

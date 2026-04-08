@@ -6,4 +6,4 @@ import <%= packageName %>.shared.domain.interfaces.Command;
  * <%= useCaseName %>Command
  * Removes the <%= entityName %> identified by itemId from the <%= aggregateName %> aggregate.
  */
-public record <%= useCaseName %>Command(<%- idType %> id, String itemId) implements Command {}
+public record <%= useCaseName %>Command(<%- idType %> id, <%- itemIdType %> itemId) implements Command {}

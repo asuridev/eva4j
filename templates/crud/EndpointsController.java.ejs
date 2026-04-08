@@ -147,7 +147,7 @@ public class <%= controllerName %> {
         useCaseMediator.dispatch(new <%= op.useCase %>Command(id<% if (op.classification && op.classification.entityFields && op.classification.entityFields.length > 0) { %>, <% op.classification.entityFields.forEach(function(f, idx) { %>command.<%= f.name %>()<% if (idx < op.classification.entityFields.length - 1) { %>, <% } %><% }); %><% } %>));
     }
 <%  } else if (op.classifiedType === 'subEntityRemove') { %>
-    public void <%= op.methodName %>(@PathVariable <%- op.idType %> id, @PathVariable String itemId) {
+    public void <%= op.methodName %>(@PathVariable <%- op.idType %> id, @PathVariable <%- op.classification.itemIdType %> itemId) {
         log.info("Handling <%= op.useCase %> for <%= aggregateName %> id: {}, itemId: {}", id, itemId);
         useCaseMediator.dispatch(new <%= op.useCase %>Command(id, itemId));
     }

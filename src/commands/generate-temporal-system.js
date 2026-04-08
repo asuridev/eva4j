@@ -330,16 +330,31 @@ function enrichStepsWithInputSources(steps) {
 }
 
 /**
- * Enrich compensation with inputSources using the same heuristic.
+ * Enrich compensation with inputSources.
+ *
+ * Compensation undoes what the parent step did, so it receives the same inputs.
+ * When the parent step and the compensation activity have the same number of
+ * input fields, we reuse the parent step's inputSources directly — this avoids
+ * name-based resolution that can match the wrong variable when field names
+ * coincide across different types (e.g., `items` in two distinct contexts).
+ *
+ * Falls back to name-based matching only when the input counts diverge.
  */
 function enrichCompensationInputSources(step, allSteps) {
   if (!step.compensation) return;
 
   const compInputFields = step.compensation.inputFields || [];
+
+  // Primary strategy: reuse parent step's already-resolved inputSources.
+  if (step.inputSources && step.inputSources.length === compInputFields.length) {
+    step.compensation.inputSources = step.inputSources.map((src) => ({ ...src }));
+    return;
+  }
+
+  // Fallback: match compensation fields against prior step outputs or workflow input
   const sources = [];
 
   for (const field of compInputFields) {
-    // For compensation, try to match field name to prior step output
     const sourceStep = allSteps.find(
       (s) => s.index <= step.index && s.rawOutputNames.includes(field.name)
     );

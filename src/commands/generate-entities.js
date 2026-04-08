@@ -1901,11 +1901,14 @@ function classifyUseCase(op, aggregateName, aggregate) {
       };
     }
     if (op.useCase === `Remove${rel.target}`) {
+      const removeTargetEntity = (aggregate.secondaryEntities || []).find(e => e.name === rel.target);
+      const removeIdField = removeTargetEntity ? removeTargetEntity.fields.find(f => f.name === 'id') : null;
       return {
         category: 'subEntityRemove',
         entityName: rel.target,
         fieldName: rel.fieldName,
-        removeMethodName: `remove${rel.target}ById`
+        removeMethodName: `remove${rel.target}ById`,
+        itemIdType: removeIdField ? removeIdField.javaType : 'String'
       };
     }
   }
@@ -2343,7 +2346,8 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
           useCaseName: op.useCase,
           idType,
           entityName: cl.entityName,
-          removeMethodName: cl.removeMethodName
+          removeMethodName: cl.removeMethodName,
+          itemIdType: cl.itemIdType || 'String'
         };
         await renderAndWrite(
           path.join(templatesDir, 'SubEntityRemoveCommand.java.ejs'),

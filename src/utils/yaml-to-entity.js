@@ -693,14 +693,16 @@ function generateAggregateMethods(root, secondaryEntities) {
       }
       
       // remove method
+      const secondaryIdField = secondaryEntity ? secondaryEntity.fields.find(f => f.name === 'id') : null;
+      const secondaryIdType = secondaryIdField ? secondaryIdField.javaType : 'String';
       methods.push({
-        name: `remove${toPascalCase(singularName)}`,
+        name: `remove${toPascalCase(singularName)}ById`,
         returnType: 'void',
         parameters: [{
-          name: 'id',
-          type: 'Long'
+          name: 'itemId',
+          type: secondaryIdType
         }],
-        body: `this.${rel.fieldName}.removeIf(item -> item.getId().equals(id));`
+        body: `this.${rel.fieldName}.removeIf(item -> item.getId().equals(itemId));`
       });
       
       // get unmodifiable collection
