@@ -1,7 +1,9 @@
 package <%= packageName %>.shared.domain.contracts.<%= targetModule %>;
-<% if (imports.length > 0) { %>
+<%
+const _allImports = [...(imports || []), ...((typeof nestedTypeImportLines !== 'undefined' ? nestedTypeImportLines : []) || [])];
+if (_allImports.length > 0) { %>
 
-<%= imports.join('\n') %>
+<%= _allImports.join('\n') %>
 <% } %>
 
 public record <%= activityPascalCase %>Output(

@@ -157,7 +157,17 @@ workflows:
     taskQueue: ORDER_WORKFLOW_QUEUE
     saga: true
     steps:
-      # Paso 1: Obtener datos del cliente (Remote Activity → customers)
+      # Paso 1: Obtener detalles de la orden (Local Activity → orders)
+      # Lee el agregado completo: items, customerId, totalAmount.
+      # Permite que el workflow input sea solo orderId.
+      - activity: GetOrderDetails
+        target: orders
+        type: sync
+        input: [orderId]
+        output: [customerId, items, totalAmount]
+        timeout: 5s
+
+      # Paso 2: Obtener datos del cliente (Remote Activity → customers)
       # Valida existencia y obtiene email/nombre para notificaciones.
       - activity: GetCustomerById
         target: customers
@@ -166,34 +176,15 @@ workflows:
         output: [customerId, firstName, lastName, email, phone]
         timeout: 5s
 
-      # Paso 2: Obtener info de productos (Remote Activity → products)
-      # Valida que los productos existen y obtiene precios actuales.
-      # ───────────────────────────────────────────────────────────
       # Paso 3: Reservar stock (Remote Activity → inventory)
-      # ⚡ Pasos 2 y 3 son INDEPENDIENTES → Async.function() en paralelo
-      #    Promise<ProductList> productPromise = Async.function(
-      #        productActivities::getProductsByIds, productIds);
-      #    Promise<ReserveResult> stockPromise = Async.function(
-      #        inventoryActivities::reserveStock, orderId, items);
-      #    Promise.allOf(productPromise, stockPromise).get();
-      - activity: GetProductsByIds
-        target: products
-        type: sync                             # async dentro del workflow
-        input: [productIds]
-        output: [products]                     # [{id, name, price, category}]
-        parallel: true                         # ← ejecutar con Async.function()
-        timeout: 5s
-
       - activity: ReserveStock
         target: inventory
         type: sync
         input: [orderId, items]
         compensation: ReleaseStock
-        parallel: true                         # ← ejecutar junto con GetProductsByIds
         timeout: 10s
 
       # Paso 4: Procesar pago (Remote Activity → payments)
-      # Después de obtener productos y reservar stock.
       - activity: ProcessOrderPayment
         target: payments
         type: sync
@@ -202,7 +193,7 @@ workflows:
         compensation: RefundPayment
         timeout: 30s
 
-      # Paso 5: Confirmar orden (Remote Activity → orders, local)
+      # Paso 5: Confirmar orden (Local Activity → orders)
       - activity: ConfirmOrder
         target: orders
         type: sync
@@ -210,7 +201,6 @@ workflows:
 
       # Paso 6: Notificar (Remote Activity → notifications)
       # ⚡ Async.function() — fire-and-forget, NO bloquea la saga.
-      # Recibe email y firstName del paso 1 (GetCustomerById).
       - activity: NotifyOrderPlaced
         target: notifications
         type: async
@@ -223,7 +213,15 @@ workflows:
       on: cancel
     taskQueue: ORDER_WORKFLOW_QUEUE
     steps:
-      # Paso 1: Obtener datos del cliente (para email de notificación)
+      # Paso 1: Obtener detalles de la orden (Local Activity → orders)
+      - activity: GetOrderDetails
+        target: orders
+        type: sync
+        input: [orderId]
+        output: [customerId, items, paymentId]
+        timeout: 5s
+
+      # Paso 2: Obtener datos del cliente (para email de notificación)
       - activity: GetCustomerById
         target: customers
         type: sync
@@ -231,14 +229,14 @@ workflows:
         output: [customerId, firstName, lastName, email, phone]
         timeout: 5s
 
-      # Paso 2: Liberar stock reservado
+      # Paso 3: Liberar stock reservado
       - activity: ReleaseStock
         target: inventory
         type: sync
         input: [orderId, items]
         timeout: 10s
 
-      # Paso 3: Reembolsar pago (si hubo pago previo)
+      # Paso 4: Reembolsar pago (si hubo pago previo)
       - activity: RefundPayment
         target: payments
         type: sync
@@ -246,7 +244,7 @@ workflows:
         timeout: 30s
         optional: true                         # No falla si no hubo pago
 
-      # Paso 4: Notificar cancelación (async, non-blocking)
+      # Paso 5: Notificar cancelación (async, non-blocking)
       - activity: NotifyOrderCancelled
         target: notifications
         type: async
@@ -261,7 +259,7 @@ workflows:
   #
   # ELIMINADOS porque:
   #   1. Read models eliminados — datos se obtienen on-demand via Remote Activity
-  #   2. GetCustomerById y GetProductsByIds reemplazan las proyecciones locales
+  #   2. GetCustomerById reemplaza las proyecciones locales
   #   3. Menos acoplamiento productor→consumidor (customers/products ya no saben
   #      quién los consume)
 

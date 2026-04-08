@@ -18,10 +18,34 @@ import <%= packageName %>.<%= moduleName %>.application.dtos.temporal.<%= activi
 <% } %>
 <% } %>
 import <%= packageName %>.<%= moduleName %>.domain.interfaces.<%= activityCategory %>;
+<% if (isQueryActivity && queryMeta) { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= queryMeta.aggregateName %>;
+import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= queryMeta.aggregateName %>Repository;
+import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
+<% } %>
 import org.springframework.stereotype.Component;
 
 @Component
 public class <%= activityPascalCase %>ActivityImpl implements <%= activityPascalCase %>Activity, <%= activityCategory %> {
+<% if (isQueryActivity && queryMeta) { %>
+
+    private final <%= queryMeta.aggregateName %>Repository repository;
+
+    public <%= activityPascalCase %>ActivityImpl(<%= queryMeta.aggregateName %>Repository repository) {
+        this.repository = repository;
+    }
+
+    @Override
+    public <%= activityPascalCase %>Output execute(<%= activityPascalCase %>Input input) {
+        <%= queryMeta.aggregateName %> entity = repository.findById(<%= queryMeta.idFieldAccessor %>)
+            .orElseThrow(() -> new NotFoundException("<%= queryMeta.aggregateName %> not found with id: " + <%= queryMeta.idFieldAccessor %>));
+        return new <%= activityPascalCase %>Output(
+<% queryMeta.outputMappings.forEach((m, i) => { -%>
+            <%- m.accessor %><%= i < queryMeta.outputMappings.length - 1 ? ',' : '' %>
+<% }); -%>
+        );
+    }
+<% } else { %>
 
     @Override
     public <%= hasOutput ? activityPascalCase + 'Output' : 'void' %> execute(<%= hasInput ? activityPascalCase + 'Input input' : '' %>) {
@@ -30,4 +54,5 @@ public class <%= activityPascalCase %>ActivityImpl implements <%= activityPascal
         throw new UnsupportedOperationException("Not implemented yet");
 <% } %>
     }
+<% } %>
 }

@@ -5,7 +5,7 @@
 #   - ELIMINA listeners[] — el workflow ya integra la respuesta del pago
 #   - ELIMINA ports[] — la reserva de stock es una Activity del workflow
 #   - ELIMINA readModels[] — datos cross-module se obtienen on-demand via
-#     Remote Activities de lectura (GetCustomerById, GetProductsByIds)
+#     Remote Activities de lectura (GetCustomerById)
 #   - ELIMINA saga: — la saga se define en system.yaml workflows
 #   - events[].notifies referencia workflows definidos en system.yaml
 # =============================================================================
@@ -121,10 +121,6 @@ aggregates:
         fields:
           - name: orderId
             type: String
-          - name: customerId
-            type: String
-          - name: totalAmount
-            type: BigDecimal
           - name: placedAt
             type: LocalDateTime
         notifies:
@@ -135,8 +131,6 @@ aggregates:
           - cancel
         fields:
           - name: orderId
-            type: String
-          - name: customerId
             type: String
         notifies:
           - workflow: CancelOrderWorkflow
@@ -153,16 +147,12 @@ aggregates:
 # ─── ELIMINADO: readModels[] ────────────────────────────────────────────────
 # CustomerReadModel y ProductReadModel ELIMINADOS.
 # Datos cross-module se obtienen ON-DEMAND en los workflows:
-#   - PlaceOrderWorkflow Paso 1: GetCustomerById → customers (Remote Activity)
+#   - PlaceOrderWorkflow: GetCustomerById → customers (Remote Activity)
 #     Valida existencia, obtiene email/nombre para notificaciones.
-#   - PlaceOrderWorkflow Paso 2: GetProductsByIds → products (Remote Activity)
-#     Valida existencia, obtiene precios actuales.
-#   - CancelOrderWorkflow Paso 1: GetCustomerById → customers
+#   - CancelOrderWorkflow: GetCustomerById → customers
 #     Obtiene email para notificación de cancelación.
 #
-# Trade-off: cada orden requiere una llamada a customers y products.
-# Aceptable para este volumen. Si performance fuera problema, se pueden
-# agregar caches con TTL en las Activities (no read models persistentes).
+# Productos se validan al crear la orden; no se re-validan en la saga.
 
 # ─── ELIMINADO: saga: ───────────────────────────────────────────────────────
 # La saga (PlaceOrderWorkflow) se define en system.yaml, no en el módulo.
@@ -172,6 +162,36 @@ aggregates:
 # Activities LOCALES — invocadas por workflows cross-module (system.yaml)
 # y workflows single-module (definidos abajo).
 activities:
+  - name: GetOrderDetails
+    type: light
+    description: "Obtiene los detalles completos de una orden (items, totales, IDs relacionados)"
+    input:
+      - name: orderId
+        type: String
+    output:
+      - name: customerId
+        type: String
+      - name: items
+        type: List<OrderItemDetail>
+      - name: totalAmount
+        type: BigDecimal
+      - name: paymentId
+        type: String
+    nestedTypes:
+      - name: OrderItemDetail
+        fields:
+          - name: productId
+            type: String
+          - name: productName
+            type: String
+          - name: quantity
+            type: Integer
+          - name: unitPrice
+            type: BigDecimal
+          - name: subtotal
+            type: BigDecimal
+    timeout: 5s
+
   - name: ConfirmOrder
     type: light
     description: "Confirma la orden tras pago exitoso (invocada por PlaceOrderWorkflow)"

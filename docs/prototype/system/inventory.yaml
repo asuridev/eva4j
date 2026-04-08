@@ -51,12 +51,15 @@ activities:
       - name: orderId
         type: String
       - name: items
-        type: List<String>      # [{productId, quantity}]
+        type: List<OrderItemDetail>
     output:
       - name: success
         type: Boolean
       - name: availableQuantity
         type: Integer
+    externalTypes:
+      - name: OrderItemDetail
+        module: orders
     timeout: 10s
     compensation: ReleaseStock  # Compensación explícita
 
@@ -67,7 +70,10 @@ activities:
       - name: orderId
         type: String
       - name: items
-        type: List<String>
+        type: List<OrderItemDetail>
+    externalTypes:
+      - name: OrderItemDetail
+        module: orders
     timeout: 10s
 
   - name: DeleteStock

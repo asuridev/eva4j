@@ -33,10 +33,12 @@ import java.time.Duration;
 <%     importLines.add(`import ${packageName}.${moduleName}.application.ports.${stub.interfaceName};`); -%>
 <%     if (stub.hasInput) importLines.add(`import ${packageName}.${moduleName}.application.dtos.temporal.${stub.activityName}Input;`); -%>
 <%     if (stub.hasOutput) importLines.add(`import ${packageName}.${moduleName}.application.dtos.temporal.${stub.activityName}Output;`); -%>
+<%     if (stub.nestedTypeImports) for (const nti of stub.nestedTypeImports) { importLines.add(nti.isExternal ? `import ${packageName}.shared.domain.contracts.${nti.sourceModule}.${nti.name};` : `import ${packageName}.${moduleName}.application.dtos.temporal.${nti.name};`); } -%>
 <%   } else { -%>
 <%     importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.interfaceName};`); -%>
 <%     if (stub.hasInput) importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.activityName}Input;`); -%>
 <%     if (stub.hasOutput) importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.activityName}Output;`); -%>
+<%     if (stub.nestedTypeImports) for (const nti of stub.nestedTypeImports) { importLines.add(nti.isExternal ? `import ${packageName}.shared.domain.contracts.${nti.sourceModule}.${nti.name};` : `import ${packageName}.shared.domain.contracts.${stub.targetModule}.${nti.name};`); } -%>
 <%   } -%>
 <% } -%>
 <%= Array.from(importLines).sort().join('\n') %>

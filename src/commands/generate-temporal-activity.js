@@ -53,6 +53,54 @@ async function parseActivitiesFromYaml(domainYamlPath) {
 }
 
 /**
+ * Extract aggregate info (root entity name + fields) from domain.yaml data.
+ * Returns null if no aggregate with a root entity is found.
+ * @param {string} domainYamlPath
+ * @returns {object|null} { aggregateName, rootEntityName, rootFieldNames: Set<string>, idFieldName, idFieldType }
+ */
+async function parseAggregateInfo(domainYamlPath) {
+  if (!(await fs.pathExists(domainYamlPath))) return null;
+  const content = await fs.readFile(domainYamlPath, 'utf-8');
+  const data = yaml.load(content);
+  if (!data || !Array.isArray(data.aggregates) || data.aggregates.length === 0) return null;
+
+  for (const agg of data.aggregates) {
+    const entities = Array.isArray(agg.entities) ? agg.entities : [];
+    const root = entities.find((e) => e.isRoot === true);
+    if (!root || !Array.isArray(root.fields)) continue;
+
+    const aggregateName = toPascalCase(agg.name);
+    const rootEntityName = toPascalCase(root.name);
+    const rootFieldNames = new Set(root.fields.map((f) => f.name));
+    const rootFieldTypes = new Map(root.fields.map((f) => [f.name, f.type || 'String']));
+    const idField = root.fields.find((f) => f.name === 'id');
+
+    return {
+      aggregateName,
+      rootEntityName,
+      rootFieldNames,
+      rootFieldTypes,
+      idFieldName: idField ? idField.name : 'id',
+      idFieldType: idField ? (idField.type || 'String') : 'String',
+    };
+  }
+  return null;
+}
+
+/**
+ * Check if a field name represents an entity ID for the given aggregate.
+ * Matches: 'id', '{entityName}Id' (e.g. 'orderId' for Order), '{aggregateName}Id'.
+ * @param {string} fieldName
+ * @param {object} aggregateInfo
+ * @returns {boolean}
+ */
+function isIdField(fieldName, aggregateInfo) {
+  const entityLower = aggregateInfo.rootEntityName.charAt(0).toLowerCase() + aggregateInfo.rootEntityName.slice(1);
+  return fieldName === 'id'
+    || fieldName === `${entityLower}Id`;
+}
+
+/**
  * Map a single YAML field definition {name, type} to {name, javaType}.
  * @param {{name: string, type: string}} field
  * @returns {{name: string, javaType: string}}
@@ -67,9 +115,10 @@ function mapField(field) {
  * @param {string} packageName
  * @param {string} moduleName
  * @param {boolean} shared  - Whether this activity's contracts live in shared/
+ * @param {object|null} aggregateInfo - Aggregate info for query activity detection
  * @returns {object} context for templates
  */
-function buildActivityContext(activity, packageName, moduleName, shared = false) {
+function buildActivityContext(activity, packageName, moduleName, shared = false, aggregateInfo = null, sharedNestedTypes = new Set()) {
   const activityPascalCase = toPascalCase(activity.name);
   const modulePascalCase = toPascalCase(moduleName);
   const categoryType = (activity.type || 'light').toLowerCase() === 'heavy' ? 'HeavyActivity' : 'LightActivity';
@@ -79,6 +128,48 @@ function buildActivityContext(activity, packageName, moduleName, shared = false)
   const outputFields = Array.isArray(activity.output) ? activity.output.map(mapField) : [];
   const hasInput = inputFields.length > 0;
   const hasOutput = outputFields.length > 0;
+
+  // ── Query activity detection ──────────────────────────────────────────────
+  // An activity is a "query activity" when:
+  //   1. Name starts with "Get"
+  //   2. Exactly 1 input field that is an entity ID
+  //   3. Has output fields
+  //   4. Module has an aggregate with root entity
+  let isQueryActivity = false;
+  let queryMeta = null;
+
+  if (aggregateInfo
+      && activityPascalCase.startsWith('Get')
+      && inputFields.length === 1
+      && hasOutput
+      && isIdField(inputFields[0].name, aggregateInfo)) {
+    isQueryActivity = true;
+    const idAccessor = `input.${inputFields[0].name}()`;
+    const entityLower = aggregateInfo.rootEntityName.charAt(0).toLowerCase() + aggregateInfo.rootEntityName.slice(1);
+    const entityIdAlias = `${entityLower}Id`; // e.g. 'customerId' for Customer
+    const SIMPLE_TYPES = new Set(['String', 'Integer', 'Long', 'Boolean', 'BigDecimal', 'LocalDate', 'LocalDateTime', 'LocalTime', 'Instant', 'UUID', 'Double', 'Float']);
+    const outputMappings = outputFields.map((f) => {
+      // Match {entityName}Id → entity.getId()
+      if (f.name === entityIdAlias && aggregateInfo.rootFieldNames.has('id')) {
+        return { fieldName: f.name, accessor: 'entity.getId()' };
+      }
+      if (aggregateInfo.rootFieldNames.has(f.name)) {
+        const getter = 'entity.get' + f.name.charAt(0).toUpperCase() + f.name.slice(1) + '()';
+        // Enum/VO → String: append .name() when output expects String but entity field is not a simple type
+        const entityFieldType = aggregateInfo.rootFieldTypes ? aggregateInfo.rootFieldTypes.get(f.name) : null;
+        if (f.javaType === 'String' && entityFieldType && !SIMPLE_TYPES.has(entityFieldType)) {
+          return { fieldName: f.name, accessor: getter + '.name()' };
+        }
+        return { fieldName: f.name, accessor: getter };
+      }
+      return { fieldName: f.name, accessor: `null /* TODO: derive ${f.name} from entity */` };
+    });
+    queryMeta = {
+      aggregateName: aggregateInfo.aggregateName,
+      idFieldAccessor: idAccessor,
+      outputMappings,
+    };
+  }
 
   return {
     packageName,
@@ -98,6 +189,102 @@ function buildActivityContext(activity, packageName, moduleName, shared = false)
     timeout: activity.timeout || null,
     shared,
     targetModule: moduleName,
+    isQueryActivity,
+    queryMeta,
+    ...buildNestedTypesContext(activity, packageName, moduleName, shared, inputFields, outputFields, sharedNestedTypes),
+  };
+}
+
+/**
+ * Extract custom type names referenced in field javaTypes that are NOT
+ * standard Java types (not in JAVA_TYPE_IMPORTS and not primitives).
+ * E.g., `List<OrderItemDetail>` → `OrderItemDetail`.
+ * @param {Array<{javaType: string}>} fields
+ * @returns {Set<string>} custom type names found
+ */
+function extractCustomTypeNames(fields) {
+  const BUILTIN = new Set(['String', 'Integer', 'Long', 'Boolean', 'Double', 'Float', 'int', 'long', 'boolean', 'double', 'float', 'void',
+    ...Object.keys(JAVA_TYPE_IMPORTS)]);
+  const customNames = new Set();
+  const genericRe = /<([A-Z][A-Za-z0-9]*)>/;
+  for (const field of fields) {
+    if (!field.javaType) continue;
+    // Check inside generics: List<OrderItemDetail> → OrderItemDetail
+    const match = field.javaType.match(genericRe);
+    if (match && !BUILTIN.has(match[1])) {
+      customNames.add(match[1]);
+    }
+    // Check bare type: OrderItemDetail (not inside generic)
+    if (!match && !BUILTIN.has(field.javaType) && /^[A-Z]/.test(field.javaType)) {
+      customNames.add(field.javaType);
+    }
+  }
+  return customNames;
+}
+
+/**
+ * Build nestedTypes context from an activity's `nestedTypes` YAML section.
+ * Returns properties to merge into the activity context.
+ * @param {object} activity - Raw activity YAML
+ * @param {string} packageName
+ * @param {string} moduleName
+ * @param {boolean} shared
+ * @param {Array} inputFields - Already-mapped input fields
+ * @param {Array} outputFields - Already-mapped output fields
+ * @returns {object} { nestedTypes, nestedTypeImportLines }
+ */
+function buildNestedTypesContext(activity, packageName, moduleName, shared, inputFields, outputFields, sharedNestedTypes = new Set()) {
+  const rawNested = Array.isArray(activity.nestedTypes) ? activity.nestedTypes : [];
+  const rawExternal = Array.isArray(activity.externalTypes) ? activity.externalTypes : [];
+
+  if (rawNested.length === 0 && rawExternal.length === 0) {
+    return { nestedTypes: [], nestedTypeImportLines: [], externalTypeMap: {} };
+  }
+
+  const nestedTypes = rawNested.map((nt) => {
+    const name = toPascalCase(nt.name);
+    const fields = Array.isArray(nt.fields) ? nt.fields.map(mapField) : [];
+    return {
+      name,
+      fields,
+      imports: resolveFieldImports(fields),
+    };
+  });
+
+  // Build external type map: typeName → sourceModule (camelCase)
+  const externalTypeMap = {};
+  for (const ext of rawExternal) {
+    const typeName = toPascalCase(ext.name);
+    const sourceModule = toCamelCase(ext.module);
+    externalTypeMap[typeName] = sourceModule;
+  }
+
+  // Determine which custom types are actually referenced by input/output fields
+  const allFields = [...inputFields, ...outputFields];
+  const referencedNames = extractCustomTypeNames(allFields);
+  const nestedTypeNames = new Set(nestedTypes.map((nt) => nt.name));
+
+  // Build import lines for custom types referenced in input/output
+  const importLines = [];
+  for (const typeName of referencedNames) {
+    if (nestedTypeNames.has(typeName)) {
+      // Local nested type — check if it's externally referenced (needs shared import)
+      if (sharedNestedTypes.has(typeName) || shared) {
+        importLines.push(`import ${packageName}.shared.domain.contracts.${moduleName}.${typeName};`);
+      } else {
+        importLines.push(`import ${packageName}.${moduleName}.application.dtos.temporal.${typeName};`);
+      }
+    } else if (externalTypeMap[typeName]) {
+      // External type — always from source module's shared contracts
+      const sourceModule = externalTypeMap[typeName];
+      importLines.push(`import ${packageName}.shared.domain.contracts.${sourceModule}.${typeName};`);
+    }
+  }
+
+  return {
+    nestedTypes,
+    nestedTypeImportLines: importLines.sort(),
+    externalTypeMap,
   };
 }
 
@@ -189,6 +376,21 @@ async function generateSharedContracts(actCtx, sharedBasePath, writeOptions) {
   );
   generated.push(`shared/domain/contracts/${actCtx.targetModule}/${actCtx.activityPascalCase}Activity.java`);
 
+  // 4. Shared NestedType records
+  if (Array.isArray(actCtx.nestedTypes) && actCtx.nestedTypes.length > 0) {
+    for (const nt of actCtx.nestedTypes) {
+      const ntPath = path.join(contractsDir, `${nt.name}.java`);
+      if (await fs.pathExists(ntPath)) continue; // Deduplicate across activities
+      await renderAndWrite(
+        path.join(templatesDir, 'SharedNestedType.java.ejs'),
+        ntPath,
+        { packageName: actCtx.packageName, targetModule: actCtx.targetModule, typeName: nt.name, fields: nt.fields, imports: nt.imports },
+        writeOptions
+      );
+      generated.push(`shared/domain/contracts/${actCtx.targetModule}/${nt.name}.java`);
+    }
+  }
+
   return generated;
 }
 
@@ -267,11 +469,57 @@ async function generateTemporalActivityCommand(moduleName, activityName, options
 
 // ─── YAML-driven generation ─────────────────────────────────────────────────
 
+/**
+ * Scan all module domain.yaml files in the system/ directory for `externalTypes`
+ * references. Returns a Map from sourceModule (camelCase) → Set of type names
+ * (PascalCase) that are referenced externally and thus need shared contracts.
+ */
+async function collectExternalTypeRefs(projectDir) {
+  const systemDir = path.join(projectDir, 'system');
+  if (!(await fs.pathExists(systemDir))) return new Map();
+
+  const refs = new Map();
+  let files;
+  try {
+    files = await fs.readdir(systemDir);
+  } catch {
+    return refs;
+  }
+  for (const file of files) {
+    if (file === 'system.yaml' || !file.endsWith('.yaml')) continue;
+    try {
+      const content = await fs.readFile(path.join(systemDir, file), 'utf-8');
+      const data = yaml.load(content);
+      if (!data || !Array.isArray(data.activities)) continue;
+      for (const act of data.activities) {
+        if (!Array.isArray(act.externalTypes)) continue;
+        for (const et of act.externalTypes) {
+          const sourceModule = toCamelCase(et.module);
+          const typeName = toPascalCase(et.name);
+          if (!refs.has(sourceModule)) refs.set(sourceModule, new Set());
+          refs.get(sourceModule).add(typeName);
+        }
+      }
+    } catch {
+      // Skip malformed YAML files
+    }
+  }
+  return refs;
+}
+
 async function generateFromYaml(yamlActivities, activityName, ctx) {
   const { projectDir, packageName, packagePath, moduleName, moduleBasePath, writeOptions } = ctx;
 
   // Detect which activities are cross-module from system.yaml
   const crossModuleSet = await parseCrossModuleActivities(projectDir);
+
+  // Detect nestedTypes from this module that are referenced as externalTypes in other modules
+  const externalTypeRefs = await collectExternalTypeRefs(projectDir);
+  const sharedNestedTypes = externalTypeRefs.get(moduleName) || new Set();
+
+  // Load aggregate info for query activity detection
+  const domainYamlPath = path.join(moduleBasePath, 'domain.yaml');
+  const aggregateInfo = await parseAggregateInfo(domainYamlPath);
 
   let activitiesToGenerate;
 
@@ -314,7 +562,7 @@ async function generateFromYaml(yamlActivities, activityName, ctx) {
 
     for (const activity of activitiesToGenerate) {
       const isShared = crossModuleSet.has(toPascalCase(activity.name));
-      const actCtx = buildActivityContext(activity, packageName, moduleName, isShared);
+      const actCtx = buildActivityContext(activity, packageName, moduleName, isShared, aggregateInfo, sharedNestedTypes);
       spinner.text = `Generating ${actCtx.activityPascalCase}Activity${isShared ? ' (shared)' : ''}...`;
 
       if (isShared) {
@@ -345,6 +593,34 @@ async function generateFromYaml(yamlActivities, activityName, ctx) {
           actCtx,
           writeOptions
         );
+        // Local NestedType records (or shared if externally referenced)
+        if (Array.isArray(actCtx.nestedTypes) && actCtx.nestedTypes.length > 0) {
+          for (const nt of actCtx.nestedTypes) {
+            if (sharedNestedTypes.has(nt.name)) {
+              // Generate as shared contract — referenced by other modules via externalTypes
+              const contractsDir = path.join(sharedBasePath, 'domain', 'contracts', moduleName);
+              const ntPath = path.join(contractsDir, `${nt.name}.java`);
+              if (await fs.pathExists(ntPath)) continue; // Deduplicate
+              await renderAndWrite(
+                path.join(templatesDir, 'SharedNestedType.java.ejs'),
+                ntPath,
+                { packageName: actCtx.packageName, targetModule: actCtx.moduleName, typeName: nt.name, fields: nt.fields, imports: nt.imports },
+                writeOptions
+              );
+              sharedGenerated.push(`shared/domain/contracts/${moduleName}/${nt.name}.java`);
+            } else {
+              // Generate locally
+              const ntPath = path.join(moduleBasePath, 'application', 'dtos', 'temporal', `${nt.name}.java`);
+              if (await fs.pathExists(ntPath)) continue; // Deduplicate
+              await renderAndWrite(
+                path.join(templatesDir, 'NestedType.java.ejs'),
+                ntPath,
+                { packageName: actCtx.packageName, moduleName: actCtx.moduleName, typeName: nt.name, fields: nt.fields, imports: nt.imports },
+                writeOptions
+              );
+            }
+          }
+        }
       }
 
       // ActivityImpl always goes in the module
@@ -662,5 +938,6 @@ module.exports.generateSharedContracts = generateSharedContracts;
 module.exports.buildActivityContext = buildActivityContext;
 module.exports.parseActivitiesFromYaml = parseActivitiesFromYaml;
 module.exports.parseCrossModuleActivities = parseCrossModuleActivities;
+module.exports.collectExternalTypeRefs = collectExternalTypeRefs;
 module.exports.resolveFieldImports = resolveFieldImports;
 module.exports.mapField = mapField;

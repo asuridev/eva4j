@@ -1,0 +1,12 @@
+package <%= packageName %>.shared.domain.contracts.<%= targetModule %>;
+<% if (imports.length > 0) { %>
+
+<%= imports.join('\n') %>
+<% } %>
+
+public record <%= typeName %>(
+<% fields.forEach((field, index) => { %>
+    <%- field.javaType %> <%= field.name %><%= index < fields.length - 1 ? ',' : '' %>
+<% }); %>
+) {
+}

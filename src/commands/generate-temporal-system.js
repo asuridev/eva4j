@@ -23,6 +23,7 @@ const ChecksumManager = require('../utils/checksum-manager');
 const { parseSystemYaml, resolveFieldImports, parseTimeout } = require('../utils/system-yaml-parser');
 const {
   generateSharedContracts,
+  buildActivityContext,
 } = require('./generate-temporal-activity');
 
 async function generateTemporalSystemCommand(options = {}) {
@@ -279,22 +280,7 @@ async function processActivity(actName, activityRegistry, packageName, processed
   const registered = activityRegistry.get(actName);
   if (!registered) return;
 
-  const actCtx = {
-    packageName,
-    moduleName: registered.module,
-    modulePascalCase: toPascalCase(registered.module),
-    targetModule: registered.module,
-    activityPascalCase: actName,
-    activityCategory: `${toPascalCase(registered.module)}${registered.type === 'heavy' ? 'HeavyActivity' : 'LightActivity'}`,
-    categoryType: registered.type === 'heavy' ? 'HeavyActivity' : 'LightActivity',
-    hasInput: registered.inputFields.length > 0,
-    hasOutput: registered.outputFields.length > 0,
-    inputFields: registered.inputFields,
-    outputFields: registered.outputFields,
-    inputImports: resolveFieldImports(registered.inputFields),
-    outputImports: resolveFieldImports(registered.outputFields),
-    shared: true,
-  };
+  const actCtx = buildActivityContext(registered.definition, packageName, registered.module, true, null, new Set());
 
   const files = await generateSharedContracts(actCtx, sharedBasePath, writeOptions);
   generatedList.push(...files);
@@ -378,10 +364,43 @@ function enrichCompensationInputSources(step, allSteps) {
  * Includes both main step activities and compensation activities.
  */
 function computeStubActivities(steps, activityRegistry, hostModule) {
+  // Pre-scan: collect all externalType references within this workflow's stubs
+  // to detect local nestedTypes that are shared across modules
+  const externalRefs = new Set(); // "sourceModule:typeName"
+  for (const step of steps) {
+    const reg = activityRegistry.get(step.activityName);
+    if (reg && reg.definition && Array.isArray(reg.definition.externalTypes)) {
+      for (const et of reg.definition.externalTypes) {
+        externalRefs.add(`${toCamelCase(et.module)}:${toPascalCase(et.name)}`);
+      }
+    }
+    if (step.compensation) {
+      const compReg = activityRegistry.get(step.compensation.name);
+      if (compReg && compReg.definition && Array.isArray(compReg.definition.externalTypes)) {
+        for (const et of compReg.definition.externalTypes) {
+          externalRefs.add(`${toCamelCase(et.module)}:${toPascalCase(et.name)}`);
+        }
+      }
+    }
+  }
+
   const stubs = new Map();
 
   for (const step of steps) {
     if (!stubs.has(step.activityName)) {
+      const registered = activityRegistry.get(step.activityName);
+      const rawNestedTypes = registered && registered.definition && Array.isArray(registered.definition.nestedTypes)
+        ? registered.definition.nestedTypes.map((nt) => {
+            const name = toPascalCase(nt.name);
+            // Mark as external if this nestedType is referenced via externalTypes in another stub
+            const isExternallyReferenced = externalRefs.has(`${step.targetModule}:${name}`);
+            return { name, sourceModule: step.targetModule, isExternal: isExternallyReferenced };
+          })
+        : [];
+      const rawExternalTypes = registered && registered.definition && Array.isArray(registered.definition.externalTypes)
+        ? registered.definition.externalTypes.map((et) => ({ name: toPascalCase(et.name), sourceModule: toCamelCase(et.module), isExternal: true }))
+        : [];
+      const nestedTypeImports = [...rawNestedTypes, ...rawExternalTypes];
       stubs.set(step.activityName, {
         activityName: step.activityName,
         activityCamel: step.activityCamel,
@@ -396,6 +415,7 @@ function computeStubActivities(steps, activityRegistry, hostModule) {
         isCompensation: false,
         hasInput: step.hasInput,
         hasOutput: step.hasOutput,
+        nestedTypeImports,
       });
     }
 
@@ -409,6 +429,17 @@ function computeStubActivities(steps, activityRegistry, hostModule) {
           ? `${toScreamingSnakeCase(compModule)}_HEAVY_TASK_QUEUE`
           : `${toScreamingSnakeCase(compModule)}_LIGHT_TASK_QUEUE`;
         const compTimeout = compRegistered ? compRegistered.timeout : null;
+        const compNestedTypes = compRegistered && compRegistered.definition && Array.isArray(compRegistered.definition.nestedTypes)
+          ? compRegistered.definition.nestedTypes.map((nt) => {
+              const name = toPascalCase(nt.name);
+              const isExternallyReferenced = externalRefs.has(`${compModule}:${name}`);
+              return { name, sourceModule: compModule, isExternal: isExternallyReferenced };
+            })
+          : [];
+        const compExternalTypes = compRegistered && compRegistered.definition && Array.isArray(compRegistered.definition.externalTypes)
+          ? compRegistered.definition.externalTypes.map((et) => ({ name: toPascalCase(et.name), sourceModule: toCamelCase(et.module), isExternal: true }))
+          : [];
+        const compNestedTypeImports = [...compNestedTypes, ...compExternalTypes];
 
         stubs.set(compName, {
           activityName: compName,
@@ -424,6 +455,7 @@ function computeStubActivities(steps, activityRegistry, hostModule) {
           isCompensation: true,
           hasInput: (step.compensation.inputFields || []).length > 0,
           hasOutput: false,
+          nestedTypeImports: compNestedTypeImports,
         });
       }
     }
