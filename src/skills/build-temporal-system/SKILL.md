@@ -73,6 +73,9 @@ All generated files go inside the `system/` directory at the project root. **NEV
 | 6.5 | `system/c4-context.mmd` + `system/c4-container.mmd` | This file (C4 section) |
 | 7 | `system/{module}.yaml` (one per module) | `references/temporal-domain-yaml-spec.md` |
 | 8 | `system/{module}.md` (one per module) | `references/temporal-module-spec.md` |
+| 9a | `AGENTS.md` (project root — rewrite) | This file (Step 9) |
+| 9b | `system/VALIDATION_FLOWS.md` | This file (Step 9) |
+| 9c | `system/USER_FLOWS.md` | This file (Step 9) |
 
 Execute **all** steps in order before returning control to the user.
 
@@ -479,10 +482,205 @@ steps:
 
 ---
 
+## Step 9 — Post-design artifacts
+
+Immediately after completing Step 8, generate three final artifacts that contextualize the newly designed system.
+
+### Step 9a — Rewrite AGENTS.md (project-specific)
+
+Rewrite the `AGENTS.md` file at the **project root** with content specific to the designed system.
+
+**Process:**
+
+1. Read the current `AGENTS.md` as a base template
+2. Analyze `system/system.yaml` and all `system/{module}.yaml` to detect which features are used:
+   - Temporal orchestration (always true for this skill)
+   - `activities:` section with types (light/heavy, compensation)
+   - `workflows:` section (single-module internal workflows)
+   - Events with `notifies:` (cross-module workflow triggers)
+   - `ports:` (external services only — not internal HTTP)
+   - `hasSoftDelete` on any entity
+   - `audit.trackUser` on any entity
+   - Value Objects with `methods:`
+   - Enums with `transitions:` and `initialValue`
+   - Field flags: `readOnly`, `hidden`, `defaultValue`, `validations`, `reference`
+3. **Prune** sections about unused features:
+
+| Condition | Section to remove |
+|---|---|
+| Temporal system (always) | Kafka/RabbitMQ messaging sections, `listeners:`, `readModels:` |
+| No `ports:` for external services | Ports/Feign subsections |
+| No `hasSoftDelete` | Soft delete section and checklist items |
+| No `audit.trackUser` | UserContextFilter/UserContextHolder/AuditorAwareImpl infrastructure (keep basic audit if `audit.enabled`) |
+| No VO `methods:` | "Value Objects with Methods" subsection |
+| No enum `transitions:` | "Enums with Lifecycle" subsection |
+
+4. **Add Temporal-specific content** (always):
+   - Activities section: light/heavy types, compensation pattern, input/output
+   - Workflows section: cross-module (system.yaml) vs single-module (domain.yaml)
+   - `notifies:` pattern in events (replaces `topic:`)
+   - Activity as collaboration mechanism (replaces events/listeners)
+5. **Specialize** remaining content:
+   - Replace generic examples (`User`, `Order`) with actual project entities/modules
+   - Update `eva` command examples with real module names
+   - Update `domain.yaml` example with actual project structure
+   - Reduce checklist to only relevant items for this project
+6. Add a **project context header** at the top:
+
+```markdown
+# AI Agent Guide — {System Name}
+
+## Project Overview
+- **System:** {name} — {brief description from system.yaml}
+- **Modules:** {list of modules with 1-line descriptions}
+- **Orchestration:** Temporal ({namespace}, {target address})
+- **Database:** {database type}
+- **Java:** {javaVersion} / **Spring Boot:** {springBootVersion}
+```
+
+7. **Always keep** (universal): DDD principles, hexagonal architecture, mapper rules, DTO rules, data flow diagrams (Command write / Query read), testing patterns
+8. Write **everything in English**
+9. **Limit: ≤ 1000 lines** — prune aggressively, compress examples, avoid redundancy
+
+---
+
+### Step 9b — Create system/VALIDATION_FLOWS.md
+
+Generate `system/VALIDATION_FLOWS.md` with technical validation flows for the system. All information is derived from `system.yaml` and the `{module}.yaml` files.
+
+**Mandatory structure:**
+
+```markdown
+# Validation Flows — {System Name}
+
+## Prerequisites
+- Services: {required infrastructure — DB, Temporal Server, external services}
+- Temporal: namespace={namespace}, target={address}
+- Startup order: {if relevant}
+- Base URLs: {per module if different}
+
+## 1. Module Validation
+
+### 1.1 {Module Name}
+
+#### CRUD Operations
+| # | Operation | Endpoint | Payload/Params | Expected Result | Validates |
+|---|-----------|----------|----------------|-----------------|-----------||
+| 1 | Create | POST /x | {key fields} | 201 + entity | {invariant} |
+| 2 | Get by ID | GET /x/{id} | — | 200 + entity | — |
+| 3 | List | GET /x | — | 200 + page | — |
+| 4 | Update | PUT /x/{id} | {fields} | 200 + updated | — |
+| 5 | Delete | DELETE /x/{id} | — | 204 | — |
+
+#### State Transitions (if module has enum transitions)
+| # | Transition | Endpoint | Precondition | Expected | Event / Workflow Triggered |
+|---|-----------|----------|--------------|----------|----------------------------|
+| 1 | DRAFT→PUBLISHED | PUT /x/{id}/publish | exists in DRAFT | 200, status=PUBLISHED | XPublishedEvent → PlaceXWorkflow |
+
+#### Business Rules
+| # | Rule | How to Trigger | Expected Error |
+|---|------|----------------|----------------|
+
+(repeat per module)
+
+## 2. Workflow Validation
+
+### 2.1 {WorkflowName}
+**Trigger:** {event} from {module}
+**Saga:** {yes/no}
+**Task Queue:** {QUEUE_NAME}
+**Steps:**
+1. Activity: {ActivityName} → {target module} — expected: {result}
+2. Activity: {ActivityName} → {target module} — expected: {result}
+**Compensation (if saga fails at step N):**
+- Step N-1: {CompensationActivity} reverses {what}
+**Verify:**
+- {expected final state in each affected module}
+
+(repeat per cross-module workflow)
+
+## 3. On-Demand Read Validation (if read activities exist)
+### 3.1 {ReadActivityName}: {caller workflow} → {target module}
+| Input | Expected Output | Error Case |
+|---|---|---|
+| valid ID | entity data returned | 404 → workflow handles gracefully |
+
+## 4. External Service Calls (if ports exist)
+### 4.1 {PortName}: {module} → {external service}
+| Method | Expected | Fallback |
+|---|---|---|
+
+## 5. Error & Edge Cases
+| # | Scenario | Steps | Expected Error |
+|---|----------|-------|----------------|
+| 1 | Create with missing required field | POST /x without {field} | 400 + validation message |
+| 2 | Invalid state transition | PUT /x/{id}/action when invalid state | 400/409 + business error |
+| 3 | Saga compensation on failure | Trigger workflow, fail at step N | Previous steps compensated |
+| 4 | Activity timeout | Simulate slow activity | Temporal retries per retryPolicy |
+```
+
+**Rules:**
+- Each flow must be concrete: real paths, real event names, real workflow/activity names from the project
+- Include suggested JSON payloads where useful
+- Omit entire sections if not applicable (e.g., no ports → omit section 4)
+- Everything in English
+
+---
+
+### Step 9c — Create system/USER_FLOWS.md
+
+Generate `system/USER_FLOWS.md` with end-to-end flows from the user’s perspective.
+
+**Mandatory structure:**
+
+```markdown
+# User Flows — {System Name}
+
+## Actors
+| Actor | Description | Modules Interacted |
+|-------|-------------|--------------------|
+| {Actor 1} | {role description} | {module list} |
+
+## Flow 1: {Business Process Name}
+**Actor:** {who}
+**Goal:** {what they want to achieve}
+**Preconditions:** {initial state}
+
+### Happy Path
+| Step | User Action | System Response | Behind the Scenes |
+|------|-------------|-----------------|-------------------|
+| 1 | {does X} | {sees Y} | {endpoint called, workflow started, activities invoked} |
+| 2 | {does Z} | {sees W} | {activity completes, state changes} |
+
+### Alternative Paths
+| Condition | At Step | What Happens |
+|-----------|---------|---------- ---|
+| {condition} | {N} | {alternative outcome} |
+
+### Error Paths
+| Error | At Step | User Sees |
+|-------|---------|----------|
+| {error} | {N} | {error message/behavior, saga rollback visible effect} |
+
+(repeat per major business flow)
+```
+
+**Rules:**
+- Derive actors from who consumes the `exposes[]` endpoints (same source as C4 Context `Person()` nodes)
+- Each flow is a **complete business scenario** crossing modules where applicable
+- "Behind the Scenes" column references **workflows and activities** instead of events and topics
+- Saga compensation reflected as **user-observable rollback behavior** (e.g., "Payment reversed, stock released")
+- Include at least one flow per major use case path through the system
+- Focus on user-observable behavior, not internal implementation
+- Everything in English
+
+---
+
 ## Refinement cycle
 
 After delivering v1, if the user requests adjustments:
 - Apply the **minimum change** necessary
 - Revalidate the checklist from Step 4
 - Update `system.md`, `c4-context.mmd`, `c4-container.mmd`, `{module}.yaml` and `{module}.md` affected
+- Update `AGENTS.md`, `VALIDATION_FLOWS.md` and `USER_FLOWS.md` if affected by the change
 - Deliver only the explained diff

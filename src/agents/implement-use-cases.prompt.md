@@ -18,6 +18,8 @@ Vas a implementar **todos los casos de uso pendientes** del módulo `$ARGUMENTS`
 
 1. Lee `system/$ARGUMENTS.md` — contiene la descripción detallada de cada caso de uso: tipo, precondiciones, postcondiciones, invariantes, validaciones, eventos emitidos
 2. Si existe `system/system.md`, léelo para entender integraciones entre módulos
+3. Si existe `system/VALIDATION_FLOWS.md`, léelo — contiene los comportamientos de validación esperados, error cases, y flujos de integración que este módulo debe cumplir
+4. Si existe `system/USER_FLOWS.md`, léelo — ayuda a entender cómo el usuario interactúa con este módulo en el contexto del sistema completo
 
 ## Paso 3 — Inventariar handlers pendientes
 

@@ -47,6 +47,9 @@ Antes de generar nada, lee estos archivos del proyecto para obtener contexto:
 | 6.5 | `system/c4-context.mmd` + `system/c4-container.mmd` | Este archivo (sección C4) |
 | 7 | `system/{module}.yaml` (uno por módulo) | `references/domain-yaml-spec.md` |
 | 8 | `system/{module}.md` (uno por módulo) | `references/module-spec.md` |
+| 9a | `AGENTS.md` (project root — rewrite) | Este archivo (Paso 9) |
+| 9b | `system/VALIDATION_FLOWS.md` | Este archivo (Paso 9) |
+| 9c | `system/USER_FLOWS.md` | Este archivo (Paso 9) |
 
 Ejecuta **todos** los pasos en orden antes de devolver el control al usuario.
 
@@ -435,10 +438,197 @@ Para cada módulo, genera `system/{nombre-del-modulo}.md` con: rol del módulo, 
 
 ---
 
+## Paso 9 — Artefactos post-diseño
+
+Inmediatamente después de completar el Paso 8, genera tres artefactos finales que contextualizan el sistema recién diseñado.
+
+### Paso 9a — Reescribir AGENTS.md (project-specific)
+
+Reescribe el archivo `AGENTS.md` en la **raíz del proyecto** con contenido específico para el sistema diseñado.
+
+**Proceso:**
+
+1. Lee el `AGENTS.md` actual como template base
+2. Analiza `system/system.yaml` y todos los `system/{module}.yaml` para detectar qué features se usan:
+   - Tipo de broker (Kafka / RabbitMQ / ninguno)
+   - `readModels:` en algún módulo
+   - `ports:` (llamadas HTTP síncronas)
+   - `listeners:` (consumidores de eventos)
+   - `events:` con `triggers:` vs `lifecycle:`
+   - `hasSoftDelete` en alguna entidad
+   - `audit.trackUser` en alguna entidad
+   - Value Objects con `methods:`
+   - Enums con `transitions:` e `initialValue`
+   - Flags de campo: `readOnly`, `hidden`, `defaultValue`, `validations`, `reference`
+3. **Poda** secciones de features no usados según estas reglas:
+
+| Condición | Sección a eliminar |
+|---|---|
+| Sin Temporal | "Temporal Workflows" completa |
+| Sin `readModels:` | Subsecciones readModels de "Características Avanzadas" y checklist |
+| Sin `ports:` | Subsecciones ports |
+| Sin `listeners:` | Subsecciones listeners |
+| Sin `hasSoftDelete` | Sección soft delete y checklist items |
+| Sin `audit.trackUser` | Infraestructura UserContextFilter/UserContextHolder/AuditorAwareImpl (mantener audit básico si `audit.enabled`) |
+| Sin VO `methods:` | "Value Objects con Métodos" |
+| Sin enum `transitions:` | "Enums con Ciclo de Vida" |
+
+4. **Especializa** el contenido restante:
+   - Reemplaza ejemplos genéricos (`User`, `Order`) con entidades/módulos reales del proyecto
+   - Actualiza la sección de comandos `eva` con los nombres de módulos reales
+   - Actualiza el ejemplo de `domain.yaml` con la estructura real del proyecto
+   - Reduce el checklist a solo items relevantes para este proyecto
+5. Agrega un **header de contexto** al inicio:
+
+```markdown
+# AI Agent Guide — {System Name}
+
+## Project Overview
+- **System:** {name} — {brief description from system.yaml}
+- **Modules:** {list of modules with 1-line descriptions}
+- **Messaging:** {broker type or "none"}
+- **Database:** {database type}
+- **Java:** {javaVersion} / **Spring Boot:** {springBootVersion}
+```
+
+6. **Siempre conserva** (son universales): principios DDD, arquitectura hexagonal, reglas de mappers, reglas de DTOs, diagramas de flujo de datos (Command write / Query read), patrones de testing
+7. Escribe **todo en inglés**
+8. **Límite: ≤ 1000 líneas** — poda agresivamente, comprime ejemplos, evita redundancia
+
+---
+
+### Paso 9b — Crear system/VALIDATION_FLOWS.md
+
+Genera `system/VALIDATION_FLOWS.md` con los flujos de validación técnica del sistema. Toda la información se deriva de `system.yaml` y los `{module}.yaml`.
+
+**Estructura obligatoria:**
+
+```markdown
+# Validation Flows — {System Name}
+
+## Prerequisites
+- Services: {infrastructure requerida — DB, broker, etc.}
+- Startup order: {si relevante}
+- Base URLs: {por módulo si difieren}
+
+## 1. Module Validation
+
+### 1.1 {Module Name}
+
+#### CRUD Operations
+| # | Operation | Endpoint | Payload/Params | Expected Result | Validates |
+|---|-----------|----------|----------------|-----------------|------ ----|
+| 1 | Create | POST /x | {key fields} | 201 + entity | {invariant} |
+| 2 | Get by ID | GET /x/{id} | — | 200 + entity | — |
+| 3 | List | GET /x | — | 200 + page | — |
+| 4 | Update | PUT /x/{id} | {fields} | 200 + updated | — |
+| 5 | Delete | DELETE /x/{id} | — | 204 | — |
+
+#### State Transitions (if module has enum transitions)
+| # | Transition | Endpoint | Precondition | Expected | Event Emitted |
+|---|-----------|----------|--------------|----------|---------------|
+| 1 | DRAFT→PUBLISHED | PUT /x/{id}/publish | exists in DRAFT | 200, status=PUBLISHED | XPublishedEvent |
+
+#### Business Rules
+| # | Rule | How to Trigger | Expected Error |
+|---|------|----------------|----------------|
+
+(repeat per module)
+
+## 2. Integration Flows
+
+### 2.1 {Flow Name}: {Event} → {Consumer Module}
+**Trigger:** {action that emits the event}
+**Steps:**
+1. {Create/modify entity in producer module}
+2. {Event emitted}: {EventName} on topic {TOPIC_NAME}
+3. {Consumer module} processes via {useCase}
+4. **Verify:** {expected state change in consumer}
+
+(repeat per async integration)
+
+## 3. Read Model Synchronization (if applicable)
+### 3.1 {ReadModelName}
+| Source Event | Action | Verification |
+|---|---|---|
+| XCreatedEvent | UPSERT | Query rm_table, record exists |
+| XUpdatedEvent | UPSERT | Fields updated |
+| XDeactivatedEvent | SOFT_DELETE | Record marked deleted |
+
+## 4. Sync Port Calls (if applicable)
+### 4.1 {PortName}: {caller} → {target}
+| Method | Expected | Fallback |
+|---|---|---|
+
+## 5. Error & Edge Cases
+| # | Scenario | Steps | Expected Error |
+|---|----------|-------|----------------|
+| 1 | Create with missing required field | POST /x without {field} | 400 + validation message |
+| 2 | Invalid state transition | PUT /x/{id}/action when invalid state | 400/409 + business error |
+| 3 | Get non-existent entity | GET /x/{invalid-id} | 404 |
+```
+
+**Reglas:**
+- Cada flujo debe ser concreto: paths reales, nombres de eventos reales, campos reales del proyecto
+- Incluir payloads JSON sugeridos donde sea útil
+- Omitir secciones enteras si no aplican (ej: sin readModels → omitir sección 3)
+- Todo en inglés
+
+---
+
+### Paso 9c — Crear system/USER_FLOWS.md
+
+Genera `system/USER_FLOWS.md` con los flujos end-to-end desde la perspectiva del usuario.
+
+**Estructura obligatoria:**
+
+```markdown
+# User Flows — {System Name}
+
+## Actors
+| Actor | Description | Modules Interacted |
+|-------|-------------|--------------------|
+| {Actor 1} | {role description} | {module list} |
+
+## Flow 1: {Business Process Name}
+**Actor:** {who}
+**Goal:** {what they want to achieve}
+**Preconditions:** {initial state}
+
+### Happy Path
+| Step | User Action | System Response | Behind the Scenes |
+|------|-------------|-----------------|-------------------|
+| 1 | {does X} | {sees Y} | {endpoint called, event emitted, etc.} |
+| 2 | {does Z} | {sees W} | {consumer processes, state changes} |
+
+### Alternative Paths
+| Condition | At Step | What Happens |
+|-----------|---------|---------- ---|
+| {condition} | {N} | {alternative outcome} |
+
+### Error Paths
+| Error | At Step | User Sees |
+|-------|---------|----------|
+| {error} | {N} | {error message/behavior} |
+
+(repeat per major business flow)
+```
+
+**Reglas:**
+- Derivar actores de quienes consumen los `exposes[]` (misma fuente que `Person()` del C4 Context)
+- Cada flujo es un **escenario de negocio completo** que cruza módulos cuando aplica
+- La columna "Behind the Scenes" conecta la experiencia de usuario con la realidad técnica (eventos, procesamiento async, state changes)
+- Incluir al menos un flujo por cada camino principal de caso de uso del sistema
+- Foco en comportamiento observable por el usuario, no implementación interna
+- Todo en inglés
+
+---
+
 ## Ciclo de refinamiento
 
 Después de entregar v1, si el usuario pide ajustes:
 - Aplica el **cambio mínimo** necesario
 - Revalida el checklist del Paso 4
 - Actualiza `system.md`, `c4-context.mmd`, `c4-container.mmd`, `{module}.yaml` y `{module}.md` afectados
+- Actualiza `AGENTS.md`, `VALIDATION_FLOWS.md` y `USER_FLOWS.md` si fueron afectados por el cambio
 - Entrega solo el diff explicado

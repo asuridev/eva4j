@@ -24,6 +24,7 @@ Before answering any question, silently perform these reads:
 3. Identify which modules are relevant to the user's question
 4. Read the relevant `system/{module}.yaml` and `system/{module}.md` files
 5. If the question involves cross-module interactions, also read C4 diagrams (`system/c4-context.mmd`, `system/c4-container.mmd`)
+6. If they exist, read `system/VALIDATION_FLOWS.md` and `system/USER_FLOWS.md` — understand expected validation procedures and user-facing business flows
 
 Do NOT ask the user which files to read. Determine this from the question context.
 
@@ -39,6 +40,8 @@ If the answer is explicitly covered in the design files:
 - Quote the exact file and section where the answer is found
 - Provide a concise, direct answer
 - Reference relevant invariants, state machines, or use cases by ID/name
+- If the question is about **testing or validation** → also reference `system/VALIDATION_FLOWS.md`
+- If the question is about **user experience or user journeys** → also reference `system/USER_FLOWS.md`
 
 **Example:** _"How is a product activated?"_ → Read `system/products.md`, find the State Machine section and the `ActivateProduct` use case. Quote them directly.
 
@@ -104,6 +107,29 @@ Update `system/c4-context.mmd` when:
 - A new external system is added or removed
 - A new actor type is introduced
 
+### Post-design artifacts (`VALIDATION_FLOWS.md`, `USER_FLOWS.md`, `AGENTS.md`)
+
+These files are generated during the initial design phase and must be kept in sync when the design changes.
+
+**Update `system/VALIDATION_FLOWS.md` when:**
+- An endpoint is added/removed/modified → update CRUD table for that module
+- An async event is added/removed → update Integration Flows section
+- A state transition (enum) changes → update State Transitions table
+- A readModel is added/removed → update Read Model Synchronization section
+- A port is added/removed → update Sync Port Calls section
+- A module is added → add new module subsection; removed → remove subsection (with confirmation)
+
+**Update `system/USER_FLOWS.md` when:**
+- An endpoint change affects a user-facing flow → update the relevant flow's steps
+- An async event change affects "Behind the Scenes" context → update that column
+- A module is added → add flows involving it; removed → remove flows (with confirmation)
+- A state transition change alters user-observable behavior → update Happy/Alternative/Error paths
+
+**Update `AGENTS.md` (project root) ONLY when:**
+- A module is added or removed (update Project Overview and module list)
+- A feature category is introduced or eliminated for the first time (e.g., first readModel is added, last softDelete is removed, first port is added) — update the relevant sections and checklist
+- Do NOT update `AGENTS.md` for field-level, use-case-level, or endpoint-level changes
+
 ---
 
 ## Format and Convention Rules
@@ -153,8 +179,10 @@ When modifying design files, always follow these conventions. Read the reference
 
 - **Does not generate a design from scratch** — use the `build-system-yaml` skill for that
 - **Does not generate Java code** — use `eva g entities`, `eva g resource`, etc.
-- **Does not run CLI commands** — it only reads and modifies design files in `system/`
-- **Does not modify files outside `system/`** — AGENTS.md, src/, templates/ are out of scope
+- **Does not run CLI commands** — it reads and modifies design files
+- **Does not modify src/ or templates/** — implementation files are out of scope
+
+> **Note:** This agent DOES update `AGENTS.md` at the project root when structural changes (module add/remove, feature category changes) affect project-level guidance. It also updates `system/VALIDATION_FLOWS.md` and `system/USER_FLOWS.md` as part of design propagation.
 
 ---
 
