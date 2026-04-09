@@ -559,7 +559,6 @@ async function registerWorkflowInConfig(configPath, packageName, moduleName, flo
 
   const implClass = `${flowPascalCase}WorkFlowImpl`;
   const importLine = `import ${packageName}.${moduleName}.application.usecases.${implClass};`;
-  const registerLine = `            factory.registerWorkflowImplementationTypes(${implClass}.class);`;
 
   // Skip if already registered
   if (content.includes(implClass)) return;
@@ -574,13 +573,25 @@ async function registerWorkflowInConfig(configPath, packageName, moduleName, flo
     }
   }
 
-  // Register in worker factory
-  const factoryRegex = /(factory\.registerWorkflowImplementationTypes\([^)]+\);)/g;
-  const allRegistrations = [...content.matchAll(factoryRegex)];
-  if (allRegistrations.length > 0) {
-    const last = allRegistrations[allRegistrations.length - 1];
-    const insertPos = last.index + last[0].length;
-    content = content.slice(0, insertPos) + '\n' + registerLine + content.slice(insertPos);
+  // Check if there is already an active registerWorkflowImplementationTypes call
+  const activeRegisterRegex = /workflowWorker\.registerWorkflowImplementationTypes\(([^)]+)\);/;
+  if (activeRegisterRegex.test(content)) {
+    content = content.replace(activeRegisterRegex, (match, classes) => {
+      const classList = classes
+        .split(',')
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0);
+      if (!classList.includes(`${implClass}.class`)) {
+        classList.push(`${implClass}.class`);
+      }
+      return `workflowWorker.registerWorkflowImplementationTypes(${classList.join(', ')});`;
+    });
+  } else {
+    // Insert active registration after the comment marker
+    content = content.replace(
+      /(\/\/ registered by eva g temporal-flow\r?\n)/,
+      `$1        workflowWorker.registerWorkflowImplementationTypes(${implClass}.class);\n`
+    );
   }
 
   await fs.writeFile(configPath, content, 'utf-8');
