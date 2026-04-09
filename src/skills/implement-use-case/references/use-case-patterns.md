@@ -21,6 +21,9 @@ Referencia completa de patrones de implementación para cada tipo de caso de uso
 13. [Query con proyección parcial](#13-query-con-proyección-parcial)
 14. [Agregar métodos al repositorio](#14-agregar-métodos-al-repositorio)
 15. [Crear excepciones custom](#15-crear-excepciones-custom)
+16. [Activity cross-module — leer el workflow como spec](#16-activity-cross-module)
+17. [Activity de compensación (rollback)](#17-activity-de-compensación)
+18. [Activity void — transición de estado sin retorno](#18-activity-void)
 
 ---
 
@@ -477,25 +480,35 @@ repository.save(entity);
 
 ## 10. Activity de Temporal (light)
 
-**Caso:** `CreateOrderFromCart`, `ConfirmOrder`, `MarkOrderCancelled`, `ReserveStock`
+**Caso:** `CreateOrderFromCart`, `GetCartDetails`, `ClearCart`, `ConfirmOrder`
 
-Las actividades light (< 5s) acceden a BD local del módulo. Viven en `infrastructure/temporal/activities/`.
+Las actividades light (< 5s) acceden a BD local del módulo. Viven en `infrastructure/adapters/activities/`.
+
+**Ubicación de contratos:**
+- **Cross-module** (activity invocada por workflow de **otro** módulo): contrato en `shared/domain/contracts/{thisModule}/`
+- **Local** (activity invocada por workflow del **mismo** módulo): contrato en `{module}/application/ports/` + `{module}/application/dtos/temporal/`
+
+**La implementación SIEMPRE vive en:** `{module}/infrastructure/adapters/activities/{Activity}ActivityImpl.java`
 
 ```java
 @Component
 @RequiredArgsConstructor
-public class CreateOrderFromCartActivityImpl implements CreateOrderFromCartActivity {
+public class CreateOrderFromCartActivityImpl
+    implements CreateOrderFromCartActivity, OrdersLightActivity {
+    //                                      ^^^^^^^^^^^^^^^^^
+    //        Marker interface del módulo — determina en qué worker se registra
 
     private final OrderRepository repository;
+    // Solo repositorios del PROPIO módulo — nunca de otro bounded context
 
     @Override
-    public String execute(CreateOrderFromCartInput input) {
+    public CreateOrderFromCartOutput execute(CreateOrderFromCartInput input) {
         // Validar invariantes
         if (input.items() == null || input.items().isEmpty()) {
             throw new EmptyOrderException("Order must have at least one item");
         }
 
-        // Crear entidad de dominio
+        // Crear entidad de dominio usando datos del input del workflow
         Order order = new Order(
             input.customerId(),
             input.items().stream()
@@ -510,16 +523,22 @@ public class CreateOrderFromCartActivityImpl implements CreateOrderFromCartActiv
 
         // Persistir
         Order saved = repository.save(order);
-        return saved.getId();
+        return new CreateOrderFromCartOutput(saved.getId());
     }
 }
 ```
 
 **Diferencias con handlers HTTP:**
-- Clase anotada con `@Component` (no `@ApplicationComponent`, depende del proyecto)
-- No usa `@Transactional` explícito (Temporal gestiona reintentos)
-- Puede lanzar excepciones que Temporal captura para compensation
-- Input/Output son DTOs del workflow, no Commands/Queries
+- Clase anotada con `@Component` + `@RequiredArgsConstructor` (no `@ApplicationComponent`)
+- Implementa **dos interfaces**: el contrato `{Activity}Activity` + el marker `{Module}LightActivity`
+- **No** usa `@Transactional` — Temporal gestiona reintentos
+- **No** usa `@LogExceptions` — Temporal captura excepciones para el Saga
+- Input/Output son records del contrato Temporal, no Commands/Queries
+- Puede lanzar excepciones que Temporal captura para compensación (Saga)
+
+**Cómo determinar el marker interface:**
+- El task queue en el `WorkFlowImpl` indica la categoría: `*_LIGHT_TASK_QUEUE` → `{Module}LightActivity`, `*_HEAVY_TASK_QUEUE` → `{Module}HeavyActivity`
+- Los markers viven en `{module}/domain/interfaces/{Module}LightActivity.java` y `{Module}HeavyActivity.java`
 
 ---
 
@@ -527,15 +546,18 @@ public class CreateOrderFromCartActivityImpl implements CreateOrderFromCartActiv
 
 **Caso:** `ProcessPayment`, `RefundPayment`, `ScheduleDelivery`
 
-Actividades heavy (hasta 30s) llaman a servicios externos vía puertos. Incluyen heartbeat.
+Actividades heavy (hasta 30s) llaman a servicios externos vía puertos. Se registran en el heavy worker del módulo.
 
 ```java
 @Component
 @RequiredArgsConstructor
-public class ProcessPaymentActivityImpl implements ProcessPaymentActivity {
+public class ProcessPaymentActivityImpl
+    implements ProcessPaymentActivity, PaymentsHeavyActivity {
+    //                                 ^^^^^^^^^^^^^^^^^^^^
+    //        Heavy marker — registrado en PAYMENTS_HEAVY_TASK_QUEUE
 
     private final PaymentRepository paymentRepository;
-    private final PaymentGatewayService paymentGateway;  // Puerto de dominio
+    private final PaymentGatewayService paymentGateway;  // Puerto a servicio externo (Feign)
 
     @Override
     public ProcessPaymentOutput execute(ProcessPaymentInput input) {
@@ -548,7 +570,7 @@ public class ProcessPaymentActivityImpl implements ProcessPaymentActivity {
         paymentRepository.save(payment);
 
         try {
-            // Llamar servicio externo (ACL via Feign)
+            // Llamar servicio externo (ACL via Feign/puerto)
             GatewayResponse response = paymentGateway.charge(input.amount(), input.currency());
 
             // Transición a COMPLETED
@@ -566,6 +588,13 @@ public class ProcessPaymentActivityImpl implements ProcessPaymentActivity {
     }
 }
 ```
+
+**Diferencias con light activities:**
+- Implementa `{Module}HeavyActivity` en lugar de `{Module}LightActivity`
+- El task queue es `*_HEAVY_TASK_QUEUE` (menos workers, más timeout)
+- Suele inyectar puertos a servicios externos además de repositorios
+- El timeout en el `WorkFlowImpl` es mayor (30s vs 5s)
+- Si lanza excepción, Temporal ejecuta la compensación del Saga (ej: `RefundPayment`)
 
 ---
 
@@ -729,3 +758,223 @@ public ErrorResponse onDuplicateSkuException(DuplicateSkuException ex) {
 ```
 
 Mapeo estándar: 409 Conflict para duplicados, 400 Bad Request para validaciones, 404 para no encontrado, 422 para reglas de negocio.
+
+---
+
+## 16. Activity cross-module — leer el workflow como spec
+
+**Caso:** Activities cuyo contrato vive en `shared/domain/contracts/{module}/` e implementación en `{module}/infrastructure/adapters/activities/`
+
+Cuando el workflow de un módulo orquestador (ej: `shoppingCarts`) invoca activities de otros módulos (ej: `orders`, `inventory`, `payments`), el `WorkFlowImpl` actúa como **spec funcional implícita**.
+
+### Cómo leer el workflow como spec
+
+```java
+// En PlaceOrderWorkFlowImpl.java (módulo shoppingCarts)
+// Step 4: CreateOrderFromCart (→ orders)
+var createOrderFromCartResult = createOrderFromCartActivity.execute(
+    new CreateOrderFromCartInput(
+        getCartDetailsResult.customerId(),       // ← este dato llega al input
+        getCartDetailsResult.items(),            // ← lista de items
+        getCartDetailsResult.totalAmount(),      // ← total calculado
+        getCustomerByIdResult.street(),          // ← dirección
+        getCustomerByIdResult.city(),
+        getCustomerByIdResult.neighborhood(),
+        getCustomerByIdResult.zipCode()
+    )
+);
+// El workflow luego usa: createOrderFromCartResult.orderId() ← este campo DEBE existir en Output
+```
+
+**Lo que te dice el workflow:**
+1. **Input:** Qué campos recibe la activity (leer `CreateOrderFromCartInput.java` para la estructura exacta)
+2. **Output:** Qué campos usa el workflow después (leer `CreateOrderFromCartOutput.java`)
+3. **Compensación:** Si hay `saga.addCompensation(() -> ...)`, existe una activity inversa que también debes implementar
+4. **Dependencias de datos:** Qué pasos previos generan los datos que esta activity recibe
+
+### Patrón de implementación
+
+```java
+@Component
+@RequiredArgsConstructor
+public class CreateOrderFromCartActivityImpl
+    implements CreateOrderFromCartActivity, OrdersLightActivity {
+
+    private final OrderRepository orderRepository;
+
+    @Override
+    public CreateOrderFromCartOutput execute(CreateOrderFromCartInput input) {
+        // 1. Construir entidades hijas desde el input (si las hay)
+        List<OrderItem> items = input.items().stream()
+            .map(item -> new OrderItem(
+                item.productId(), item.productName(),
+                item.unitPrice(), item.quantity(), item.subtotal()))
+            .toList();
+
+        // 2. Construir Value Objects desde el input (si los hay)
+        ShippingAddress address = new ShippingAddress(
+            input.street(), input.city(),
+            input.neighborhood(), input.zipCode());
+
+        // 3. Crear entidad raíz del agregado
+        Order order = new Order(
+            input.customerId(), items,
+            input.totalAmount(), address);
+
+        // 4. Persistir
+        Order saved = orderRepository.save(order);
+
+        // 5. Retornar Output con los campos que el workflow necesita
+        return new CreateOrderFromCartOutput(saved.getId());
+    }
+}
+```
+
+**Reglas para cross-module:**
+- **Nunca** modifiques los archivos en `shared/domain/contracts/` — son contratos generados por eva4j
+- **Solo** modifica el `ActivityImpl` en `{module}/infrastructure/adapters/activities/`
+- **Solo** inyecta repositorios del **propio módulo** — la data de otros módulos llega vía el Input
+- Si necesitas un método de repositorio que no existe, agrégalo en los 3 archivos del propio módulo
+
+---
+
+## 17. Activity de compensación (rollback)
+
+**Caso:** `ReleaseStock` (compensa `ReserveStock`), `RefundPayment` (compensa `ProcessPayment`), `CancelDelivery` (compensa `ScheduleDelivery`), `RestoreCart` (compensa `ClearCart`)
+
+Las activities de compensación deshacen el efecto de una activity principal. Son invocadas automáticamente por el Saga cuando un paso posterior falla.
+
+### Cómo identificar pares compensación/principal
+
+En el `WorkFlowImpl`, busca el patrón `saga.addCompensation(...)`:
+
+```java
+// Activity principal
+reserveStockActivity.execute(new ReserveStockInput(items));
+// Compensación registrada inmediatamente después
+saga.addCompensation(() ->
+    releaseStockActivity.execute(new ReleaseStockInput(items))
+);
+```
+
+El input de la compensación suele ser **el mismo** que el de la activity principal (o un subconjunto).
+
+### Patrón — Compensación que invierte una operación de escritura
+
+```java
+@Component
+@RequiredArgsConstructor
+public class ReleaseStockActivityImpl
+    implements ReleaseStockActivity, InventoryLightActivity {
+
+    private final ProductRepository repository;
+
+    @Override
+    public void execute(ReleaseStockInput input) {
+        for (StockReservationItem item : input.items()) {
+            Product product = repository.findById(item.productId())
+                .orElseThrow(() -> new NotFoundException(
+                    "Product not found: " + item.productId()));
+
+            product.releaseStock(item.quantity());  // Inverso de reserveStock()
+            repository.save(product);
+        }
+    }
+}
+```
+
+### Patrón — Compensación que revierte una transición de estado
+
+```java
+@Component
+@RequiredArgsConstructor
+public class CancelDeliveryActivityImpl
+    implements CancelDeliveryActivity, DeliveriesLightActivity {
+
+    private final DeliveryRepository repository;
+
+    @Override
+    public void execute(CancelDeliveryInput input) {
+        Delivery delivery = repository.findByOrderId(input.orderId())
+            .orElseThrow(() -> new NotFoundException(
+                "Delivery not found for order: " + input.orderId()));
+
+        delivery.cancel();  // Transición de estado → CANCELLED
+        repository.save(delivery);
+    }
+}
+```
+
+### Patrón — Compensación que restaura una snapshot
+
+```java
+@Component
+@RequiredArgsConstructor
+public class RestoreCartActivityImpl
+    implements RestoreCartActivity, ShoppingCartsLightActivity {
+
+    private final ShoppingCartRepository repository;
+
+    @Override
+    public void execute(RestoreCartInput input) {
+        ShoppingCart cart = repository.findById(input.cartId())
+            .orElseThrow(() -> new NotFoundException(
+                "Cart not found: " + input.cartId()));
+
+        cart.restoreItems();  // Revertir el clearItems()
+        repository.save(cart);
+    }
+}
+```
+
+**Reglas de compensación:**
+- La compensación debe ser **idempotente** — ejecutarla 2 veces no debe causar error
+- Si el recurso no existe (ya fue eliminado), la compensación debe completar sin lanzar excepción — usar `findById().ifPresent(...)` cuando sea apropiado
+- Verifica que el método de negocio inverso existe en la entidad de dominio; si no, créalo siguiendo las reglas DDD (sin setters, con validación)
+- La compensación tiene el **mismo marker** (Light/Heavy) que la activity principal
+
+---
+
+## 18. Activity void — transición de estado sin retorno
+
+**Caso:** `ConfirmOrder`, `MarkOrderCancelled`, `ClearCart`
+
+Activities que modifican estado interno de una entidad pero no retornan datos al workflow. El output del contrato es `void`.
+
+```java
+@Component
+@RequiredArgsConstructor
+public class ConfirmOrderActivityImpl
+    implements ConfirmOrderActivity, OrdersLightActivity {
+
+    private final OrderRepository repository;
+
+    @Override
+    public void execute(ConfirmOrderInput input) {
+        Order order = repository.findById(input.orderId())
+            .orElseThrow(() -> new NotFoundException(
+                "Order not found with id: " + input.orderId()));
+
+        order.confirm(input.paymentId());  // Método de negocio + transición de estado
+        repository.save(order);
+    }
+}
+```
+
+**Estructura estándar de una activity void:**
+1. Buscar la entidad por ID (desde el Input)
+2. Llamar al método de negocio de la entidad (transición/modificación)
+3. Persistir con `repository.save(entity)`
+4. No retornar nada — el contrato `@ActivityInterface` declara `void execute(...)`
+
+**Cuándo el Input tiene campos adicionales (beyond ID):**
+
+Algunos métodos de negocio necesitan datos que provienen de pasos previos del workflow:
+
+```java
+// ConfirmOrderInput tiene orderId + paymentId
+// paymentId viene del step anterior (ProcessPayment)
+order.confirm(input.paymentId());
+```
+
+Siempre revisa el record de Input y el `WorkFlowImpl` para entender de dónde vienen los campos.

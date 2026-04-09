@@ -41,6 +41,35 @@ Lee los archivos del módulo en este orden (todos conviven bajo `src/main/java/{
 9. **JPA Repository** (`infrastructure/database/repositories/{Entity}JpaRepository.java`) — métodos Spring Data ya definidos
 10. **Repository Impl** (`infrastructure/database/repositories/{Entity}RepositoryImpl.java`) — implementación del puerto
 
+### Paso 2b — Si hay Temporal workflows
+
+Detecta si el módulo tiene archivos `*WorkFlowImpl.java` en `application/usecases/`. Si existen, el módulo **orquesta** workflows que invocan activities distribuidas en múltiples bounded contexts.
+
+**Lee en este orden:**
+
+1. **`*WorkFlowImpl.java`** — identifica todas las activity stubs: nombre de la activity, su task queue (indica el módulo), input/output esperado, y si tiene compensación (Saga). Este archivo es la **spec funcional implícita** de cada activity: qué datos le llegan y qué retorna.
+2. **Contratos cross-module** — Para cada activity de otro módulo, lee el contrato en `shared/domain/contracts/{targetModule}/`:
+   - `{Activity}Activity.java` — interfaz `@ActivityInterface` (firma del método)
+   - `{Activity}Input.java` — record con los campos de entrada
+   - `{Activity}Output.java` — record con los campos de retorno (si existe)
+3. **Contratos locales** — Para activities del propio módulo, lee:
+   - `{module}/application/ports/{Activity}Activity.java` — interfaz
+   - `{module}/application/dtos/temporal/{Activity}Input.java` / `{Activity}Output.java`
+4. **Implementaciones** — Lee cada `{Activity}ActivityImpl.java` en `{targetModule}/infrastructure/adapters/activities/` para saber si tiene lógica real o está pendiente (`UnsupportedOperationException` o `//todo`)
+5. **`system/{module}.md`** — busca la sección del workflow que describe cada paso, precondiciones, y compensaciones
+
+**Mapa de activities a construir:**
+
+```
+WorkFlowImpl → activity stub → task queue → módulo destino
+                                            ↓
+                              {module}/infrastructure/adapters/activities/{Activity}ActivityImpl.java
+                              ↓
+                              ¿Tiene UnsupportedOperationException o //todo? → PENDIENTE
+```
+
+> **Regla cross-module:** Para implementar activity `X` que pertenece al módulo `Y`, necesitas leer también la entidad de dominio, repositorio y enums del módulo `Y` — la activity accede **solo** a la BD de su propio módulo.
+
 ### Paso 3 — Entender el caso de uso
 
 Del archivo `.md` del módulo, extrae para el caso de uso concreto:
@@ -94,6 +123,9 @@ Lee el archivo `references/use-case-patterns.md` para los patrones detallados co
 - **Command con soft delete** (Delete) — `entity.softDelete()` + save
 - **Activity de Temporal** — lógica similar pero invocada por workflow, no por REST
 - **Command que emite eventos** — `raise()` dentro del método de negocio
+- **Activity cross-module** — cómo leer el WorkFlowImpl como spec + implementar en módulo destino
+- **Activity de compensación** — revertir operación previa (ReleaseStock, RefundPayment)
+- **Activity void** — buscar + transicionar estado + persistir, sin retorno
 
 ---
 
@@ -128,6 +160,16 @@ Lee el archivo `references/use-case-patterns.md` para los patrones detallados co
 16. Usar `BusinessException` para violaciones de reglas de negocio → 422
 17. Usar `InvalidStateTransitionException` para transiciones inválidas → 409
 18. Crear excepciones custom (e.g., `DuplicateSkuException`) solo cuando el `.md` las define explícitamente
+
+### Temporal Activities
+
+19. Cada activity accede **SOLO** a la base de datos de su propio módulo — nunca inyectar repositorios de otro bounded context
+20. **NUNCA** agregar `@Transactional` en activities — Temporal gestiona reintentos y compensación
+21. La implementación vive en `{module}/infrastructure/adapters/activities/` — implementa la interfaz `@ActivityInterface` + el marker `{Module}LightActivity` o `{Module}HeavyActivity`
+22. Activities cross-module: el contrato (interfaz + Input + Output) está en `shared/domain/contracts/{module}/` — **no lo modifiques**, solo implementa el `ActivityImpl`
+23. Activities locales: el contrato está en `{module}/application/ports/` + `{module}/application/dtos/temporal/`
+24. Para activities de compensación (rollback): la lógica es el **inverso exacto** de la activity principal — si `ReserveStock` decrementa, `ReleaseStock` incrementa
+25. El `WorkFlowImpl` es la **spec funcional implícita**: los datos que pasa como Input son los que la activity recibe, y el Output que extrae es lo que debe retornar
 
 ---
 
@@ -215,6 +257,77 @@ Lee el archivo `references/use-case-patterns.md` para los patrones detallados co
    }
    ```
 
+### Para una Temporal Activity (ej: CreateOrderFromCart en módulo orders)
+
+1. **Leer** el contrato de la activity — interfaz + Input + Output en `shared/domain/contracts/{module}/` o `{module}/application/ports/`
+2. **Leer** el `WorkFlowImpl` que la invoca — entender qué datos le pasa como input y qué espera como output
+3. **Leer** la entidad de dominio del módulo **donde vive la implementación** (no del módulo orquestador)
+4. **Leer** el repositorio de dominio del módulo destino
+5. **Implementar** la lógica:
+   ```java
+   @Component
+   @RequiredArgsConstructor
+   public class CreateOrderFromCartActivityImpl
+       implements CreateOrderFromCartActivity, OrdersLightActivity {
+
+       private final OrderRepository repository;
+
+       @Override
+       public CreateOrderFromCartOutput execute(CreateOrderFromCartInput input) {
+           // Construir entidad de dominio desde el input del workflow
+           Order order = new Order(
+               input.customerId(), input.totalAmount(),
+               new ShippingAddress(input.street(), input.city(), ...)
+           );
+           Order saved = repository.save(order);
+           return new CreateOrderFromCartOutput(saved.getId());
+       }
+   }
+   ```
+
+**Diferencias clave con handlers CQRS:**
+- Anotado con `@Component` + `@RequiredArgsConstructor` (no `@ApplicationComponent`)
+- Implementa dos interfaces: el contrato `{Activity}Activity` + el marker `{Module}Light/HeavyActivity`
+- No usa `@Transactional` ni `@LogExceptions`
+- Input/Output son records del contrato Temporal, no Commands/Queries
+- Puede lanzar excepciones que Temporal captura para compensación (Saga)
+
+### Para una Activity de compensación (ej: ReleaseStock — reverso de ReserveStock)
+
+1. **Leer** la activity principal que compensa (ej: `ReserveStockActivityImpl`)
+2. **Implementar** la lógica inversa:
+   ```java
+   @Component
+   @RequiredArgsConstructor
+   public class ReleaseStockActivityImpl
+       implements ReleaseStockActivity, InventoryLightActivity {
+
+       private final ProductRepository repository;
+
+       @Override
+       public void execute(ReleaseStockInput input) {
+           // Inverso de ReserveStock: incrementar stock de cada item
+           for (StockReservationItem item : input.items()) {
+               Product product = repository.findById(item.productId())
+                   .orElseThrow(() -> new NotFoundException("Product not found: " + item.productId()));
+               product.releaseStock(item.quantity());
+               repository.save(product);
+           }
+       }
+   }
+   ```
+3. **Verificar** que el método de negocio inverso existe en la entidad de dominio (ej: `releaseStock()` si `reserveStock()` existe)
+
+### Para implementar activities de múltiples módulos (workflow cross-module)
+
+Cuando un workflow orquesta activities de N módulos, la implementación pendiente puede estar dispersa en cualquiera de ellos. Sigue este flujo:
+
+1. **Lee** el `WorkFlowImpl` completo — extrae la lista de todas las activities y su task queue
+2. **Agrupa** por módulo destino (la task queue indica el módulo: `ORDERS_LIGHT_TASK_QUEUE` → módulo `orders`)
+3. **Para cada módulo**, lee su entidad de dominio, repositorio, y enums antes de implementar las activities de ese módulo
+4. **Implementa** las activities de un módulo antes de pasar al siguiente — así el contexto del dominio está fresco
+5. **Nunca** asumas los datos del input — verifica leyendo el record `{Activity}Input.java`
+
 ---
 
 ## Checklist antes de entregar
@@ -230,3 +343,8 @@ Después de implementar, verifica:
 - [ ] Queries usan `@Transactional(readOnly = true)`
 - [ ] Commands usan `@Transactional`
 - [ ] El handler mantiene `@ApplicationComponent` y `@LogExceptions`
+- [ ] Activities Temporal: usan `@Component` + `@RequiredArgsConstructor` (no `@ApplicationComponent`)
+- [ ] Activities Temporal: implementan interfaz del contrato + marker `{Module}Light/HeavyActivity`
+- [ ] Activities Temporal: no tienen `@Transactional`
+- [ ] Activities Temporal: acceden solo al repositorio de su propio módulo
+- [ ] Activities de compensación: lógica es el inverso exacto de la activity principal
