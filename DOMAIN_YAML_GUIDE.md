@@ -2337,7 +2337,7 @@ public void removeOrderItem(OrderItem orderItem) {
 
 **Genera en JPA:**
 ```java
-@OneToMany(mappedBy = "order", cascade = {CascadeType.PERSIST, CascadeType.MERGE, CascadeType.REMOVE}, fetch = FetchType.LAZY)
+@OneToMany(mappedBy = "order", cascade = {CascadeType.PERSIST, CascadeType.MERGE, CascadeType.REMOVE}, orphanRemoval = true, fetch = FetchType.LAZY)
 @Builder.Default
 private List<OrderItemJpa> orderItems = new ArrayList<>();
 ```
@@ -2564,6 +2564,8 @@ relationships:
 | `REFRESH` | Al refrescar el padre, refresca los hijos | ⚠️ Rara vez necesario |
 | `DETACH` | Al separar el padre, separa los hijos | ⚠️ Rara vez necesario |
 | `ALL` | Todas las operaciones anteriores | ⚠️ Solo si estás seguro |
+
+> **Nota:** eva4j genera automáticamente `orphanRemoval = true` en todas las relaciones `@OneToMany` y `@OneToOne(mappedBy)`. Esto asegura que al remover un hijo de la colección del padre, JPA elimina la fila de la base de datos. Es el comportamiento correcto en DDD: las entidades secundarias del agregado no tienen existencia independiente — su ciclo de vida lo controla la raíz.
 
 #### **Configuraciones Recomendadas:**
 

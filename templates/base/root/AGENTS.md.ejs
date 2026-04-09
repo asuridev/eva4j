@@ -722,7 +722,7 @@ public class OrderJpa {
     
     private LocalDateTime orderDate;
     
-    @OneToMany(mappedBy = "order", cascade = {...}, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "order", cascade = {...}, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<OrderItemJpa> items;
 }
 ```

@@ -87,7 +87,7 @@ if (audit && audit.trackUser) {
 <% }); %>
 <% relationships.forEach(rel => { %>
   <% if (rel.type === 'OneToMany') { %>
-    @OneToMany(mappedBy = "<%= rel.mappedBy %>", cascade = {<% rel.cascade.forEach((c, idx) => { %>CascadeType.<%= c %><%= idx < rel.cascade.length - 1 ? ', ' : '' %><% }); %>}, fetch = FetchType.<%= rel.fetch %>)
+    @OneToMany(mappedBy = "<%= rel.mappedBy %>", cascade = {<% rel.cascade.forEach((c, idx) => { %>CascadeType.<%= c %><%= idx < rel.cascade.length - 1 ? ', ' : '' %><% }); %>}, orphanRemoval = true, fetch = FetchType.<%= rel.fetch %>)
     @Builder.Default
     private <%- rel.javaTypeJpa %> <%= rel.fieldName %> = new ArrayList<>();
   <% } else if (rel.type === 'ManyToOne') { %>
@@ -96,7 +96,7 @@ if (audit && audit.trackUser) {
     private <%- rel.javaTypeJpa %> <%= rel.fieldName %>;
   <% } else if (rel.type === 'OneToOne') { %>
     <% if (rel.mappedBy) { %>
-    @OneToOne(mappedBy = "<%= rel.mappedBy %>", cascade = {<% rel.cascade.forEach((c, idx) => { %>CascadeType.<%= c %><%= idx < rel.cascade.length - 1 ? ', ' : '' %><% }); %>}, fetch = FetchType.<%= rel.fetch %>)
+    @OneToOne(mappedBy = "<%= rel.mappedBy %>", cascade = {<% rel.cascade.forEach((c, idx) => { %>CascadeType.<%= c %><%= idx < rel.cascade.length - 1 ? ', ' : '' %><% }); %>}, orphanRemoval = true, fetch = FetchType.<%= rel.fetch %>)
     <% } else { %>
     @OneToOne(cascade = {<% rel.cascade.forEach((c, idx) => { %>CascadeType.<%= c %><%= idx < rel.cascade.length - 1 ? ', ' : '' %><% }); %>}, fetch = FetchType.<%= rel.fetch %>)
     @JoinColumn(name = "<%= rel.joinColumn %>")
