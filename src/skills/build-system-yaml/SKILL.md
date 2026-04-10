@@ -57,7 +57,14 @@ Ejecuta **todos** los pasos en orden antes de devolver el control al usuario.
 
 ## Paso 1 — Recopilar información
 
-Si el usuario no proveyó todos los datos, **pregunta** antes de generar:
+**Antes de preguntar nada**, verifica si ya existen artefactos del skill `requirements-elicitation`:
+- `system/FUNCTIONAL_REQUIREMENTS.md` — casos de uso, actores, ciclos de vida, integraciones externas
+- `system/PRODUCT_FLOWS.md` — flujos de negocio por actor (happy paths + alternativos)
+- `system/BUSINESS_RULES.md` — reglas de negocio, invariantes, restricciones
+
+Si existen, **léelos primero** y extrae de ellos el contexto de negocio. Reduce o elimina las preguntas que ya están respondidas por estos archivos. Estos documentos son la fuente de verdad funcional — los módulos, casos de uso, estados y reglas que diseñes deben ser consistentes con lo que describen.
+
+Si el usuario no proveyó todos los datos y los archivos anteriores no existen, **pregunta** antes de generar:
 
 0. **Contexto del negocio** — ¿Cuál es el dominio? Actores, procesos clave, reglas importantes.
 1. **¿Usa mensajería asíncrona?** `kafka` | `rabbitmq` | `sns-sqs`
