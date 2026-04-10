@@ -36,16 +36,23 @@ Narrative technical specification of the complete system. One `##` section per m
 **Postconditions:** [system state after successful execution]
 **Validations and errors:** [exception conditions and error types]
 **Events emitted:** [DomainEvent name and what workflow it triggers, or "none"]
+**Operations:**
+1. [Load entity / validate precondition — throw NotFoundException or 400 if invalid]
+2. [External port call: {PortName}.{method}() — if applicable]
+3. [Invoke domain method: entity.{method}()]
+4. [Persist via repository]
+5. [Emit event → triggers {WorkflowName} — if applicable]
 
 ### Exposed Endpoints
 [One `####` per endpoint in exposes:]
 
 #### {METHOD} {/path}
 **Purpose:** [endpoint description and usage context]
-**Path params / Query params:** [each parameter described]
-**Request body:** [expected fields, types, validation constraints]
-**Response:** [returned fields and their business meaning]
-**Errors:** [HTTP status codes and when they occur]
+**Path params:** [param — Type — Description; omit if none]
+**Query params:** [GET/DELETE only — param: Type, required/optional, default, description; omit if none]
+**Request body:** [POST/PUT/PATCH only — field: Type — constraint; omit for GET/DELETE]
+**Response:** [GET only — field: Type — business meaning; list endpoints include {content:[...], totalElements, page, size}]
+**Errors:** [HTTP status — condition]
 
 ### Activities Exposed
 [One `####` per activity declared in module's domain.yaml]
@@ -93,6 +100,8 @@ Narrative technical specification of the complete system. One `##` section per m
 - **Activities are the collaboration mechanism**: explain which workflows invoke each activity
 - **Reference modules by name**
 - **State machines** when there are lifecycles
+- **Detailed endpoints**: separate path params from query params. For GETs provide the key response fields with types. For POST/PUT/PATCH list body fields with types and constraints. Never use "see request" as a response description.
+- **Operations in use cases**: the `**Operations:**` field is mandatory in each `#### {UseCaseName}`. Each item describes a concrete handler step referencing real repository, port, domain method, and event names. No generic items like "execute business logic".
 - Omit non-applicable sections
 
 ---
@@ -224,6 +233,12 @@ sequenceDiagram
 **Invariants verified:** [ID list]
 **Validations and errors:** [exception conditions]
 **Events emitted:** [{EventName} → triggers {WorkflowName}, or "none"]
+**Operations:**
+1. [Load entity by id via {Repository}.findById() — throw NotFoundException if absent]
+2. [Call {PortName}.{method}() to obtain cross-module data — if applicable]
+3. [Invoke entity.{domainMethod}() — domain enforces invariants]
+4. [Persist via {Repository}.save(entity)]
+5. [DomainEventHandler publishes event → Temporal starts {WorkflowName} — if applicable]
 
 ## Activities Exposed
 [One `###` per activity in activities:]
@@ -236,6 +251,12 @@ sequenceDiagram
 **Compensation:** [{compensation activity} or "none — irreversible"]
 **What it does:** [detailed business logic]
 **Invariants verified:** [ID list]
+**Operations:**
+1. [Load entity by id via {Repository}.findById() — throw ApplicationFailure if absent (workflow handles)]
+2. [Call {PortName}.{method}() — if applicable]
+3. [Invoke entity.{domainMethod}() — domain enforces invariants]
+4. [Persist via {Repository}.save(entity)]
+5. [Return {OutputType} to workflow]
 **Data access:** [repositories and operations performed]
 
 **Flow diagram:**
@@ -254,10 +275,42 @@ flowchart TD
 ### {METHOD} {/path}
 **Use case:** `{UseCase}`
 **Purpose:** [description]
-**Path params / Query params:** [each parameter]
-**Request body:** [fields, types, validations]
-**Response:** [fields and business meaning]
-**Errors:** [HTTP status codes and conditions]
+**Path params:** _(omit table if none)_
+
+| Param | Type | Description |
+|-------|------|-------------|
+| {param} | `String` | [description] |
+
+**Query params:** _(GET / DELETE only — omit table if none)_
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| {param} | `String` | No | — | [description] |
+
+**Request body:** _(POST / PUT / PATCH only — omit for GET / DELETE)_
+```json
+{
+  "field": "String",       // required — [constraint]
+  "otherField": "Integer"  // optional — [constraint]
+}
+```
+
+**Response schema:** _(GET single only — omit for mutations)_
+```json
+{
+  "id": "String",
+  "field": "Type"          // [business meaning]
+}
+```
+_(For GET list: `{ "content": [...], "totalElements": "Long", "page": "Integer", "size": "Integer" }`)_
+
+**Errors:**
+
+| Status | Condition |
+|--------|-----------|
+| 404 | [entity] not found |
+| 400 | [validation failure] |
+| 409 | [invariant violated] |
 
 ## Single-Module Workflows
 [Only if workflows: in domain.yaml]
@@ -290,4 +343,6 @@ flowchart TD
 - **Flow diagram per use case and activity**: `flowchart TD` with trigger, invariants, logic, and output.
 - **State machine**: only if entities have lifecycle. Transition restrictions are implicit invariants.
 - **Reference invariants** in each use case and activity (INV-01, INV-02...).
+- **Endpoints with rich contracts**: for each endpoint, separate path params, query params, body, and response into distinct blocks. Use real domain field names and types — never generic placeholders. GET endpoints must include the JSON response schema; POST/PUT/PATCH must include the JSON body. List endpoints include pagination wrapper `{ content, totalElements, page, size }`.
+- **Operations in use cases and activities**: the `**Operations:**` field is **mandatory** in each `### {UseCase}` and `### {ActivityName}`. Lists the handler/activity steps with concrete names: repository, port, domain method, event, and workflow. Acts as an evaluable implementation specification for human reviewers before code generation.
 - Files in `system/{module-name}.md`.

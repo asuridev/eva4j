@@ -18,7 +18,7 @@ Vas a implementar **todos los casos de uso pendientes** del módulo `$ARGUMENTS`
 
 ## Paso 2 — Leer la especificación funcional
 
-1. Lee `system/$ARGUMENTS.md` — contiene la descripción detallada de cada caso de uso: tipo, precondiciones, postcondiciones, invariantes, validaciones, eventos emitidos
+1. Lee `system/$ARGUMENTS.md` — contiene la descripción detallada de cada caso de uso: tipo, precondiciones, postcondiciones, invariantes, validaciones, eventos emitidos. Cada caso de uso y activity puede incluir un campo `**Operations:**` con la lista ordenada de pasos concretos del handler (load → port call → domain method → persist → event). **Este campo es el contrato de implementación primario** — extráelo y tenlo presente antes de escribir cada handler.
 2. Si existe `system/system.md`, léelo para entender integraciones entre módulos
 3. Si existe `system/VALIDATION_FLOWS.md`, léelo — contiene los comportamientos de validación esperados, error cases, y flujos de integración que este módulo debe cumplir
 4. Si existe `system/USER_FLOWS.md`, léelo — ayuda a entender cómo el usuario interactúa con este módulo en el contexto del sistema completo
@@ -70,6 +70,7 @@ Para cada handler CQRS pendiente, sigue este flujo **en orden**:
 
 #### Recopilar contexto del caso de uso
 - Lee la sección del caso de uso en el `.md` del módulo
+- **Extrae el campo `**Operations:**`** si está presente — es la secuencia de pasos que el handler debe ejecutar, con nombres reales de repositorio, port, método de dominio y evento
 - Lee el Command/Query record correspondiente
 - Lee la entidad de dominio involucrada
 - Lee el repositorio de dominio (interfaz)
@@ -77,6 +78,9 @@ Para cada handler CQRS pendiente, sigue este flujo **en orden**:
 - Lee el DTO de respuesta (si aplica)
 
 #### Implementar siguiendo los patrones
+
+> **Regla de prioridad:** Si el caso de uso tiene `**Operations:**` en el `.md`, úsalo como guía de implementación paso a paso — cada ítem es un paso del handler con repositorio, port, método de dominio y evento ya especificados. La tabla de patrones a continuación aplica **solo cuando `**Operations:**` está ausente o incompleto**.
+
 Aplica el patrón correcto según el tipo de caso de uso:
 
 | Tipo | Patrón |
@@ -100,6 +104,7 @@ Para las activities Temporal, **agrupa por módulo destino** e implementa todas 
 3. Lee el contrato de la activity (interfaz + Input + Output):
    - Cross-module: `shared/domain/contracts/{module}/`
    - Local: `{module}/application/ports/` + `{module}/application/dtos/temporal/`
+4. **Extrae el campo `**Operations:**`** de la sección de la activity en `system/{module}.md` si está presente — úsalo como guía primaria de implementación; la tabla de abajo es fallback cuando el campo está ausente.
 
 #### Implementar según el tipo de activity:
 

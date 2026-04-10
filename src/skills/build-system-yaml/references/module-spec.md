@@ -34,16 +34,23 @@ Especificación técnica narrativa del sistema completo. Una sección `##` por c
 **Postconditions:** [system state after successful execution]
 **Validations and errors:** [exception conditions and error types]
 **Events emitted:** [DomainEvent name and trigger condition, or "none"]
+**Operations:**
+1. [Load entity / validate precondition — throw NotFoundException or 400 if invalid]
+2. [External port call: {PortName}.{method}() — if applicable]
+3. [Invoke domain method: entity.{method}()]
+4. [Persist via repository]
+5. [Emit event — if applicable]
 
 ### Exposed Endpoints
 [One `####` per endpoint in exposes:]
 
 #### {METHOD} {/path}
 **Purpose:** [endpoint description and usage context]
-**Path params / Query params:** [each parameter described]
-**Request body:** [expected fields, types, validation constraints]
-**Response:** [returned fields and their business meaning]
-**Errors:** [HTTP status codes and when they occur]
+**Path params:** [param — Type — Description; omit if none]
+**Query params:** [GET/DELETE only — param: Type, required/optional, default, description; omit if none]
+**Request body:** [POST/PUT/PATCH only — field: Type — constraint; omit for GET/DELETE]
+**Response:** [GET only — field: Type — business meaning; list endpoints include {content:[...], totalElements, page, size}]
+**Errors:** [HTTP status — condition]
 
 ### Emitted Events
 [Only if module is producer in integrations.async]
@@ -81,6 +88,8 @@ Especificación técnica narrativa del sistema completo. Una sección `##` por c
 - **Incluir useCases de consumers** como casos de uso del módulo consumidor.
 - **Referenciar módulos por nombre**.
 - **Máquinas de estado** cuando hay ciclos de vida.
+- **Endpoints detallados**: separar path params de query params. Para GETs indicar los campos clave de la respuesta con sus tipos. Para POST/PUT/PATCH listar los campos del body con tipo y constraint. Nunca "ver request" como descripción de response.
+- **Operations en casos de uso**: el campo `**Operations:**` es obligatorio en cada `#### {UseCaseName}`. Cada ítem describe un paso concreto del handler referenciando nombres reales de repositorios, ports, métodos de dominio y eventos. No usar items genéricos como "execute business logic".
 - Omitir secciones no aplicables.
 
 ---
@@ -215,6 +224,12 @@ sequenceDiagram
 **Invariants verified:** [ID list — e.g., INV-01, INV-03]
 **Validations and errors:** [exception conditions, error type, HTTP status]
 **Events emitted:** [DomainEvent name and condition, or "none"]
+**Operations:**
+1. [Load entity by id via {Repository}.findById() — throw NotFoundException if absent]
+2. [Call {PortName}.{method}() to obtain cross-module data — if applicable]
+3. [Invoke entity.{domainMethod}() — domain enforces invariants]
+4. [Persist via {Repository}.save(entity)]
+5. [DomainEventHandler publishes event after transaction commit — if applicable]
 
 **Flow diagram:**
 ```mermaid
@@ -235,10 +250,42 @@ flowchart TD
 ### {METHOD} {/path}
 **Use case:** `{UseCase}`
 **Purpose:** [description]
-**Path params / Query params:** [each parameter]
-**Request body:** [fields, types, validations]
-**Response:** [fields and business meaning]
-**Errors:** [HTTP status codes and conditions]
+**Path params:** _(omit table if none)_
+
+| Param | Type | Description |
+|-------|------|-------------|
+| {param} | `String` | [description] |
+
+**Query params:** _(GET / DELETE only — omit table if none)_
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| {param} | `String` | No | — | [description] |
+
+**Request body:** _(POST / PUT / PATCH only — omit for GET / DELETE)_
+```json
+{
+  "field": "String",       // required — [constraint]
+  "otherField": "Integer"  // optional — [constraint]
+}
+```
+
+**Response schema:** _(GET single only — omit for mutations)_
+```json
+{
+  "id": "String",
+  "field": "Type"          // [business meaning]
+}
+```
+_(For GET list: `{ "content": [...], "totalElements": "Long", "page": "Integer", "size": "Integer" }`)_
+
+**Errors:**
+
+| Status | Condition |
+|--------|-----------|
+| 404 | [entity] not found |
+| 400 | [validation failure] |
+| 409 | [invariant violated] |
 
 ## Emitted Events
 [Only if module is producer in integrations.async]
@@ -290,6 +337,8 @@ flowchart TD
 - **Diagrama de flujo por caso de uso**: `flowchart TD` dentro de cada `### {UseCase}` con trigger, invariantes, lógica y eventos.
 - **Máquina de estados condicional**: solo si hay entidades con ciclo de vida. Restricciones de transición son invariantes implícitas.
 - **Referenciar invariantes** en cada caso de uso (INV-01, INV-02...).
+- **Endpoints con contratos ricos**: para cada endpoint separar path params, query params, body y response en bloques distintos con tipos y constraints reales del dominio. Para GETs incluir el JSON schema de respuesta; para POST/PUT/PATCH el JSON del body. Listas incluyen wrapper de paginación `{ content, totalElements, page, size }`. Nunca usar placeholders genéricos.
+- **Operations en casos de uso**: el campo `**Operations:**` es **obligatorio** en cada `### {UseCase}`. Lista los pasos del handler con nombres concretos: repositorio, port, método de dominio, evento. Sirve como contrato de implementación evaluable por revisores humanos antes de generar código.
 - **No duplicar** system.md — el `.md` del módulo es la especificación completa.
 - Archivos en `system/{module-name}.md`.
 
