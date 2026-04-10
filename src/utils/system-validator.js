@@ -23,6 +23,10 @@ function validateSystem(systemConfig, domainConfigs = {}) {
   const messaging = systemConfig.messaging || {};
   const topicPrefix = (messaging.kafka || {}).topicPrefix || null;
 
+  // Detect Temporal orchestration mode — suppresses Kafka/Feign-specific rules
+  const orchestration = systemConfig.orchestration || {};
+  const isTemporalMode = !!(orchestration.enabled && orchestration.engine === 'temporal');
+
   // Helper: normalize a consumer entry to its module name string
   const consumerModule = (c) => (typeof c === 'string' ? c : c.module);
 
@@ -59,7 +63,17 @@ function validateSystem(systemConfig, domainConfigs = {}) {
     const consumesEvents = asyncEvents.some((e) =>
       (e.consumers || []).some((c) => consumerModule(c) === mod.name)
     );
-    if (!hasExposes && !producesEvents && !consumesEvents) {
+    // In Temporal mode: a module with activities or local workflows is a valid participant
+    const hasTemporalRole = isTemporalMode && (() => {
+      const domCfg = domainConfigs[mod.name] || {};
+      return (Array.isArray(domCfg.activities) && domCfg.activities.length > 0) ||
+             (Array.isArray(domCfg.workflows) && domCfg.workflows.length > 0) ||
+             (systemConfig.workflows || []).some((wf) =>
+               (wf.trigger && toCamelCase(wf.trigger.module) === toCamelCase(mod.name)) ||
+               (wf.steps || []).some((s) => s.target && toCamelCase(s.target) === toCamelCase(mod.name))
+             );
+    })();
+    if (!hasExposes && !producesEvents && !consumesEvents && !hasTemporalRole) {
       errors.push(`[S1-002] Módulo '${mod.name}' no tiene ninguna responsabilidad — no expone endpoints, no produce ni consume eventos`);
       s1_002_found = true;
     }
@@ -348,10 +362,13 @@ function validateSystem(systemConfig, domainConfigs = {}) {
   // ── S5 — Coherencia del sistema global ───────────────────────────────────
 
   // S5-001: messaging.enabled: false with async events declared
-  if (messaging.enabled === false && asyncEvents.length > 0) {
-    warnings.push(`[S5-001] messaging.enabled está en false pero hay ${asyncEvents.length} eventos declarados en integrations.async`);
-  } else if (messaging.enabled !== false && asyncEvents.length > 0) {
-    ok.push('[S5-001] Configuración de messaging es coherente con los eventos declarados ✓');
+  // Not applicable to Temporal-based systems
+  if (!isTemporalMode) {
+    if (messaging.enabled === false && asyncEvents.length > 0) {
+      warnings.push(`[S5-001] messaging.enabled está en false pero hay ${asyncEvents.length} eventos declarados en integrations.async`);
+    } else if (messaging.enabled !== false && asyncEvents.length > 0) {
+      ok.push('[S5-001] Configuración de messaging es coherente con los eventos declarados ✓');
+    }
   }
 
   // S5-002: success event without matching failure event for same subject
@@ -401,18 +418,21 @@ function validateSystem(systemConfig, domainConfigs = {}) {
   }
 
   // S5-004: module with no connection to system graph (info)
-  for (const mod of modules) {
-    const hasAnyConnection =
-      asyncEvents.some((e) => e.producer === mod.name || (e.consumers || []).some((c) => consumerModule(c) === mod.name)) ||
-      syncIntegrations.some((s) => s.caller === mod.name || s.calls === mod.name);
-    if (!hasAnyConnection) {
-      info.push(`[S5-004] Módulo '${mod.name}' no tiene ninguna conexión al grafo del sistema — ni async ni sync`);
+  // Suppressed for Temporal mode — connectivity is via workflows[], not integrations.async[]/sync[]
+  if (!isTemporalMode) {
+    for (const mod of modules) {
+      const hasAnyConnection =
+        asyncEvents.some((e) => e.producer === mod.name || (e.consumers || []).some((c) => consumerModule(c) === mod.name)) ||
+        syncIntegrations.some((s) => s.caller === mod.name || s.calls === mod.name);
+      if (!hasAnyConnection) {
+        info.push(`[S5-004] Módulo '${mod.name}' no tiene ninguna conexión al grafo del sistema — ni async ni sync`);
+      }
     }
   }
 
   // ── T1 — Temporal Workflow Integrity ──────────────────────────────────────
-  const orchestration = systemConfig.orchestration || {};
-  if (orchestration.enabled && Array.isArray(systemConfig.workflows)) {
+  // Skipped in Temporal mode — handled exclusively by temporal-validator.js
+  if (!isTemporalMode && orchestration.enabled && Array.isArray(systemConfig.workflows)) {
     // Build activity registry from domainConfigs: PascalCase name → { module, input[], output[] }
     const activityMap = new Map();
     for (const [modName, domainCfg] of Object.entries(domainConfigs)) {

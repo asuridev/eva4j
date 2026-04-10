@@ -48,6 +48,16 @@
       validation: VALIDATION,
       domainValidation: DOMAIN_VALIDATION,
       generatedAt,
+      isTemporalMode: IS_TEMPORAL_MODE,
+      orchestration: TEMPORAL_ORCHESTRATION,
+      workflows: TEMPORAL_WORKFLOWS,
+      localWorkflows: LOCAL_WORKFLOWS,
+      sagaWorkflows: SAGA_WORKFLOWS,
+      activityCatalog: ACTIVITY_CATALOG,
+      moduleRoles: MODULE_ROLES,
+      queueTopology: QUEUE_TOPOLOGY,
+      externalTypeDeps: EXTERNAL_TYPE_DEPS,
+      temporalValidation: TEMPORAL_VALIDATION,
     } = window.__EVA_DATA__;
 
     // Convert arrays to maps for fast lookup
@@ -583,13 +593,15 @@
     function DiagramTab() {
       const containerRef     = useRef(null);
       const networkRef      = useRef(null);
-      const edgesDataRef    = useRef(null);
-      const edgeGroupMapRef  = useRef({});
-      const eventEdgesMapRef = useRef({});
-      const edgeLabelMapRef  = useRef({});
-      const [physicsOn, setPhysicsOn] = useState(true);
-      const [hoveredNode,  setHoveredNode]  = useState(null);
-      const [hoveredEvent, setHoveredEvent] = useState(null);  // { name, producer, consumers[] }
+      const edgesDataRef              = useRef(null);
+      const edgeGroupMapRef            = useRef({});
+      const eventEdgesMapRef           = useRef({});
+      const edgeLabelMapRef            = useRef({});
+      const temporalEdgeActivitiesRef  = useRef({});  // edgeId → { activities[], color, wfLabel }
+      const [physicsOn, setPhysicsOn]             = useState(true);
+      const [hoveredNode,  setHoveredNode]        = useState(null);
+      const [hoveredEvent, setHoveredEvent]       = useState(null);  // { name, producer, consumers[] }
+      const [hoveredTemporalEdge, setHoveredTemporalEdge] = useState(null); // { activities[], color, wfLabel }
 
       // Build vis datasets from injected data
       function buildDatasets() {
@@ -628,6 +640,120 @@
             smooth: { enabled: true, type: "curvedCW", roundness: 0.15 },
           });
         });
+
+        // Temporal workflow edges — central Temporal Server hub (mirrors Kafka broker pattern)
+        if (IS_TEMPORAL_MODE && Array.isArray(TEMPORAL_WORKFLOWS)) {
+          // Build camelCase → vis node id lookup (handles hyphenated names like "shopping-carts")
+          const camelToNodeId = {};
+          MODULES_LIST.forEach(m => {
+            camelToNodeId[m.id] = m.id;
+            const cc = m.id
+              .replace(/[-_\s]+(.)?/g, (_, c) => (c ? c.toUpperCase() : ''))
+              .replace(/^(.)/, c => c.toLowerCase());
+            camelToNodeId[cc] = m.id;
+          });
+
+          // Central Temporal Server node
+          const temporalTarget = (TEMPORAL_ORCHESTRATION && TEMPORAL_ORCHESTRATION.target) || "localhost:7233";
+          const temporalNs     = (TEMPORAL_ORCHESTRATION && TEMPORAL_ORCHESTRATION.namespace) || "default";
+          visNodes.push({
+            id:    "__temporal__",
+            label: "⏱️ Temporal\n" + temporalNs,
+            title: `Temporal Server: ${temporalTarget} — orquesta todos los workflows`,
+            color: {
+              background: "#3b1f6e",
+              border:     C.purple,
+              highlight:  { background: "#5a2fa8", border: C.purple },
+              hover:      { background: "#4a2890", border: C.purple },
+            },
+            font:  { color: "#e8e8f0", size: 13, face: "'Plus Jakarta Sans', sans-serif", bold: true },
+            shape: "ellipse", borderWidth: 3, borderWidthSelected: 4, margin: 14,
+          });
+
+          const WF_COLORS = [C.blue, C.orange, C.green, C.accent, C.gold, "#c084fc"];
+          const temporalEdgeActivities = {};  // populated below, stored in ref after build
+
+          TEMPORAL_WORKFLOWS.forEach((wf, wfIdx) => {
+            const orchId = camelToNodeId[wf.triggerModule];
+            if (!orchId) return;
+            const color = WF_COLORS[wfIdx % WF_COLORS.length];
+            const shortLabel = (wf.name || "").replace(/Workflow$/, "");
+
+            // Fix 2: one trigger edge PER WORKFLOW (not per unique orchestrator module)
+            // Uses workflow color + shortLabel so both Checkout and CancelOrder are distinct
+            visEdges.push({
+              id:     `temporal-trigger-${wfIdx}`,
+              from:   orchId,
+              to:     "__temporal__",
+              label:  shortLabel,
+              dashes: [5, 3],
+              color:  { color: color + "cc", highlight: color, hover: color },
+              font:   { color, size: 9, face: "'JetBrains Mono', monospace",
+                        background: C.bg, strokeWidth: 0, align: "middle" },
+              arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+              width:  1.5,
+              smooth: { enabled: true, type: "dynamic" },
+            });
+
+            // Mejora 4: determine dashes per target (all-async → dashed, else solid)
+            // Fix 1: removed `|| tgtId === orchId` — allow self-calls (e.g. Temporal→ShoppingCarts)
+            // Build per-target activity list for Mejora 3 (tooltip)
+            const wfTargetActivities = {};  // tgtId → [{activity, roleClass, type, compensation}]
+            (wf.steps || []).forEach((step) => {
+              if (step._isWait || !step.target) return;
+              const tgtId = camelToNodeId[step.target];
+              if (!tgtId) return;
+              if (!wfTargetActivities[tgtId]) wfTargetActivities[tgtId] = [];
+              wfTargetActivities[tgtId].push({
+                activity:     step.activity || step.activityPascal || "",
+                roleClass:    step.roleClass || "",
+                type:         step.type || "sync",
+                compensation: step.compensation || null,
+              });
+            });
+
+            // Emit one dispatch edge per (wf, target) pair
+            Object.entries(wfTargetActivities).forEach(([tgtId, activities]) => {
+              const allAsync = activities.every(a => a.type === "async");
+              const edgeId   = `temporal-dispatch-${wfIdx}-${tgtId}`;
+              temporalEdgeActivities[edgeId] = { activities, color, wfLabel: shortLabel };
+              visEdges.push({
+                id:     edgeId,
+                from:   "__temporal__",
+                to:     tgtId,
+                label:  shortLabel,
+                dashes: allAsync ? [4, 3] : false,
+                color:  { color, highlight: color, hover: color },
+                font:   { color, size: 10, face: "'JetBrains Mono', monospace",
+                          background: C.bg, strokeWidth: 0, align: "middle" },
+                arrows: { to: { enabled: true, scaleFactor: 0.7 } },
+                width:  2,
+                smooth: { enabled: true, type: "curvedCW", roundness: 0.12 + wfIdx * 0.18 },
+              });
+
+              // Mejora 5: compensation edges (red dashed, Temporal → same target, thin)
+              activities.forEach((act, aIdx) => {
+                if (!act.compensation) return;
+                const compId = `temporal-comp-${wfIdx}-${tgtId}-${aIdx}`;
+                visEdges.push({
+                  id:     compId,
+                  from:   "__temporal__",
+                  to:     tgtId,
+                  label:  "↩ " + act.compensation,
+                  dashes: [3, 4],
+                  color:  { color: C.accent + "99", highlight: C.accent, hover: C.accent },
+                  font:   { color: C.accent, size: 8, face: "'JetBrains Mono', monospace",
+                            background: C.bg, strokeWidth: 0, align: "middle" },
+                  arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+                  width:  1,
+                  smooth: { enabled: true, type: "curvedCCW", roundness: 0.35 },
+                });
+              });
+            });
+          });
+
+          temporalEdgeActivitiesRef.current = temporalEdgeActivities;
+        }
 
         // Broker node — shown only if there are async events
         if (EVENTS.length > 0) {
@@ -725,11 +851,18 @@
         const net = new vis.Network(containerRef.current, data, options);
         net.once("stabilizationIterationsDone", () => {
           net.setOptions({ physics: { enabled: false } });
+          net.fit({ animation: { duration: 300, easingFunction: "easeInOutQuad" } });
           setPhysicsOn(false);
         });
         net.on("hoverNode", (p) => setHoveredNode(p.node));
         net.on("blurNode",  ()  => setHoveredNode(null));
         net.on("hoverEdge", (p) => {
+          // Mejora 3: temporal dispatch edges have their own tooltip
+          const temporalInfo = temporalEdgeActivitiesRef.current[p.edge];
+          if (temporalInfo) {
+            setHoveredTemporalEdge(temporalInfo);
+            return;
+          }
           const groupIdx = edgeGroupMapRef.current[p.edge];
           if (groupIdx === undefined || !edgesDataRef.current) return;
           const groupIds = eventEdgesMapRef.current[groupIdx] || [];
@@ -759,6 +892,7 @@
         });
         net.on("blurEdge", () => {
           setHoveredEvent(null);
+          setHoveredTemporalEdge(null);
           if (!edgesDataRef.current) return;
           const allIds   = Object.keys(edgeGroupMapRef.current);
           const FONT_PUB = { color: C.gold, size: 10, face: "'JetBrains Mono', monospace", background: C.bg, strokeWidth: 0, align: "middle" };
@@ -793,10 +927,11 @@
       const fitView  = () => networkRef.current && networkRef.current.fit({ animation: { duration: 400, easingFunction: "easeInOutQuad" } });
       const resetNet = () => initNetwork(true);
 
-      const hoveredMod    = (hoveredNode && hoveredNode !== "__broker__") ? MODULES[hoveredNode] : null;
-      const hoveredBroker = hoveredNode === "__broker__";
-      // overlay priority: hoveredEvent > node tooltips
-      const showOverlay   = hoveredEvent || hoveredMod || hoveredBroker;
+      const hoveredMod      = (hoveredNode && hoveredNode !== "__broker__" && hoveredNode !== "__temporal__") ? MODULES[hoveredNode] : null;
+      const hoveredBroker   = hoveredNode === "__broker__";
+      const hoveredTemporal = hoveredNode === "__temporal__";
+      // overlay priority: hoveredTemporalEdge > hoveredEvent > node tooltips
+      const showOverlay   = hoveredTemporalEdge || hoveredEvent || hoveredMod || hoveredBroker || hoveredTemporal;
 
       return (
         <div>
@@ -837,15 +972,48 @@
                 position: "absolute", bottom: 12, left: 12,
                 background: C.bg + "ee",
                 border: `1px solid ${
-                  hoveredEvent ? "#4ade80"
+                  hoveredTemporalEdge ? hoveredTemporalEdge.color
+                  : hoveredEvent ? "#4ade80"
                   : hoveredBroker ? C.gold
-                  : hoveredMod.color}66`,
-                borderRadius: 8, padding: "6px 12px", backdropFilter: "blur(4px)",
+                  : hoveredTemporal ? C.purple
+                  : hoveredMod ? hoveredMod.color : C.borderBright}66`,
+                borderRadius: 8, padding: "8px 14px", backdropFilter: "blur(4px)",
                 fontSize: 12, fontWeight: 600,
                 animation: "fadeIn 0.15s", pointerEvents: "none",
                 maxWidth: "80%",
               }}>
-                {hoveredEvent
+                {hoveredTemporalEdge
+                  ? <div>
+                      <div style={{ color: hoveredTemporalEdge.color, marginBottom: 6 }}>
+                        ⏱️ <span style={{ fontWeight: 700 }}>{hoveredTemporalEdge.wfLabel}</span>
+                        <span style={{ color: C.textMuted, fontWeight: 400, marginLeft: 6, fontSize: 11 }}>actividades en este módulo</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        {hoveredTemporalEdge.activities.map((act, i) => {
+                          const ROLE_COLORS = { READ: C.blue, WRITE: C.green, COMPENSATE: C.accent, NOTIFY: C.gold };
+                          const roleColor = ROLE_COLORS[act.roleClass] || C.textMuted;
+                          return (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+                              <span style={{
+                                background: roleColor + "22", color: roleColor,
+                                border: `1px solid ${roleColor}44`,
+                                borderRadius: 3, padding: "0 5px", fontSize: 9, fontWeight: 700,
+                                fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.4,
+                                minWidth: 70, textAlign: "center",
+                              }}>{act.roleClass || "STEP"}</span>
+                              <span style={{ color: C.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{act.activity}</span>
+                              {act.type === "async" && (
+                                <span style={{ color: C.gold, fontSize: 9, fontWeight: 700, letterSpacing: 0.3 }}>async</span>
+                              )}
+                              {act.compensation && (
+                                <span style={{ color: C.accent, fontSize: 9 }}>↩ {act.compensation}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  : hoveredEvent
                   ? <span style={{ color: "#4ade80" }}>
                       ⬡ {hoveredEvent.name}
                       <span style={{ color: C.textMuted, fontWeight: 400 }}> — </span>
@@ -853,6 +1021,8 @@
                         {hoveredEvent.producer} → [{hoveredEvent.consumers.join(", ")}]
                       </span>
                     </span>
+                  : hoveredTemporal
+                  ? <span style={{ color: C.purple }}>⏱️ Temporal Server — <span style={{ color: C.textDim, fontWeight: 400 }}>Orquesta la ejecución de workflows y despacha actividades a los módulos worker</span></span>
                   : hoveredBroker
                   ? <span style={{ color: C.gold }}>⚡ Kafka Broker — <span style={{ color: C.textDim, fontWeight: 400 }}>Retransmite eventos asíncronos entre módulos</span></span>
                   : <span style={{ color: hoveredMod.color }}>{hoveredMod.icon} {hoveredMod.label} — <span style={{ color: C.textDim, fontWeight: 400 }}>{hoveredMod.desc}</span></span>
@@ -866,25 +1036,67 @@
             display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap",
             alignItems: "center", paddingLeft: 4,
           }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <svg width="36" height="12">
-                <line x1="0" y1="6" x2="36" y2="6"
-                  stroke={C.blue} strokeWidth="2" strokeLinecap="round" />
-                <polygon points="32,3 36,6 32,9" fill={C.blue} />
-              </svg>
-              <span style={{ color: C.textMuted, fontSize: 12 }}>Síncrono (HTTP)</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <svg width="36" height="12">
-                <line x1="0" y1="6" x2="36" y2="6"
-                  stroke={C.gold} strokeWidth="1.5" strokeDasharray="6 4" strokeLinecap="round" />
-                <polygon points="32,3 36,6 32,9" fill={C.gold} />
-              </svg>
-              <span style={{ color: C.textMuted, fontSize: 12 }}>Asíncrono (Kafka)</span>
-            </div>
-            <div style={{ color: C.textMuted, fontSize: 11, marginLeft: "auto" }}>
-              {MODULES_LIST.length} módulos · {SYNC_INTEGRATIONS.length} puertos sync · {EVENTS.length} eventos
-            </div>
+            {IS_TEMPORAL_MODE ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="36" height="12">
+                    <line x1="0" y1="6" x2="36" y2="6"
+                      stroke={C.blue} strokeWidth="1.5" strokeDasharray="5 3" strokeLinecap="round" />
+                    <polygon points="32,3 36,6 32,9" fill={C.blue} />
+                  </svg>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>Trigger (por workflow)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="36" height="12">
+                    <line x1="0" y1="6" x2="36" y2="6"
+                      stroke={C.blue} strokeWidth="2" strokeLinecap="round" />
+                    <polygon points="32,3 36,6 32,9" fill={C.blue} />
+                  </svg>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>Dispatch sync</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="36" height="12">
+                    <line x1="0" y1="6" x2="36" y2="6"
+                      stroke={C.blue} strokeWidth="2" strokeDasharray="4 3" strokeLinecap="round" />
+                    <polygon points="32,3 36,6 32,9" fill={C.blue} />
+                  </svg>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>Dispatch async</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="36" height="12">
+                    <line x1="0" y1="6" x2="36" y2="6"
+                      stroke={C.accent} strokeWidth="1" strokeDasharray="3 4" strokeLinecap="round" />
+                    <polygon points="32,3 36,6 32,9" fill={C.accent} />
+                  </svg>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>Compensación</span>
+                </div>
+                <div style={{ color: C.textMuted, fontSize: 11, marginLeft: "auto" }}>
+                  {MODULES_LIST.length} módulos · {(TEMPORAL_WORKFLOWS || []).length} workflows · hover edges para ver actividades
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="36" height="12">
+                    <line x1="0" y1="6" x2="36" y2="6"
+                      stroke={C.blue} strokeWidth="2" strokeLinecap="round" />
+                    <polygon points="32,3 36,6 32,9" fill={C.blue} />
+                  </svg>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>Síncrono (HTTP)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="36" height="12">
+                    <line x1="0" y1="6" x2="36" y2="6"
+                      stroke={C.gold} strokeWidth="1.5" strokeDasharray="6 4" strokeLinecap="round" />
+                    <polygon points="32,3 36,6 32,9" fill={C.gold} />
+                  </svg>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>Asíncrono (Kafka)</span>
+                </div>
+                <div style={{ color: C.textMuted, fontSize: 11, marginLeft: "auto" }}>
+                  {MODULES_LIST.length} módulos · {SYNC_INTEGRATIONS.length} puertos sync · {EVENTS.length} eventos
+                </div>
+              </>
+            )}
           </div>
         </div>
       );
@@ -1656,22 +1868,765 @@
         </div>
       );
     }
+    // ─── Temporal: role badge colors ────────────────────────────────────────
+    const ROLE_STYLE = {
+      READ:       { color: C.blue,   label: "READ",       bg: C.blue   + "22" },
+      WRITE:      { color: C.green,  label: "WRITE",      bg: C.green  + "22" },
+      COMPENSATE: { color: C.accent, label: "COMPENSATE", bg: C.accent + "22" },
+      NOTIFY:     { color: C.gold,   label: "NOTIFY",     bg: C.gold   + "22" },
+    };
+
+    const PRIMARY_ROLE_STYLE = {
+      Orchestrator: { color: C.purple, icon: "🎯" },
+      Executor:     { color: C.green,  icon: "⚙️" },
+      DataProvider: { color: C.blue,   icon: "📦" },
+      Reactor:      { color: C.gold,   icon: "⚡" },
+      Standalone:   { color: C.textMuted, icon: "◈" },
+    };
+
+    function RoleBadge({ role, small }) {
+      const rs = ROLE_STYLE[role] || { color: C.textMuted, label: role, bg: C.surface };
+      return (
+        <span style={{
+          background: rs.bg, color: rs.color, border: `1px solid ${rs.color}55`,
+          borderRadius: 4, padding: small ? "0px 5px" : "2px 8px",
+          fontSize: small ? 9 : 11, fontWeight: 700, letterSpacing: 0.5,
+          fontFamily: "'JetBrains Mono', monospace", display: "inline-block",
+        }}>{rs.label}</span>
+      );
+    }
+
+    // ─── WorkflowsTab ───────────────────────────────────────────────────────
+    function WorkflowsTab() {
+      const allWfs = [...(TEMPORAL_WORKFLOWS || []), ...(LOCAL_WORKFLOWS || [])];
+      const [selectedIdx, setSelectedIdx] = useState(0);
+      const [expandedStep, setExpandedStep] = useState(null);
+      const wf = allWfs[selectedIdx] || null;
+
+      if (!wf) return (
+        <div style={{ color: C.textMuted, padding: 60, textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>⏱️</div>
+          No hay workflows Temporal declarados en system.yaml
+        </div>
+      );
+
+      const typeIcon = (type, actType) => {
+        if (type === "async") return "⚡";
+        if (actType === "heavy") return "🏋️";
+        return "▶";
+      };
+
+      return (
+        <div>
+          {/* Workflow selector */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+            {allWfs.map((w, i) => (
+              <button key={i} onClick={() => { setSelectedIdx(i); setExpandedStep(null); }} style={{
+                background: i === selectedIdx ? C.purple + "22" : C.surface,
+                border: `1px solid ${i === selectedIdx ? C.purple : C.border}`,
+                color: i === selectedIdx ? C.purple : C.textMuted,
+                borderRadius: 8, padding: "7px 14px", cursor: "pointer",
+                fontWeight: i === selectedIdx ? 700 : 400, fontSize: 12,
+                transition: "all 0.15s", fontFamily: "inherit",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                {w.saga && <span title="Saga">🔄</span>}
+                {w._isLocal && <span title="Local">📌</span>}
+                {w.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Workflow header */}
+          <div style={{
+            background: C.surface, border: `1px solid ${C.purple}44`, borderRadius: 12,
+            padding: 20, marginBottom: 20,
+          }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 800, fontSize: 18, color: C.text }}>{wf.name}</span>
+                  {wf.saga && <Tag color={C.accent}>🔄 SAGA</Tag>}
+                  {wf._isLocal && <Tag color={C.gold}>📌 LOCAL</Tag>}
+                </div>
+                {wf.trigger && (
+                  <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>TRIGGER</span>
+                    <Tag color={wf.triggerModuleColor || C.blue}>
+                      {wf.triggerModuleIcon} {wf.triggerModuleLabel}
+                    </Tag>
+                    {wf.trigger.on && (
+                      <>
+                        <span style={{ color: C.textMuted, fontSize: 11 }}>evento</span>
+                        <code style={{ background: C.bg, color: C.gold, padding: "2px 8px", borderRadius: 4, fontSize: 11, border: `1px solid ${C.border}` }}>{wf.trigger.on}</code>
+                      </>
+                    )}
+                  </div>
+                )}
+                <div style={{ marginTop: 10, display: "flex", gap: 16, flexWrap: "wrap" }}>
+                  <span style={{ color: C.textMuted, fontSize: 11 }}>
+                    <span style={{ color: C.textDim, fontWeight: 700 }}>{wf.stepCount}</span> pasos
+                  </span>
+                  {wf.compensableStepCount > 0 && (
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>
+                      <span style={{ color: C.accent, fontWeight: 700 }}>{wf.compensableStepCount}</span> compensables
+                    </span>
+                  )}
+                  {wf.asyncStepCount > 0 && (
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>
+                      <span style={{ color: C.gold, fontWeight: 700 }}>{wf.asyncStepCount}</span> async (fire-and-forget)
+                    </span>
+                  )}
+                  {wf.taskQueue && (
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>
+                      queue: <code style={{ color: C.purple, fontSize: 10 }}>{wf.taskQueue}</code>
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Steps timeline */}
+          <div style={{ marginBottom: 24 }}>
+            {(wf.steps || []).filter(s => !s._isWait).map((step, i) => {
+              const expanded = expandedStep === i;
+              const roleSt = ROLE_STYLE[step.roleClass] || {};
+              const actColor = roleSt.color || C.blue;
+              return (
+                <div key={i} style={{ display: "flex", gap: 14, marginBottom: 6 }}>
+                  {/* Timeline */}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 40, flexShrink: 0 }}>
+                    <div style={{
+                      width: 38, height: 38, borderRadius: "50%",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: actColor + "22", border: `2px solid ${actColor}55`,
+                      color: actColor, fontWeight: 800, fontSize: 13,
+                    }}>{step._stepNum}</div>
+                    {i < (wf.steps || []).filter(s => !s._isWait).length - 1 && (
+                      <div style={{ width: 2, flex: 1, minHeight: 16, background: C.border, marginTop: 3 }} />
+                    )}
+                  </div>
+                  {/* Card */}
+                  <div style={{ flex: 1 }}>
+                    <div
+                      onClick={() => setExpandedStep(expanded ? null : i)}
+                      style={{
+                        background: expanded ? actColor + "11" : C.surface,
+                        border: `1px solid ${expanded ? actColor + "66" : C.border}`,
+                        borderRadius: expanded ? "10px 10px 0 0" : 10,
+                        padding: "11px 16px", cursor: "pointer", transition: "all 0.15s",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 15 }}>{typeIcon(step.type, step.activityType)}</span>
+                        <span style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{step.activity}</span>
+                        <RoleBadge role={step.roleClass} />
+                        {step.type === "async" && <Tag color={C.gold}>async</Tag>}
+                        {step.activityType === "heavy" && <Tag color={C.orange}>heavy</Tag>}
+                        <div style={{ flex: 1 }} />
+                        <Tag color={step.targetColor || C.blue}>{step.targetIcon} {step.targetLabel || step.target}</Tag>
+                        <span style={{ color: C.textMuted, fontSize: 11 }}>{expanded ? "▲" : "▼"}</span>
+                      </div>
+                      {step.roleDesc && (
+                        <div style={{ color: C.textMuted, fontSize: 11, marginTop: 5, lineHeight: 1.5 }}>{step.roleDesc}</div>
+                      )}
+                    </div>
+                    {expanded && (
+                      <div style={{ border: `1px solid ${actColor}66`, borderTop: "none", borderRadius: "0 0 10px 10px", background: C.bg, padding: 16 }}>
+                        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                          {/* Inputs */}
+                          {step.inputs && step.inputs.length > 0 && (
+                            <div style={{ flex: 1, minWidth: 200 }}>
+                              <div style={{ color: C.textMuted, fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>ENTRADAS</div>
+                              {step.inputs.map((inp, j) => (
+                                <div key={j} style={{ marginBottom: 4 }}>
+                                  <code style={{ color: C.blue, fontSize: 11, background: C.surface, padding: "1px 6px", borderRadius: 3 }}>{inp.name}</code>
+                                  <span style={{ color: C.textMuted, fontSize: 10, marginLeft: 6 }}>← {inp.source}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {/* Outputs */}
+                          {step.outputs && step.outputs.length > 0 && (
+                            <div style={{ flex: 1, minWidth: 200 }}>
+                              <div style={{ color: C.textMuted, fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>SALIDAS</div>
+                              {step.outputs.map((out, j) => (
+                                <div key={j} style={{ marginBottom: 4 }}>
+                                  <code style={{ color: C.green, fontSize: 11, background: C.surface, padding: "1px 6px", borderRadius: 3 }}>{out.name}</code>
+                                  {out.consumers && out.consumers.length > 0 && (
+                                    <span style={{ color: C.textMuted, fontSize: 10, marginLeft: 6 }}>→ {out.consumers.join(", ")}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {/* Compensation */}
+                          {step.compensation && (
+                            <div style={{ flex: 1, minWidth: 200 }}>
+                              <div style={{ color: C.textMuted, fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>COMPENSACIÓN</div>
+                              <code style={{ color: C.accent, fontSize: 11, background: C.surface, padding: "1px 6px", borderRadius: 3 }}>{step.compensation}</code>
+                            </div>
+                          )}
+                        </div>
+                        {/* Retry / timeout */}
+                        <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+                          {step.timeout && (
+                            <span style={{ color: C.textMuted, fontSize: 10 }}>
+                              ⏱ timeout: <code style={{ color: C.textDim }}>{step.timeout}</code>
+                            </span>
+                          )}
+                          {step.retryPolicy && (
+                            <span style={{ color: C.textMuted, fontSize: 10 }}>
+                              🔁 retry: max {step.retryPolicy.maximumAttempts || "∞"} · backoff {step.retryPolicy.initialInterval || "1s"}
+                            </span>
+                          )}
+                          {!step.retryPolicy && step.activityType === "heavy" && (
+                            <span style={{ color: C.accent, fontSize: 10 }}>⚠ heavy activity sin retryPolicy declarado</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Data flow table */}
+          {wf.dataFlowTable && wf.dataFlowTable.length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>TABLA DE FLUJO DE DATOS</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: C.surface }}>
+                      <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, fontWeight: 700, textAlign: "left" }}>Campo</th>
+                      <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.blue, fontWeight: 700, textAlign: "left" }}>Origen</th>
+                      <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.green, fontWeight: 700, textAlign: "left" }}>Consumido por</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wf.dataFlowTable.map((row, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? C.bg : C.surface }}>
+                        <td style={{ border: `1px solid ${C.border}`, padding: "7px 12px" }}>
+                          <code style={{ color: C.text, fontSize: 11 }}>{row.field}</code>
+                        </td>
+                        <td style={{ border: `1px solid ${C.border}`, padding: "7px 12px", color: C.textDim, fontSize: 11 }}>{row.source}</td>
+                        <td style={{ border: `1px solid ${C.border}`, padding: "7px 12px" }}>
+                          {row.consumed && row.consumed.length > 0
+                            ? row.consumed.map((c, j) => (
+                              <span key={j} style={{ color: C.textDim, fontSize: 11, marginRight: 6 }}>{c.activity}</span>
+                            ))
+                            : <span style={{ color: C.textMuted, fontSize: 11 }}>— no consumido —</span>
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── SagaAnalysisTab ────────────────────────────────────────────────────
+    function SagaAnalysisTab() {
+      const sagas = SAGA_WORKFLOWS || [];
+      const [selectedIdx, setSelectedIdx] = useState(0);
+      const [failAtStep, setFailAtStep] = useState(null);
+      const saga = sagas[selectedIdx] || null;
+
+      if (!sagas.length) return (
+        <div style={{ color: C.textMuted, padding: 60, textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>🔄</div>
+          No hay workflows con <code style={{ color: C.accent }}>saga: true</code> declarados
+        </div>
+      );
+
+      const chain = saga ? (saga.sagaChain || []) : [];
+      const lifo = [...chain].reverse();
+
+      // Simulate failure: steps after failAtStep get rolled back
+      const isRolledBack = (stepNum) => failAtStep !== null && stepNum > failAtStep;
+      const isFailPoint = (stepNum) => stepNum === failAtStep;
+      const wasExecuted = (stepNum) => failAtStep === null || stepNum <= failAtStep;
+
+      return (
+        <div>
+          {/* Saga selector */}
+          {sagas.length > 1 && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+              {sagas.map((s, i) => (
+                <button key={i} onClick={() => { setSelectedIdx(i); setFailAtStep(null); }} style={{
+                  background: i === selectedIdx ? C.accent + "22" : C.surface,
+                  border: `1px solid ${i === selectedIdx ? C.accent : C.border}`,
+                  color: i === selectedIdx ? C.accent : C.textMuted,
+                  borderRadius: 8, padding: "7px 14px", cursor: "pointer",
+                  fontWeight: i === selectedIdx ? 700 : 400, fontSize: 12,
+                  transition: "all 0.15s", fontFamily: "inherit",
+                }}>🔄 {s.name}</button>
+              ))}
+            </div>
+          )}
+
+          {/* Saga header */}
+          <div style={{ background: C.surface, border: `1px solid ${C.accent}44`, borderRadius: 12, padding: 20, marginBottom: 24 }}>
+            <div style={{ fontWeight: 800, fontSize: 18, color: C.text, marginBottom: 8 }}>🔄 {saga.name}</div>
+            <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>
+                <span style={{ color: C.text, fontWeight: 700 }}>{chain.length}</span> pasos en la cadena
+              </span>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>
+                <span style={{ color: C.accent, fontWeight: 700 }}>{chain.filter(s => s.isCompensable).length}</span> compensables
+              </span>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>
+                <span style={{ color: C.gold, fontWeight: 700 }}>{chain.filter(s => !s.isCompensable && s.type === "async").length}</span> async (no compensables)
+              </span>
+            </div>
+          </div>
+
+          {/* Fail simulator */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, marginBottom: 24 }}>
+            <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>
+              🔴 SIMULAR FALLO EN PASO:
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <button onClick={() => setFailAtStep(null)} style={{
+                background: failAtStep === null ? C.green + "22" : C.bg,
+                border: `1px solid ${failAtStep === null ? C.green : C.border}`,
+                color: failAtStep === null ? C.green : C.textMuted,
+                borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+              }}>✅ Sin fallo</button>
+              {chain.filter(s => s.canFail).map((s) => (
+                <button key={s.stepNum} onClick={() => setFailAtStep(s.stepNum)} style={{
+                  background: failAtStep === s.stepNum ? C.accent + "22" : C.bg,
+                  border: `1px solid ${failAtStep === s.stepNum ? C.accent : C.border}`,
+                  color: failAtStep === s.stepNum ? C.accent : C.textMuted,
+                  borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+                }}>Paso {s.stepNum}</button>
+              ))}
+            </div>
+            {failAtStep !== null && (
+              <div style={{ marginTop: 12, padding: "10px 14px", background: C.accent + "11", border: `1px solid ${C.accent}44`, borderRadius: 8 }}>
+                <div style={{ color: C.accent, fontWeight: 700, fontSize: 12 }}>
+                  💥 Fallo en paso {failAtStep} — Se ejecutan compensaciones LIFO:
+                </div>
+                <div style={{ color: C.textDim, fontSize: 11, marginTop: 4, lineHeight: 1.7 }}>
+                  {lifo.filter(s => s.stepNum < failAtStep && s.isCompensable).map((s, i) => (
+                    <span key={i}>
+                      <code style={{ color: C.accent, background: C.surface, padding: "1px 5px", borderRadius: 3 }}>{s.compensationName}</code>
+                      {" en "}<span style={{ color: C.textDim }}>{s.targetModule}</span>
+                      {i < lifo.filter(ss => ss.stepNum < failAtStep && ss.isCompensable).length - 1 ? " → " : ""}
+                    </span>
+                  ))}
+                  {lifo.filter(s => s.stepNum < failAtStep && s.isCompensable).length === 0 && (
+                    <span style={{ color: C.gold }}>⚠ Ningún paso previo tiene compensación declarada</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Execution chain (forward) */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>
+              ▶ CADENA DE EJECUCIÓN (orden cronológico)
+            </div>
+            {chain.map((step, i) => {
+              const rolledBack = isRolledBack(step.stepNum);
+              const failPoint = isFailPoint(step.stepNum);
+              const executed = wasExecuted(step.stepNum);
+              const color = failPoint ? C.accent : rolledBack ? C.textMuted : step.isCompensable ? C.green : C.gold;
+
+              return (
+                <div key={i} style={{ display: "flex", gap: 12, marginBottom: 6, opacity: rolledBack ? 0.35 : 1 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 36, flexShrink: 0 }}>
+                    <div style={{
+                      width: 34, height: 34, borderRadius: "50%",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: color + "22", border: `2px solid ${color}55`,
+                      color, fontWeight: 800, fontSize: 12,
+                    }}>
+                      {failPoint ? "💥" : rolledBack ? "○" : step.stepNum}
+                    </div>
+                    {i < chain.length - 1 && (
+                      <div style={{ width: 2, flex: 1, minHeight: 12, background: C.border, marginTop: 3 }} />
+                    )}
+                  </div>
+                  <div style={{
+                    flex: 1, background: failPoint ? C.accent + "11" : C.surface,
+                    border: `1px solid ${failPoint ? C.accent : rolledBack ? C.border : color + "44"}`,
+                    borderRadius: 8, padding: "10px 14px",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 700, color: failPoint ? C.accent : C.text, fontSize: 13 }}>
+                        {step.activityName}
+                      </span>
+                      {step.isCompensable && <Tag color={C.green}>compensable</Tag>}
+                      {step.type === "async" && !step.isCompensable && <Tag color={C.gold}>async · no compensable</Tag>}
+                      {failPoint && <Tag color={C.accent}>FALLO AQUÍ</Tag>}
+                      <div style={{ flex: 1 }} />
+                      <span style={{ color: C.textMuted, fontSize: 11 }}>{step.targetModule}</span>
+                      {step.timeout && <code style={{ color: C.textMuted, fontSize: 10 }}>⏱ {step.timeout}</code>}
+                    </div>
+                    {step.isCompensable && step.compensationName && (
+                      <div style={{ marginTop: 5, color: C.textMuted, fontSize: 11 }}>
+                        ↩ compensación: <code style={{ color: C.accent, background: C.bg, padding: "1px 5px", borderRadius: 3 }}>{step.compensationName}</code>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* LIFO compensation chain */}
+          <div>
+            <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>
+              ↩ CADENA DE COMPENSACIÓN LIFO
+            </div>
+            {lifo.filter(s => s.isCompensable).length === 0 && (
+              <div style={{ color: C.gold, fontSize: 12, padding: 16, background: C.gold + "11", border: `1px solid ${C.gold}44`, borderRadius: 8 }}>
+                ⚠ Ningún paso de este workflow tiene compensación declarada. Considera agregar <code>compensation:</code> en cada paso crítico de la saga.
+              </div>
+            )}
+            {lifo.filter(s => s.isCompensable).map((step, i, arr) => (
+              <div key={i} style={{ display: "flex", gap: 12, marginBottom: 6 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 36, flexShrink: 0 }}>
+                  <div style={{
+                    width: 34, height: 34, borderRadius: "50%",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: C.accent + "22", border: `2px solid ${C.accent}55`,
+                    color: C.accent, fontWeight: 800, fontSize: 12,
+                  }}>{i + 1}</div>
+                  {i < arr.length - 1 && (
+                    <div style={{ width: 2, flex: 1, minHeight: 12, background: C.accent + "33", marginTop: 3 }} />
+                  )}
+                </div>
+                <div style={{ flex: 1, background: C.accent + "08", border: `1px solid ${C.accent}33`, borderRadius: 8, padding: "10px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ color: C.accent, fontWeight: 700, fontSize: 12 }}>↩ {step.compensationName}</span>
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>en <span style={{ color: C.textDim }}>{step.targetModule}</span></span>
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>
+                      (revierte paso {step.stepNum}: {step.activityName})
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── ActivityCatalogTab ─────────────────────────────────────────────────
+    function ActivityCatalogTab() {
+      const catalog = ACTIVITY_CATALOG || [];
+      const [roleFilter, setRoleFilter] = useState("ALL");
+      const [moduleFilter, setModuleFilter] = useState("ALL");
+      const [showOrphans, setShowOrphans] = useState(false);
+
+      const modules = [...new Set(catalog.map(a => a.module))].sort();
+      const roles = ["ALL", "READ", "WRITE", "COMPENSATE", "NOTIFY"];
+
+      const filtered = catalog.filter(a => {
+        if (roleFilter !== "ALL" && a.role !== roleFilter) return false;
+        if (moduleFilter !== "ALL" && a.module !== moduleFilter) return false;
+        if (showOrphans && !a.isOrphan) return false;
+        return true;
+      });
+
+      const orphanCount = catalog.filter(a => a.isOrphan).length;
+
+      return (
+        <div>
+          {/* Stats bar */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+            {[
+              { label: "Total", count: catalog.length, color: C.text },
+              { label: "READ", count: catalog.filter(a => a.role === "READ").length, color: C.blue },
+              { label: "WRITE", count: catalog.filter(a => a.role === "WRITE").length, color: C.green },
+              { label: "COMPENSATE", count: catalog.filter(a => a.role === "COMPENSATE").length, color: C.accent },
+              { label: "NOTIFY", count: catalog.filter(a => a.role === "NOTIFY").length, color: C.gold },
+              { label: "Orphans", count: orphanCount, color: C.orange },
+            ].map(stat => (
+              <div key={stat.label} style={{
+                background: C.surface, border: `1px solid ${C.border}`,
+                borderRadius: 10, padding: "12px 18px", textAlign: "center", minWidth: 90,
+              }}>
+                <div style={{ fontSize: 24, fontWeight: 900, color: stat.color, fontFamily: "monospace" }}>{stat.count}</div>
+                <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2, fontWeight: 700, letterSpacing: 0.5 }}>{stat.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Filters */}
+          <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ color: C.textMuted, fontSize: 11 }}>Rol:</span>
+            {roles.map(r => (
+              <button key={r} onClick={() => setRoleFilter(r)} style={{
+                background: roleFilter === r ? (ROLE_STYLE[r] || { color: C.text }).color + "22" : C.surface,
+                border: `1px solid ${roleFilter === r ? (ROLE_STYLE[r] || { color: C.border }).color : C.border}`,
+                color: roleFilter === r ? (ROLE_STYLE[r] || { color: C.text }).color : C.textMuted,
+                borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+              }}>{r}</button>
+            ))}
+            <span style={{ color: C.border }}>|</span>
+            <span style={{ color: C.textMuted, fontSize: 11 }}>Módulo:</span>
+            <select value={moduleFilter} onChange={e => setModuleFilter(e.target.value)} style={{
+              background: C.surface, border: `1px solid ${C.border}`, color: C.textDim,
+              borderRadius: 6, padding: "4px 10px", fontSize: 11, fontFamily: "inherit",
+            }}>
+              <option value="ALL">Todos</option>
+              {modules.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <span style={{ color: C.border }}>|</span>
+            <button onClick={() => setShowOrphans(!showOrphans)} style={{
+              background: showOrphans ? C.orange + "22" : C.surface,
+              border: `1px solid ${showOrphans ? C.orange : C.border}`,
+              color: showOrphans ? C.orange : C.textMuted,
+              borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+            }}>⚠ Solo orphans ({orphanCount})</button>
+          </div>
+
+          {/* Table */}
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: C.surface }}>
+                  <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, textAlign: "left" }}>Actividad</th>
+                  <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, textAlign: "left" }}>Módulo</th>
+                  <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, textAlign: "left" }}>Rol</th>
+                  <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, textAlign: "left" }}>Tipo</th>
+                  <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, textAlign: "left" }}>Descripción</th>
+                  <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, textAlign: "left" }}>Usado en</th>
+                  <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, textAlign: "center" }}>Retry</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((act, i) => {
+                  const roleSt = ROLE_STYLE[act.role] || { color: C.textMuted };
+                  return (
+                    <tr key={i} style={{ background: i % 2 === 0 ? C.bg : C.surface }}>
+                      <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <code style={{ color: C.text, fontSize: 12 }}>{act.name}</code>
+                          {act.isOrphan && <span title="No usado en ningún workflow" style={{ color: C.orange, fontSize: 10 }}>⚠</span>}
+                        </div>
+                      </td>
+                      <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textDim, fontSize: 11 }}>{act.moduleLabel || act.module}</td>
+                      <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px" }}>
+                        <RoleBadge role={act.role} small />
+                      </td>
+                      <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px" }}>
+                        <Tag color={act.type === "heavy" ? C.orange : C.textMuted}>{act.type}</Tag>
+                      </td>
+                      <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, fontSize: 11, maxWidth: 280, lineHeight: 1.5 }}>
+                        {act.description}
+                      </td>
+                      <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px" }}>
+                        {act.usedInWorkflows && act.usedInWorkflows.length > 0
+                          ? act.usedInWorkflows.map((w, j) => (
+                            <div key={j} style={{ color: C.purple, fontSize: 10, marginBottom: 2 }}>{w}</div>
+                          ))
+                          : <span style={{ color: C.orange, fontSize: 11 }}>⚠ orphan</span>
+                        }
+                      </td>
+                      <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px", textAlign: "center" }}>
+                        {act.hasRetryPolicy
+                          ? <span style={{ color: C.green, fontSize: 14 }} title={`max: ${act.retryPolicy?.maximumAttempts}`}>✓</span>
+                          : act.type === "heavy"
+                            ? <span style={{ color: C.accent, fontSize: 14 }} title="Heavy activity sin retryPolicy">⚠</span>
+                            : <span style={{ color: C.border, fontSize: 12 }}>—</span>
+                        }
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {filtered.length === 0 && (
+              <div style={{ color: C.textMuted, padding: 20, textAlign: "center", fontSize: 12 }}>Sin resultados para los filtros seleccionados</div>
+            )}
+          </div>
+
+          {/* External type deps */}
+          {EXTERNAL_TYPE_DEPS && EXTERNAL_TYPE_DEPS.length > 0 && (
+            <div style={{ marginTop: 28 }}>
+              <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>
+                DEPENDENCIAS DE TIPOS EXTERNOS
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {EXTERNAL_TYPE_DEPS.map((dep, i) => (
+                  <div key={i} style={{
+                    background: C.surface, border: `1px solid ${C.purple}44`, borderRadius: 8,
+                    padding: "8px 14px", fontSize: 11,
+                  }}>
+                    <span style={{ color: C.text, fontWeight: 700 }}>{dep.consumerModule}</span>
+                    <span style={{ color: C.textMuted }}>.</span>
+                    <span style={{ color: C.blue }}>{dep.activityName}</span>
+                    <span style={{ color: C.textMuted }}> usa </span>
+                    <code style={{ color: C.purple }}>{dep.typeName}</code>
+                    <span style={{ color: C.textMuted }}> de </span>
+                    <span style={{ color: C.green }}>{dep.sourceModule}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── TemporalArchitectureTab ─────────────────────────────────────────────
+    function TemporalArchitectureTab() {
+      const roles = Object.values(MODULE_ROLES || {});
+      const queues = Object.values(QUEUE_TOPOLOGY || {});
+
+      return (
+        <div>
+          {/* Orchestration info */}
+          {TEMPORAL_ORCHESTRATION && (
+            <div style={{ background: C.surface, border: `1px solid ${C.purple}44`, borderRadius: 12, padding: 20, marginBottom: 24 }}>
+              <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>TEMPORAL SERVER</div>
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12 }}>
+                  <span style={{ color: C.textMuted }}>target: </span>
+                  <code style={{ color: C.purple }}>{TEMPORAL_ORCHESTRATION.target}</code>
+                </span>
+                <span style={{ fontSize: 12 }}>
+                  <span style={{ color: C.textMuted }}>namespace: </span>
+                  <code style={{ color: C.green }}>{TEMPORAL_ORCHESTRATION.namespace}</code>
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Module roles grid */}
+          <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>ROL POR MÓDULO</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, marginBottom: 28 }}>
+            {roles.map((mod, i) => {
+              const rs = PRIMARY_ROLE_STYLE[mod.primaryRole] || PRIMARY_ROLE_STYLE["Standalone"];
+              return (
+                <div key={i} style={{
+                  background: C.surface, border: `1px solid ${rs.color}44`,
+                  borderRadius: 12, padding: 16,
+                  boxShadow: `0 0 16px ${rs.color}12`,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <span style={{ fontSize: 22 }}>{rs.icon}</span>
+                    <div>
+                      <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{mod.label || mod.name}</div>
+                      <div style={{ color: rs.color, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>{mod.roleLabel}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {(mod.roles || []).map((r, j) => {
+                      const rrs = PRIMARY_ROLE_STYLE[r] || {};
+                      return (
+                        <span key={j} style={{
+                          background: (rrs.color || C.textMuted) + "22", color: rrs.color || C.textMuted,
+                          border: `1px solid ${(rrs.color || C.textMuted)}44`,
+                          borderRadius: 4, padding: "1px 7px", fontSize: 10, fontWeight: 700,
+                        }}>{r}</span>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Queue topology */}
+          {queues.length > 0 && (
+            <div>
+              <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>TASK QUEUES POR MÓDULO</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ background: C.surface }}>
+                      <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.textMuted, textAlign: "left" }}>Módulo</th>
+                      <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.purple, textAlign: "left" }}>Workflow Queue</th>
+                      <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.orange, textAlign: "left" }}>Heavy Task Queue</th>
+                      <th style={{ border: `1px solid ${C.border}`, padding: "8px 12px", color: C.green, textAlign: "left" }}>Light Task Queue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queues.map((q, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? C.bg : C.surface }}>
+                        <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px", fontWeight: 700, color: C.text }}>{q.label || q.name}</td>
+                        <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px" }}>
+                          <code style={{ color: C.purple, fontSize: 10 }}>{q.flowQueue}</code>
+                        </td>
+                        <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px" }}>
+                          <code style={{ color: C.orange, fontSize: 10 }}>{q.heavyQueue}</code>
+                        </td>
+                        <td style={{ border: `1px solid ${C.border}`, padding: "8px 12px" }}>
+                          <code style={{ color: C.green, fontSize: 10 }}>{q.lightQueue}</code>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Cross-workflow module interaction matrix */}
+          <div style={{ marginTop: 28 }}>
+            <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>PARTICIPACIÓN EN WORKFLOWS</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {(TEMPORAL_WORKFLOWS || []).map((wf, i) => (
+                <div key={i} style={{
+                  background: C.surface, border: `1px solid ${C.purple}33`, borderRadius: 10,
+                  padding: "12px 16px", minWidth: 200,
+                }}>
+                  <div style={{ fontWeight: 700, color: C.purple, fontSize: 13, marginBottom: 8 }}>
+                    {wf.saga ? "🔄 " : "⏱️ "}{wf.name}
+                  </div>
+                  {[...new Set((wf.steps || []).filter(s => !s._isWait).map(s => s.target || wf.triggerModule))].map((mod, j) => {
+                    const rs = PRIMARY_ROLE_STYLE[(MODULE_ROLES[mod] || {}).primaryRole] || { color: C.textMuted, icon: "◈" };
+                    return (
+                      <div key={j} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                        <span style={{ fontSize: 12 }}>{rs.icon}</span>
+                        <span style={{ color: C.textDim, fontSize: 11 }}>{(MODULE_ROLES[mod] || {}).label || mod}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // ─── App root ───────────────────────────────────────────────────────────
     function App() {
       const [tab, setTab] = useState("validation");
 
-      const tabs = [
-        { id: "validation",   label: "Validación",           icon: "🔍" },
-        { id: "flows",        label: "Simulador de flujos",   icon: "▶" },
-        { id: "architecture", label: "Arquitectura",          icon: "🗺️" },
-        { id: "diagram",      label: "Diagrama",              icon: "◈" },
-        ...(DOMAIN_VALIDATION ? [{ id: "domain", label: "Dominio", icon: "🏛️" }] : []),
-      ];
+      const tabs = IS_TEMPORAL_MODE
+        ? [
+            { id: "validation",    label: "Validación",       icon: "🔍" },
+            { id: "workflows",     label: "Workflows",        icon: "⏱️" },
+            ...(SAGA_WORKFLOWS && SAGA_WORKFLOWS.length > 0 ? [{ id: "saga", label: "Análisis Saga", icon: "🔄" }] : []),
+            { id: "activities",    label: "Actividades",      icon: "🗂️" },
+            { id: "architecture",  label: "Arquitectura",     icon: "🗺️" },
+            { id: "diagram",       label: "Diagrama",         icon: "◈" },
+            ...(DOMAIN_VALIDATION ? [{ id: "domain", label: "Dominio", icon: "🏛️" }] : []),
+          ]
+        : [
+            { id: "validation",   label: "Validación",           icon: "🔍" },
+            { id: "flows",        label: "Simulador de flujos",   icon: "▶" },
+            { id: "architecture", label: "Arquitectura",          icon: "🗺️" },
+            { id: "diagram",      label: "Diagrama",              icon: "◈" },
+            ...(DOMAIN_VALIDATION ? [{ id: "domain", label: "Dominio", icon: "🏛️" }] : []),
+          ];
 
       const sys = window.__EVA_DATA__;
-      const tech = [];
-      // Detect tech from systemConfig embedded in data
-      if (sys.events && sys.events.length > 0) tech.push({ label: "Kafka", color: C.gold });
 
       return (
         <div style={{ background: C.bg, minHeight: "100vh", color: C.text, fontFamily: "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" }}>
@@ -1687,11 +2642,26 @@
               <div style={{ fontWeight: 700, fontSize: 16, color: C.text }}>{systemName}</div>
               <div style={{ flex: 1 }} />
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {sys.events && sys.events.length > 0 && (
-                  <Tag color={C.gold}>Kafka · {sys.events.length} events</Tag>
-                )}
-                {sys.syncIntegrations && sys.syncIntegrations.length > 0 && (
-                  <Tag color={C.blue}>Sync · {sys.syncIntegrations.length} ports</Tag>
+                {IS_TEMPORAL_MODE ? (
+                  <>
+                    <Tag color={C.purple}>⏱️ Temporal</Tag>
+                    {TEMPORAL_ORCHESTRATION && (
+                      <Tag color={C.textMuted}>{TEMPORAL_ORCHESTRATION.namespace}</Tag>
+                    )}
+                    {TEMPORAL_WORKFLOWS && <Tag color={C.blue}>{TEMPORAL_WORKFLOWS.length} workflows</Tag>}
+                    {SAGA_WORKFLOWS && SAGA_WORKFLOWS.length > 0 && (
+                      <Tag color={C.accent}>🔄 {SAGA_WORKFLOWS.length} sagas</Tag>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {sys.events && sys.events.length > 0 && (
+                      <Tag color={C.gold}>Kafka · {sys.events.length} events</Tag>
+                    )}
+                    {sys.syncIntegrations && sys.syncIntegrations.length > 0 && (
+                      <Tag color={C.blue}>Sync · {sys.syncIntegrations.length} ports</Tag>
+                    )}
+                  </>
                 )}
                 <Tag color={C.purple}>{sys.modules.length} modules</Tag>
               </div>
@@ -1726,8 +2696,15 @@
           {/* Tab content */}
           <div style={{ maxWidth: 1100, margin: "0 auto", padding: "28px 24px" }}>
             {tab === "validation"   && <ValidationTab />}
-            {tab === "flows"        && <FlowSimulator />}
-            {tab === "architecture" && <ArchitectureTab />}
+            {/* Temporal-specific tabs */}
+            {IS_TEMPORAL_MODE && tab === "workflows"    && <WorkflowsTab />}
+            {IS_TEMPORAL_MODE && tab === "saga"         && <SagaAnalysisTab />}
+            {IS_TEMPORAL_MODE && tab === "activities"   && <ActivityCatalogTab />}
+            {IS_TEMPORAL_MODE && tab === "architecture" && <TemporalArchitectureTab />}
+            {/* Broker-mode tabs */}
+            {!IS_TEMPORAL_MODE && tab === "flows"        && <FlowSimulator />}
+            {!IS_TEMPORAL_MODE && tab === "architecture" && <ArchitectureTab />}
+            {/* Shared tabs */}
             {tab === "diagram"      && <DiagramTab />}
             {tab === "domain"       && DOMAIN_VALIDATION && <DomainTab />}
           </div>

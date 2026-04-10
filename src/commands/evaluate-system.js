@@ -10,6 +10,7 @@ const ora = require('ora');
 
 const { validateSystem } = require('../utils/system-validator');
 const { validateDomain } = require('../utils/domain-validator');
+const { validateTemporal } = require('../utils/temporal-validator');
 
 // ── Module icon heuristic ────────────────────────────────────────────────────
 
@@ -207,7 +208,554 @@ function buildEventFlows(systemConfig, modulesMap) {
   return flows;
 }
 
+// ── Temporal helpers ──────────────────────────────────────────────────────────
+
+function _camelCase(str) {
+  if (!str) return '';
+  return str.replace(/[-_ ]+(.)/g, (_, c) => c.toUpperCase()).replace(/^(.)/, (c) => c.toLowerCase());
+}
+function _pascalCase(str) {
+  if (!str) return '';
+  const c = _camelCase(str);
+  return c.charAt(0).toUpperCase() + c.slice(1);
+}
+
+/**
+ * Infers a human-readable role description for an activity step.
+ * Priority: domain.yaml description → auto-infer from name + type context.
+ */
+function inferActivityRole(actName, actDef, step, wfContext) {
+  if (actDef && actDef.description) return actDef.description;
+
+  const name = (actName || '').toLowerCase();
+  const isCompensation = actDef && actDef.isCompensation;
+
+  // Compensation activities
+  if (isCompensation || /^(release|refund|cancel|undo|revert|restore|rollback|mark.*cancel)/i.test(actName)) {
+    return `COMPENSATE: Deshace los efectos de la actividad principal en caso de fallo del workflow`;
+  }
+  // Async notification activities
+  if (step && step.type === 'async') {
+    return `NOTIFY: Envía notificación async (fire-and-forget) — no bloquea el workflow`;
+  }
+  // Read activities
+  if (/^(get|find|fetch|load|read|query|search|list)/i.test(actName)) {
+    const target = _pascalCase((step && step.target) || '');
+    return `READ: Obtiene datos de ${target} necesarios para los pasos siguientes del workflow`;
+  }
+  // Write activities
+  if (/^(create|make|build|generate|init)/i.test(actName)) {
+    const target = _pascalCase((step && step.target) || '');
+    return `WRITE: Crea un nuevo recurso en ${target}`;
+  }
+  if (/^(confirm|approve|activate|enable|process|execute)/i.test(actName)) {
+    const target = _pascalCase((step && step.target) || '');
+    return `WRITE: Confirma o actualiza estado en ${target}`;
+  }
+  if (/^(reserve|block|lock|hold|schedule|assign)/i.test(actName)) {
+    const target = _pascalCase((step && step.target) || '');
+    return `WRITE: Reserva o bloquea recurso en ${target}`;
+  }
+  if (/^(clear|clean|remove|purge|convert|mark)/i.test(actName)) {
+    const target = _pascalCase((step && step.target) || '');
+    return `WRITE: Actualiza o limpia datos en ${target}`;
+  }
+
+  return `Ejecuta lógica de negocio en módulo '${_pascalCase((step && step.target) || '')}'`;
+}
+
+/**
+ * Classifies an activity step into one of: READ / WRITE / COMPENSATE / NOTIFY
+ */
+function classifyActivityRole(actName, actDef, step) {
+  if (actDef && actDef.isCompensation) return 'COMPENSATE';
+  if (/^(release|refund|cancel|undo|revert|restore|rollback|mark.*cancel)/i.test(actName)) return 'COMPENSATE';
+  if (step && step.type === 'async') return 'NOTIFY';
+  if (/^(get|find|fetch|load|read|query|search|list)/i.test(actName)) return 'READ';
+  if (/^(notify|send|emit|alert|push|broadcast)/i.test(actName)) return 'NOTIFY';
+  return 'WRITE';
+}
+
+/**
+ * Calculates the LIFO compensation chain for a saga workflow.
+ * Returns an array of { stepNum, activityName, compensationName, targetModule, type }
+ * ordered chronologically (execution order); the LIFO rollback is the reverse.
+ */
+function buildSagaChain(wf) {
+  const steps = Array.isArray(wf.steps) ? wf.steps : [];
+  const chain = [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    if (!step.activity) continue;
+    chain.push({
+      stepNum: i + 1,
+      activityName: step.activity,
+      compensationName: step.compensation || null,
+      targetModule: step.target || null,
+      type: step.type || 'sync',
+      timeout: step.timeout || null,
+      isCompensable: !!(step.compensation),
+      canFail: step.type !== 'async',
+    });
+  }
+  return chain;
+}
+
+/**
+ * Resolves the source of each input field in a step:
+ * 'trigger' | 'step N: ActivityName' | 'unknown'
+ */
+function resolveInputSources(allSteps, currentIdx, triggerFields) {
+  const inputSources = {};
+  const available = {}; // fieldName → source label
+
+  // Seed with trigger/event fields
+  for (const f of triggerFields) {
+    available[f] = 'trigger';
+  }
+
+  for (let i = 0; i < currentIdx; i++) {
+    const prev = allSteps[i];
+    for (const o of (prev.output || [])) {
+      const oName = typeof o === 'string' ? o : o.name;
+      if (oName) available[oName] = `paso ${i + 1}: ${prev.activity}`;
+    }
+  }
+
+  const current = allSteps[currentIdx];
+  for (const inp of (current.input || [])) {
+    const iName = typeof inp === 'string' ? inp : inp.name;
+    if (iName) inputSources[iName] = available[iName] || 'no resuelto';
+  }
+
+  return inputSources;
+}
+
+/**
+ * Builds which downstream steps consume each output field of a given step.
+ */
+function buildOutputConsumers(allSteps, currentIdx) {
+  const current = allSteps[currentIdx];
+  const consumers = {};
+  const outputs = (current.output || []).map((o) => (typeof o === 'string' ? o : o.name)).filter(Boolean);
+
+  for (const outField of outputs) {
+    consumers[outField] = [];
+    for (let j = currentIdx + 1; j < allSteps.length; j++) {
+      const downstep = allSteps[j];
+      const inputs = (downstep.input || []).map((i) => (typeof i === 'string' ? i : i.name));
+      if (inputs.includes(outField)) {
+        consumers[outField].push(`paso ${j + 1}: ${downstep.activity}`);
+      }
+    }
+  }
+  return consumers;
+}
+
+/**
+ * Calculates the module role based on its participation in workflows.
+ * Orchestrator: has trigger module; DataProvider: only read activities; Executor: write/compensate; Reactor: only async/notify
+ */
+function calculateModuleRoles(systemConfig, domainConfigs) {
+  const roles = {};
+  const rawWorkflows = systemConfig.workflows || [];
+  const modules = systemConfig.modules || [];
+
+  for (const mod of modules) {
+    const modName = _camelCase(mod.name);
+    roles[modName] = { name: modName, roles: new Set(), label: mod.name };
+  }
+
+  for (const wf of rawWorkflows) {
+    const trigMod = wf.trigger && wf.trigger.module ? _camelCase(wf.trigger.module) : null;
+    if (trigMod && roles[trigMod]) roles[trigMod].roles.add('Orchestrator');
+
+    for (const step of (wf.steps || [])) {
+      const targetMod = step.target ? _camelCase(step.target) : trigMod;
+      if (!targetMod || !roles[targetMod]) continue;
+
+      const actName = (step.activity || '').toLowerCase();
+      if (step.type === 'async') {
+        roles[targetMod].roles.add('Reactor');
+      } else if (/^(get|find|fetch|load|read|query|search|list)/.test(actName)) {
+        roles[targetMod].roles.add('DataProvider');
+      } else {
+        roles[targetMod].roles.add('Executor');
+      }
+    }
+  }
+
+  // Convert Sets to sorted arrays
+  const result = {};
+  for (const [modName, data] of Object.entries(roles)) {
+    const rolesArr = [...data.roles];
+    result[modName] = {
+      name: modName,
+      label: data.label,
+      roles: rolesArr,
+      primaryRole: rolesArr.includes('Orchestrator') ? 'Orchestrator'
+        : rolesArr.includes('Executor') ? 'Executor'
+        : rolesArr.includes('DataProvider') ? 'DataProvider'
+        : rolesArr.includes('Reactor') ? 'Reactor'
+        : 'Standalone',
+      roleLabel: rolesArr.length > 0 ? rolesArr.join(' + ') : 'Standalone',
+    };
+  }
+  return result;
+}
+
+/**
+ * Builds the activity catalog: all activities across all modules with usage info.
+ */
+function buildActivityCatalog(systemConfig, domainConfigs, modulesMap) {
+  const rawWorkflows = systemConfig.workflows || [];
+  const localWorkflowsByModule = {};
+
+  // Collect local workflows
+  for (const [modName, domainCfg] of Object.entries(domainConfigs)) {
+    if (domainCfg && Array.isArray(domainCfg.workflows)) {
+      localWorkflowsByModule[_camelCase(modName)] = domainCfg.workflows;
+    }
+  }
+
+  // Build used-in index: "modName::ActivityName" → ["WorkflowName", ...]
+  const usedIn = {};
+  for (const wf of rawWorkflows) {
+    const trigMod = wf.trigger && wf.trigger.module ? _camelCase(wf.trigger.module) : null;
+    for (const step of (wf.steps || [])) {
+      if (!step.activity) continue;
+      const targetMod = step.target ? _camelCase(step.target) : trigMod;
+      const key = `${targetMod}::${_pascalCase(step.activity)}`;
+      if (!usedIn[key]) usedIn[key] = [];
+      usedIn[key].push(wf.name);
+
+      if (step.compensation) {
+        const compKey = `${targetMod}::${_pascalCase(step.compensation)}`;
+        if (!usedIn[compKey]) usedIn[compKey] = [];
+        usedIn[compKey].push(`${wf.name} (compensation)`);
+      }
+    }
+  }
+  for (const [modName, localWfs] of Object.entries(localWorkflowsByModule)) {
+    for (const wf of localWfs) {
+      for (const step of (wf.steps || [])) {
+        if (!step.activity) continue;
+        const key = `${modName}::${_pascalCase(step.activity)}`;
+        if (!usedIn[key]) usedIn[key] = [];
+        usedIn[key].push(`${wf.name} (local)`);
+      }
+    }
+  }
+
+  // Build catalog entries
+  const catalog = [];
+  let compensationNames = new Set();
+
+  // First pass: collect compensation names
+  for (const [, domainCfg] of Object.entries(domainConfigs)) {
+    for (const act of (domainCfg?.activities || [])) {
+      if (act.compensation) compensationNames.add(_pascalCase(act.compensation));
+    }
+  }
+
+  for (const [modName, domainCfg] of Object.entries(domainConfigs)) {
+    if (!domainCfg || !Array.isArray(domainCfg.activities)) continue;
+    const modKey = _camelCase(modName);
+
+    for (const act of domainCfg.activities) {
+      const actPascal = _pascalCase(act.name);
+      const key = `${modKey}::${actPascal}`;
+      const usedInWorkflows = usedIn[key] || [];
+      const isCompensation = compensationNames.has(actPascal);
+      const role = classifyActivityRole(act.name, { isCompensation }, null);
+
+      catalog.push({
+        name: actPascal,
+        module: modKey,
+        moduleLabel: modulesMap[modKey]?.label || modKey,
+        type: (act.type || 'light').toLowerCase(),
+        role,
+        description: act.description || inferActivityRole(act.name, { isCompensation }, null, {}),
+        usedInWorkflows,
+        isCompensation,
+        isOrphan: usedInWorkflows.length === 0,
+        hasRetryPolicy: !!(act.retryPolicy),
+        retryPolicy: act.retryPolicy || null,
+        timeout: act.timeout || null,
+        inputFields: (act.input || []).map((f) => (typeof f === 'string' ? { name: f, type: 'String' } : f)),
+        outputFields: (act.output || []).map((f) => (typeof f === 'string' ? { name: f, type: 'String' } : f)),
+        hasOutput: !!(act.output && act.output.length > 0),
+        nestedTypes: act.nestedTypes || [],
+        externalTypes: act.externalTypes || [],
+        compensation: act.compensation || null,
+      });
+    }
+  }
+
+  return catalog;
+}
+
+/**
+ * Builds the external type dependency graph.
+ * Returns array of { consumerModule, activityName, typeName, sourceModule }
+ */
+function buildExternalTypeDeps(domainConfigs) {
+  const deps = [];
+  for (const [modName, domainCfg] of Object.entries(domainConfigs)) {
+    if (!domainCfg || !Array.isArray(domainCfg.activities)) continue;
+    for (const act of domainCfg.activities) {
+      for (const ext of (act.externalTypes || [])) {
+        deps.push({
+          consumerModule: _camelCase(modName),
+          activityName: _pascalCase(act.name),
+          typeName: _pascalCase(ext.name || ext),
+          sourceModule: _camelCase(ext.module || ext),
+        });
+      }
+    }
+  }
+  return deps;
+}
+
+/**
+ * Builds queue topology for each module.
+ */
+function buildQueueTopology(systemConfig, domainConfigs) {
+  const rawWorkflows = systemConfig.workflows || [];
+  const modules = systemConfig.modules || [];
+  const topology = {};
+
+  const participating = new Set();
+  for (const wf of rawWorkflows) {
+    if (wf.trigger && wf.trigger.module) participating.add(_camelCase(wf.trigger.module));
+    for (const step of (wf.steps || [])) {
+      if (step.target) participating.add(_camelCase(step.target));
+    }
+  }
+  // Also modules with activities[] in domain.yaml
+  for (const [modName, domainCfg] of Object.entries(domainConfigs)) {
+    if (domainCfg && Array.isArray(domainCfg.activities) && domainCfg.activities.length > 0) {
+      participating.add(_camelCase(modName));
+    }
+    if (domainCfg && Array.isArray(domainCfg.workflows) && domainCfg.workflows.length > 0) {
+      participating.add(_camelCase(modName));
+    }
+  }
+
+  for (const mod of modules) {
+    const modKey = _camelCase(mod.name);
+    if (!participating.has(modKey)) continue;
+    const snake = mod.name.toUpperCase().replace(/-/g, '_');
+    topology[modKey] = {
+      name: modKey,
+      label: mod.name,
+      flowQueue: `${snake}_WORKFLOW_QUEUE`,
+      heavyQueue: `${snake}_HEAVY_TASK_QUEUE`,
+      lightQueue: `${snake}_LIGHT_TASK_QUEUE`,
+    };
+  }
+
+  return topology;
+}
+
+/**
+ * Enriches workflows with resolved data flow, role descriptions and saga analysis.
+ */
+function enrichWorkflows(rawWorkflows, domainConfigs, modulesMap) {
+  const activityDefs = {};
+  for (const [modName, domainCfg] of Object.entries(domainConfigs)) {
+    if (!domainCfg || !Array.isArray(domainCfg.activities)) continue;
+    const modKey = _camelCase(modName);
+    const compensationNames = new Set();
+    for (const act of domainCfg.activities) {
+      if (act.compensation) compensationNames.add(_pascalCase(act.compensation));
+    }
+    for (const act of domainCfg.activities) {
+      activityDefs[`${modKey}::${_pascalCase(act.name)}`] = {
+        ...act,
+        isCompensation: compensationNames.has(_pascalCase(act.name)),
+      };
+    }
+  }
+
+  return rawWorkflows.map((wf) => {
+    const triggerModule = wf.trigger && wf.trigger.module ? _camelCase(wf.trigger.module) : null;
+    const steps = Array.isArray(wf.steps) ? wf.steps : [];
+
+    // Approximate trigger fields from domain events
+    const triggerFields = [];
+    if (wf.trigger && wf.trigger.on && triggerModule && domainConfigs[triggerModule]) {
+      const domainCfg = domainConfigs[triggerModule];
+      for (const agg of (domainCfg.aggregates || [])) {
+        for (const ev of (agg.events || [])) {
+          const evLower = (ev.name || '').toLowerCase().replace(/event$/, '');
+          const trigLower = (wf.trigger.on || '').toLowerCase().replace(/event$/, '');
+          if (evLower.includes(trigLower) || trigLower.includes(evLower)) {
+            for (const f of (ev.fields || [])) {
+              if (f && f.name) triggerFields.push(f.name);
+            }
+          }
+        }
+      }
+    }
+
+    const enrichedSteps = steps.map((step, idx) => {
+      if (!step.activity) return { ...step, _stepNum: idx + 1, _isWait: true };
+
+      const actPascal = _pascalCase(step.activity);
+      const targetMod = step.target ? _camelCase(step.target) : triggerModule;
+      const actKey = `${targetMod}::${actPascal}`;
+      const actDef = activityDefs[actKey] || null;
+
+      const modInfo = modulesMap[targetMod] || { label: targetMod, icon: '📁', color: '#888' };
+      const roleClass = classifyActivityRole(step.activity, actDef, step);
+      const roleDesc = inferActivityRole(step.activity, actDef, step, { wfName: wf.name });
+      const inputSources = resolveInputSources(steps, idx, triggerFields);
+      const outputConsumers = buildOutputConsumers(steps, idx);
+
+      return {
+        _stepNum: idx + 1,
+        _isWait: false,
+        activity: step.activity,
+        activityPascal: actPascal,
+        target: targetMod,
+        targetLabel: modInfo.label,
+        targetIcon: modInfo.icon,
+        targetColor: modInfo.color,
+        type: step.type || 'sync',
+        activityType: (actDef && actDef.type) ? actDef.type.toLowerCase() : 'light',
+        timeout: step.timeout || null,
+        retryPolicy: (actDef && actDef.retryPolicy) || null,
+        compensation: step.compensation || null,
+        roleClass,
+        roleDesc,
+        inputs: (step.input || []).map((f) => {
+          const fName = typeof f === 'string' ? f : f.name;
+          return { name: fName, source: inputSources[fName] || 'trigger' };
+        }),
+        outputs: (step.output || []).map((f) => {
+          const fName = typeof f === 'string' ? f : f.name;
+          return { name: fName, consumers: outputConsumers[fName] || [] };
+        }),
+        formalOutputCount: actDef ? (actDef.output || []).length : 0,
+      };
+    });
+
+    const sagaChain = wf.saga === true ? buildSagaChain(wf) : null;
+
+    // Build data flow table: columns = steps (sync only), rows = all field names
+    const dataFlowFields = new Set();
+    const dataFlowSources = {}; // fieldName → { origin: 'trigger'|stepIdx, label }
+    for (const f of triggerFields) {
+      dataFlowFields.add(f);
+      dataFlowSources[f] = { origin: 'trigger', label: 'trigger' };
+    }
+    for (let i = 0; i < enrichedSteps.length; i++) {
+      for (const o of (enrichedSteps[i].outputs || [])) {
+        if (o.name) {
+          dataFlowFields.add(o.name);
+          dataFlowSources[o.name] = { origin: i, label: `paso ${i + 1}: ${steps[i].activity}` };
+        }
+      }
+    }
+
+    const dataFlowTable = [...dataFlowFields].map((field) => {
+      const source = dataFlowSources[field] || { origin: 'trigger', label: 'trigger' };
+      const consumed = enrichedSteps
+        .map((s, idx) => ({ idx, step: s }))
+        .filter(({ step }) => (step.inputs || []).some((inp) => inp.name === field))
+        .map(({ idx, step }) => ({ stepNum: idx + 1, activity: step.activity || '(wait)' }));
+      return { field, source: source.label, consumed };
+    });
+
+    return {
+      name: wf.name,
+      trigger: wf.trigger || null,
+      triggerModule,
+      triggerModuleLabel: modulesMap[triggerModule]?.label || triggerModule,
+      triggerModuleIcon: modulesMap[triggerModule]?.icon || '📁',
+      triggerModuleColor: modulesMap[triggerModule]?.color || '#888',
+      saga: wf.saga === true,
+      taskQueue: wf.taskQueue || null,
+      steps: enrichedSteps,
+      sagaChain,
+      dataFlowTable,
+      triggerFields,
+      stepCount: steps.length,
+      asyncStepCount: steps.filter((s) => s.type === 'async').length,
+      compensableStepCount: steps.filter((s) => !!s.compensation).length,
+    };
+  });
+}
+
+/**
+ * Main Temporal report data extraction function.
+ * Returns the full temporalData object passed to the HTML template.
+ */
+function extractTemporalReportData(systemConfig, domainConfigs, modulesMap) {
+  const rawWorkflows = systemConfig.workflows || [];
+  const orchestration = systemConfig.orchestration || {};
+
+  const moduleRoles = calculateModuleRoles(systemConfig, domainConfigs);
+  const activityCatalog = buildActivityCatalog(systemConfig, domainConfigs, modulesMap);
+  const externalTypeDeps = buildExternalTypeDeps(domainConfigs);
+  const queueTopology = buildQueueTopology(systemConfig, domainConfigs);
+  const workflows = enrichWorkflows(rawWorkflows, domainConfigs, modulesMap);
+
+  // Local workflows (from individual domain.yaml files)
+  const localWorkflows = [];
+  for (const [modName, domainCfg] of Object.entries(domainConfigs)) {
+    if (!domainCfg || !Array.isArray(domainCfg.workflows)) continue;
+    const modKey = _camelCase(modName);
+    for (const wf of domainCfg.workflows) {
+      const enriched = enrichWorkflows([wf], domainConfigs, modulesMap)[0];
+      localWorkflows.push({ ...enriched, _ownerModule: modKey, _ownerLabel: modulesMap[modKey]?.label || modKey, _isLocal: true });
+    }
+  }
+
+  // Saga workflows only
+  const sagaWorkflows = workflows.filter((wf) => wf.saga);
+
+  return {
+    isTemporalMode: true,
+    orchestration: {
+      target: orchestration.temporal?.target || 'localhost:7233',
+      namespace: orchestration.temporal?.namespace || 'default',
+      engine: 'temporal',
+    },
+    workflows,
+    localWorkflows,
+    sagaWorkflows,
+    activityCatalog,
+    moduleRoles,
+    externalTypeDeps,
+    queueTopology,
+  };
+}
+
 // ── Data extraction ──────────────────────────────────────────────────────────
+
+// Builds the shared color/icon modules map used by multiple extractors
+function buildModulesMap(systemConfig) {
+  const modulesConfig = systemConfig.modules || [];
+  const modulesMap = {};
+  for (let i = 0; i < modulesConfig.length; i++) {
+    const mod = modulesConfig[i];
+    const key = _camelCase(mod.name);
+    modulesMap[key] = {
+      id: mod.name,
+      label: toPascalCase(mod.name),
+      icon: assignIcon(mod.name),
+      color: COLOR_PALETTE[i % COLOR_PALETTE.length],
+      desc: mod.description || mod.name,
+    };
+    // Also index by raw name for compatibility
+    if (mod.name !== key) {
+      modulesMap[mod.name] = modulesMap[key];
+    }
+  }
+  return modulesMap;
+}
 
 function extractReportData(systemConfig, validation, domainValidation) {
   const modulesConfig = systemConfig.modules || [];
@@ -215,17 +763,7 @@ function extractReportData(systemConfig, validation, domainValidation) {
   const syncIntegrations = (systemConfig.integrations || {}).sync || [];
 
   // Build modules map with color + icon
-  const modulesMap = {};
-  for (let i = 0; i < modulesConfig.length; i++) {
-    const mod = modulesConfig[i];
-    modulesMap[mod.name] = {
-      id: mod.name,
-      label: toPascalCase(mod.name),
-      icon: assignIcon(mod.name),
-      color: COLOR_PALETTE[i % COLOR_PALETTE.length],
-      desc: mod.description || mod.name,
-    };
-  }
+  const modulesMap = buildModulesMap(systemConfig);
 
   // Normalize events (consumers can be strings or objects with .module)
   const events = asyncEvents.map((ev) => ({
@@ -252,9 +790,18 @@ function extractReportData(systemConfig, validation, domainValidation) {
   // Auto-generate flows
   const flows = buildEventFlows(systemConfig, modulesMap);
 
+  // Deduplicate modules by id (buildModulesMap indexes both camelCase and raw-name keys,
+  // so Object.values() can return the same module object twice for hyphenated names like "shopping-carts")
+  const seenModIds = new Set();
+  const modulesList = Object.values(modulesMap).filter((m) => {
+    if (seenModIds.has(m.id)) return false;
+    seenModIds.add(m.id);
+    return true;
+  });
+
   return {
     systemName: (systemConfig.system || {}).name || 'eva4j system',
-    modules: Object.values(modulesMap),
+    modules: modulesList,
     events,
     syncIntegrations: syncList,
     endpoints,
@@ -332,8 +879,41 @@ async function evaluateSystemCommand(type, options = {}) {
     domainValidation = validateDomain(domainConfigs, systemConfig);
   }
 
-  // ── 3. Extract report data ──────────────────────────────────────────────
+  // ── 3. Detect orchestration engine + extract report data ────────────────
+  const orchestration = systemConfig.orchestration || {};
+  const isTemporalMode = !!(orchestration.enabled && orchestration.engine === 'temporal');
+
   const reportData = extractReportData(systemConfig, validation, domainValidation);
+  reportData.isTemporalMode = isTemporalMode;
+
+  if (isTemporalMode) {
+    const modulesMap = buildModulesMap(systemConfig);
+    const temporalCtx = extractTemporalReportData(systemConfig, domainConfigs, modulesMap);
+    const temporalValidation = validateTemporal(systemConfig, domainConfigs, temporalCtx);
+
+    Object.assign(reportData, {
+      orchestration: temporalCtx.orchestration,
+      workflows: temporalCtx.workflows,
+      localWorkflows: temporalCtx.localWorkflows,
+      sagaWorkflows: temporalCtx.sagaWorkflows,
+      activityCatalog: temporalCtx.activityCatalog,
+      moduleRoles: temporalCtx.moduleRoles,
+      externalTypeDeps: temporalCtx.externalTypeDeps,
+      queueTopology: temporalCtx.queueTopology,
+      temporalValidation,
+    });
+
+    if (temporalValidation) {
+      console.log();
+      console.log(chalk.bold('⏱️  Temporal Validation'));
+      console.log(chalk.gray('─'.repeat(40)));
+      const tv = temporalValidation.summary;
+      console.log(`  ${chalk.red('🔴 Errors:')}     ${chalk.red.bold(tv.errors)}`);
+      console.log(`  ${chalk.yellow('🟡 Warnings:')}   ${chalk.yellow.bold(tv.warnings)}`);
+      console.log(`  ${chalk.cyan('🔵 Info:')}       ${chalk.cyan.bold(tv.info)}`);
+      console.log(`  ${chalk.green('🟢 OK:')}         ${chalk.green.bold(tv.ok)}`);
+    }
+  }
 
   // ── 4. Render HTML ──────────────────────────────────────────────────────
   const templatePath = path.join(__dirname, '../../templates/evaluate/report.html.ejs');
