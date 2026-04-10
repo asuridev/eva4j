@@ -83,7 +83,7 @@ for (const block of renderBlocks) {
 <% } -%>
 <% const optIndent = step.isOptional ? indent + '    ' : indent; -%>
 <% if (step.hasOutput) { -%>
-<%= optIndent %>var <%= step.activityCamel %>Result = <%= step.activityCamel %>Activity.execute(<% if (step.hasInput) { %>
+<%= optIndent %><%= step.activityName %>Output <%= step.activityCamel %>Result = <%= step.activityCamel %>Activity.execute(<% if (step.hasInput) { %>
 <%= optIndent %>    new <%= step.activityName %>Input(<%= step.inputSources.map(src => src.source === 'input' ? `input.${src.fieldName}()` : `${src.varName}.${src.fieldName}()`).join(', ') %>)<% } %>);
 <% } else { -%>
 <%= optIndent %><%= step.activityCamel %>Activity.execute(<% if (step.hasInput) { %>
@@ -118,7 +118,7 @@ for (const block of renderBlocks) {
 <%= indent %>// Wait for parallel results
 <% for (const step of block.steps) { -%>
 <% if (step.hasOutput) { -%>
-<%= indent %>var <%= step.activityCamel %>Result = <%= step.activityCamel %>Promise.get();
+<%= indent %><%= step.activityName %>Output <%= step.activityCamel %>Result = <%= step.activityCamel %>Promise.get();
 <% } else { -%>
 <%= indent %><%= step.activityCamel %>Promise.get();
 <% } -%>

@@ -1,8 +1,10 @@
 ---
 description: "Implementar todos los casos de uso pendientes de un bounded context. Detecta handlers con UnsupportedOperationException y los implementa uno a uno siguiendo la arquitectura DDD/hexagonal del proyecto."
 argument-hint: "Nombre del módulo (ej: product-catalog, orders, customers)"
-mode: "agent"
+agent: "agent"
 ---
+
+> **Skill requerido:** Tu primera acción DEBE ser leer el archivo `.agents/skills/implement-use-case/SKILL.md` usando `read_file`. Contiene los patrones, reglas de implementación y ejemplos de código que deben seguirse. No implementes nada antes de haberlo leído.
 
 Vas a implementar **todos los casos de uso pendientes** del módulo `$ARGUMENTS` en este proyecto eva4j.
 

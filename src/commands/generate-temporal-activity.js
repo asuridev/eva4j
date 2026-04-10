@@ -75,11 +75,38 @@ async function parseAggregateInfo(domainYamlPath) {
     const rootFieldTypes = new Map(root.fields.map((f) => [f.name, f.type || 'String']));
     const idField = root.fields.find((f) => f.name === 'id');
 
+    // Build voFieldsMap: PascalCase VO name → raw fields array
+    const voFieldsMap = new Map();
+    const voList = Array.isArray(agg.valueObjects) ? agg.valueObjects : [];
+    for (const vo of voList) {
+      voFieldsMap.set(toPascalCase(vo.name), Array.isArray(vo.fields) ? vo.fields : []);
+    }
+
+    // Build lazyRelationshipFields: camelCase field name → { relType, target, jpaFieldName }
+    // OneToMany / ManyToMany are LAZY by JPA default; OneToOne / ManyToOne are EAGER by default.
+    const lazyRelationshipFields = new Map();
+    const relationships = Array.isArray(root.relationships) ? root.relationships : [];
+    for (const rel of relationships) {
+      const relType = (rel.type || '').trim();
+      const fetchType = (rel.fetch || '').toUpperCase();
+      const isToMany = relType === 'OneToMany' || relType === 'ManyToMany';
+      // LAZY when: *ToMany (unless explicitly EAGER) OR any type explicitly marked LAZY
+      const isLazy = isToMany ? fetchType !== 'EAGER' : fetchType === 'LAZY';
+      if (!isLazy) continue;
+      const targetPascal = toPascalCase(rel.target || '');
+      if (!targetPascal) continue;
+      const fieldBase = targetPascal.charAt(0).toLowerCase() + targetPascal.slice(1);
+      const fieldName = isToMany ? fieldBase + 's' : fieldBase; // simple plural for *ToMany
+      lazyRelationshipFields.set(fieldName, { relType, target: targetPascal, jpaFieldName: fieldName });
+    }
+
     return {
       aggregateName,
       rootEntityName,
       rootFieldNames,
       rootFieldTypes,
+      voFieldsMap,
+      lazyRelationshipFields,
       idFieldName: idField ? idField.name : 'id',
       idFieldType: idField ? (idField.type || 'String') : 'String',
     };
@@ -89,15 +116,20 @@ async function parseAggregateInfo(domainYamlPath) {
 
 /**
  * Check if a field name represents an entity ID for the given aggregate.
- * Matches: 'id', '{entityName}Id' (e.g. 'orderId' for Order), '{aggregateName}Id'.
+ * Matches: 'id', '{entityName}Id' (e.g. 'shoppingCartId' for ShoppingCart),
+ * or the abbreviated last-word form: '{lastWord}Id' (e.g. 'cartId' for ShoppingCart).
  * @param {string} fieldName
  * @param {object} aggregateInfo
  * @returns {boolean}
  */
 function isIdField(fieldName, aggregateInfo) {
   const entityLower = aggregateInfo.rootEntityName.charAt(0).toLowerCase() + aggregateInfo.rootEntityName.slice(1);
+  // Split camelCase to get the last word: 'shoppingCart' → ['shopping','Cart'] → 'cart'
+  const nameParts = entityLower.split(/(?=[A-Z])/);
+  const lastWord = nameParts[nameParts.length - 1].toLowerCase();
   return fieldName === 'id'
-    || fieldName === `${entityLower}Id`;
+    || fieldName === `${entityLower}Id`
+    || (nameParts.length > 1 && fieldName === `${lastWord}Id`);
 }
 
 /**
@@ -148,6 +180,13 @@ function buildActivityContext(activity, packageName, moduleName, shared = false,
     const entityLower = aggregateInfo.rootEntityName.charAt(0).toLowerCase() + aggregateInfo.rootEntityName.slice(1);
     const entityIdAlias = `${entityLower}Id`; // e.g. 'customerId' for Customer
     const SIMPLE_TYPES = new Set(['String', 'Integer', 'Long', 'Boolean', 'BigDecimal', 'LocalDate', 'LocalDateTime', 'LocalTime', 'Instant', 'UUID', 'Double', 'Float']);
+    // Build nestedTypesMap: PascalCase name → raw fields array (for VO→nestedType detection)
+    const nestedTypesMap = new Map();
+    if (Array.isArray(activity.nestedTypes)) {
+      for (const nt of activity.nestedTypes) {
+        nestedTypesMap.set(toPascalCase(nt.name), Array.isArray(nt.fields) ? nt.fields : []);
+      }
+    }
     const outputMappings = outputFields.map((f) => {
       // Match {entityName}Id → entity.getId()
       if (f.name === entityIdAlias && aggregateInfo.rootFieldNames.has('id')) {
@@ -155,19 +194,67 @@ function buildActivityContext(activity, packageName, moduleName, shared = false,
       }
       if (aggregateInfo.rootFieldNames.has(f.name)) {
         const getter = 'entity.get' + f.name.charAt(0).toUpperCase() + f.name.slice(1) + '()';
-        // Enum/VO → String: append .name() when output expects String but entity field is not a simple type
         const entityFieldType = aggregateInfo.rootFieldTypes ? aggregateInfo.rootFieldTypes.get(f.name) : null;
+        // Enum/VO → String: append .name() when output expects String but entity field is not a simple type
         if (f.javaType === 'String' && entityFieldType && !SIMPLE_TYPES.has(entityFieldType)) {
           return { fieldName: f.name, accessor: getter + '.name()' };
+        }
+        // VO → nestedType: when entity field is a VO and output expects a declared nestedType
+        const voFields = entityFieldType && aggregateInfo.voFieldsMap ? aggregateInfo.voFieldsMap.get(entityFieldType) : null;
+        const ntFields = nestedTypesMap.get(f.javaType);
+        if (voFields && ntFields) {
+          const ntArgs = ntFields.map((ntField) => {
+            const voField = voFields.find((vf) => vf.name === ntField.name);
+            return voField
+              ? `${getter}.get${ntField.name.charAt(0).toUpperCase() + ntField.name.slice(1)}()`
+              : `null /* TODO: derive ${ntField.name} */`;
+          });
+          return {
+            fieldName: f.name,
+            accessor: f.name,
+            preDeclaration: { varType: f.javaType, varName: f.name, getter, ntArgs },
+          };
         }
         return { fieldName: f.name, accessor: getter };
       }
       return { fieldName: f.name, accessor: `null /* TODO: derive ${f.name} from entity */` };
     });
+    const voMappingImports = outputMappings
+      .filter((m) => m.preDeclaration)
+      .map((m) => (shared
+        ? `import ${packageName}.shared.domain.contracts.${moduleName}.${m.preDeclaration.varType};`
+        : `import ${packageName}.${moduleName}.application.dtos.temporal.${m.preDeclaration.varType};`));
+
+    // ── Eager load detection ──────────────────────────────────────────────
+    // If any output field is a List<...> whose name matches a LAZY relationship,
+    // we must use findByIdWith{Field} (JOIN FETCH) instead of findById.
+    let needsEagerLoad = false;
+    let eagerLoadField = null;
+    const lazyMap = aggregateInfo.lazyRelationshipFields;
+    if (lazyMap && lazyMap.size > 0) {
+      for (const f of outputFields) {
+        if (!f.javaType.startsWith('List<')) continue;
+        for (const [lazyFieldName, lazyInfo] of lazyMap.entries()) {
+          const lazyFieldPascal = lazyFieldName.charAt(0).toUpperCase() + lazyFieldName.slice(1);
+          const outputFieldPascal = f.name.charAt(0).toUpperCase() + f.name.slice(1);
+          // Direct name match OR the lazy field name ends with the output field name (PascalCase suffix)
+          if (f.name === lazyFieldName || lazyFieldPascal.endsWith(outputFieldPascal)) {
+            needsEagerLoad = true;
+            eagerLoadField = { jpaFieldName: lazyInfo.jpaFieldName, fieldPascal: lazyFieldPascal };
+            break;
+          }
+        }
+        if (needsEagerLoad) break;
+      }
+    }
+
     queryMeta = {
       aggregateName: aggregateInfo.aggregateName,
       idFieldAccessor: idAccessor,
       outputMappings,
+      voMappingImports,
+      needsEagerLoad,
+      eagerLoadField,
     };
   }
 
@@ -507,6 +594,76 @@ async function collectExternalTypeRefs(projectDir) {
   return refs;
 }
 
+/**
+ * Inject a `findByIdWith{Field}` method (with JOIN FETCH) into the 3 repository
+ * files when a query activity needs eager loading of a LAZY relationship.
+ * Idempotent: skips injection if the method already exists in the file.
+ *
+ * @param {object} actCtx   - Activity context (must have queryMeta.eagerLoadField)
+ * @param {string} moduleBasePath
+ * @param {string} packageName
+ * @param {string} moduleName
+ */
+async function injectEagerLoadMethods(actCtx, moduleBasePath, packageName, moduleName) {
+  const { aggregateName, eagerLoadField } = actCtx.queryMeta;
+  const { jpaFieldName, fieldPascal } = eagerLoadField;
+  const methodName = `findByIdWith${fieldPascal}`;
+  const entityLower = aggregateName.charAt(0).toLowerCase() + aggregateName.slice(1);
+
+  // 1. domain/repositories/{Entity}Repository.java
+  const repoPath = path.join(moduleBasePath, 'domain', 'repositories', `${aggregateName}Repository.java`);
+  if (await fs.pathExists(repoPath)) {
+    let content = await fs.readFile(repoPath, 'utf-8');
+    if (!content.includes(methodName)) {
+      const lastBrace = content.lastIndexOf('}');
+      const injection = `\n    Optional<${aggregateName}> ${methodName}(String id);\n`;
+      content = content.slice(0, lastBrace) + injection + content.slice(lastBrace);
+      await fs.writeFile(repoPath, content, 'utf-8');
+    }
+  }
+
+  // 2. infrastructure/database/repositories/{Entity}JpaRepository.java
+  const jpaRepoPath = path.join(moduleBasePath, 'infrastructure', 'database', 'repositories', `${aggregateName}JpaRepository.java`);
+  if (await fs.pathExists(jpaRepoPath)) {
+    let content = await fs.readFile(jpaRepoPath, 'utf-8');
+    if (!content.includes(methodName)) {
+      // Inject @Query and @Param imports if missing
+      const queryImport = 'import org.springframework.data.jpa.repository.Query;';
+      const paramImport = 'import org.springframework.data.repository.query.Param;';
+      if (!content.includes(queryImport)) {
+        content = content.replace(/^(import .+;)$/m, `$1\n${queryImport}`);
+      }
+      if (!content.includes(paramImport)) {
+        content = content.replace(/^(import .+;)$/m, `$1\n${paramImport}`);
+      }
+      const lastBrace = content.lastIndexOf('}');
+      const queryStr = `SELECT ${entityLower} FROM ${aggregateName}Jpa ${entityLower} JOIN FETCH ${entityLower}.${jpaFieldName} WHERE ${entityLower}.id = :id`;
+      const injection = `\n    @Query("${queryStr}")\n    Optional<${aggregateName}Jpa> ${methodName}(@Param("id") String id);\n`;
+      content = content.slice(0, lastBrace) + injection + content.slice(lastBrace);
+      await fs.writeFile(jpaRepoPath, content, 'utf-8');
+    }
+  }
+
+  // 3. infrastructure/database/repositories/{Entity}RepositoryImpl.java
+  const implPath = path.join(moduleBasePath, 'infrastructure', 'database', 'repositories', `${aggregateName}RepositoryImpl.java`);
+  if (await fs.pathExists(implPath)) {
+    let content = await fs.readFile(implPath, 'utf-8');
+    if (!content.includes(methodName)) {
+      const lastBrace = content.lastIndexOf('}');
+      const injection = [
+        '',
+        '    @Override',
+        `    public Optional<${aggregateName}> ${methodName}(String id) {`,
+        `        return jpaRepository.${methodName}(id).map(mapper::toDomain);`,
+        '    }',
+        '',
+      ].join('\n');
+      content = content.slice(0, lastBrace) + injection + content.slice(lastBrace);
+      await fs.writeFile(implPath, content, 'utf-8');
+    }
+  }
+}
+
 async function generateFromYaml(yamlActivities, activityName, ctx) {
   const { projectDir, packageName, packagePath, moduleName, moduleBasePath, writeOptions } = ctx;
 
@@ -630,6 +787,11 @@ async function generateFromYaml(yamlActivities, activityName, ctx) {
         actCtx,
         writeOptions
       );
+
+      // Inject eager-load repository methods when a LAZY relationship is projected
+      if (actCtx.isQueryActivity && actCtx.queryMeta && actCtx.queryMeta.needsEagerLoad) {
+        await injectEagerLoadMethods(actCtx, moduleBasePath, packageName, moduleName);
+      }
 
       generated.push(actCtx);
     }

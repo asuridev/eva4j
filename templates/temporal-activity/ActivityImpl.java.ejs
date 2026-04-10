@@ -22,6 +22,11 @@ import <%= packageName %>.<%= moduleName %>.domain.interfaces.<%= activityCatego
 import <%= packageName %>.<%= moduleName %>.domain.models.entities.<%= queryMeta.aggregateName %>;
 import <%= packageName %>.<%= moduleName %>.domain.repositories.<%= queryMeta.aggregateName %>Repository;
 import <%= packageName %>.shared.domain.customExceptions.NotFoundException;
+<% if (queryMeta.voMappingImports && queryMeta.voMappingImports.length > 0) { -%>
+<% queryMeta.voMappingImports.forEach(imp => { -%>
+<%- imp %>
+<% }); -%>
+<% } -%>
 <% } %>
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,8 +44,22 @@ public class <%= activityPascalCase %>ActivityImpl implements <%= activityPascal
     @Override
     @Transactional(readOnly = true)
     public <%= activityPascalCase %>Output execute(<%= activityPascalCase %>Input input) {
-        <%= queryMeta.aggregateName %> entity = repository.findById(<%= queryMeta.idFieldAccessor %>)
+<% const findMethod = (queryMeta.needsEagerLoad && queryMeta.eagerLoadField)
+    ? 'findByIdWith' + queryMeta.eagerLoadField.fieldPascal
+    : 'findById'; -%>
+        <%= queryMeta.aggregateName %> entity = repository.<%= findMethod %>(<%= queryMeta.idFieldAccessor %>)
             .orElseThrow(() -> new NotFoundException("<%= queryMeta.aggregateName %> not found with id: " + <%= queryMeta.idFieldAccessor %>));
+<% if (queryMeta.outputMappings.some(m => m.preDeclaration)) { -%>
+<% queryMeta.outputMappings.filter(m => m.preDeclaration).forEach(m => { %>
+        <%- m.preDeclaration.varType %> <%- m.preDeclaration.varName %> = <%- m.preDeclaration.getter %> != null
+            ? new <%- m.preDeclaration.varType %>(
+<% m.preDeclaration.ntArgs.forEach((arg, ai) => { -%>
+                <%- arg %><%= ai < m.preDeclaration.ntArgs.length - 1 ? ',' : '' %>
+<% }); -%>
+            )
+            : null;
+<% }); -%>
+<% } -%>
         return new <%= activityPascalCase %>Output(
 <% queryMeta.outputMappings.forEach((m, i) => { -%>
             <%- m.accessor %><%= i < queryMeta.outputMappings.length - 1 ? ',' : '' %>
