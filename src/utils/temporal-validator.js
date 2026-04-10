@@ -66,16 +66,22 @@ function validateTemporal(systemConfig, domainConfigs, temporalCtx) {
     // from the domain event that triggers this workflow)
     if (wf.trigger && wf.trigger.on && triggerModule) {
       const eventsForModule = domainEventsByModule.get(triggerModule) || new Map();
+      const triggerOn = wf.trigger.on;
       for (const [, evDef] of eventsForModule) {
-        if (normalizeMethodName(evDef.name) === normalizeMethodName(wf.trigger.on) ||
-            normalizeMethodName(evDef.name).includes(normalizeMethodName(wf.trigger.on))) {
+        const nameMatch =
+          normalizeMethodName(evDef.name) === normalizeMethodName(triggerOn) ||
+          normalizeMethodName(evDef.name).includes(normalizeMethodName(triggerOn));
+        // Also match via explicit triggers[] array declared in the event
+        const triggersMatch = (evDef.triggers || []).some(
+          (t) => normalizeMethodName(t) === normalizeMethodName(triggerOn)
+        );
+        if (nameMatch || triggersMatch) {
           for (const f of evDef.fields || []) {
             if (f && f.name) available.add(f.name);
           }
         }
       }
       // Also add the triggering identifier itself (e.g., cartId)
-      const triggerOn = wf.trigger.on;
       if (triggerOn) available.add(triggerOn + 'Id');
     }
 
@@ -196,15 +202,22 @@ function validateTemporal(systemConfig, domainConfigs, temporalCtx) {
       const eventsForModule = domainEventsByModule.get(triggerModule) || new Map();
       const triggerOn = wf.trigger.on;
       let found = false;
-      for (const [evName] of eventsForModule) {
-        if (normalizeMethodName(evName).includes(normalizeMethodName(triggerOn)) ||
-            normalizeMethodName(triggerOn).includes(normalizeMethodName(evName))) {
+      for (const [, evDef] of eventsForModule) {
+        const nameMatch =
+          normalizeMethodName(evDef.name).includes(normalizeMethodName(triggerOn)) ||
+          normalizeMethodName(triggerOn).includes(normalizeMethodName(evDef.name));
+        // Also match via explicit triggers[] array declared in the event
+        const triggersMatch = (evDef.triggers || []).some(
+          (t) => normalizeMethodName(t) === normalizeMethodName(triggerOn)
+        );
+        if (nameMatch || triggersMatch) {
           found = true;
           break;
         }
       }
       // Also check if it matches transition method names
-      const domainCfg = domainConfigs[triggerModule] || {};
+      // Use getDomainCfg to handle both kebab-case and camelCase dict keys
+      const domainCfg = getDomainCfg(domainConfigs, triggerModule) || {};
       for (const agg of domainCfg.aggregates || []) {
         for (const en of agg.enums || []) {
           for (const tr of en.transitions || []) {
@@ -224,7 +237,8 @@ function validateTemporal(systemConfig, domainConfigs, temporalCtx) {
     // T2-004: trigger module has no event with notifies pointing to this workflow
     if (wf.trigger && wf.trigger.module && wf.name) {
       const trigMod = camelCase(wf.trigger.module);
-      const domainCfg = domainConfigs[trigMod] || {};
+      // Use getDomainCfg to handle both kebab-case and camelCase dict keys
+      const domainCfg = getDomainCfg(domainConfigs, trigMod) || {};
       let notifiesFound = false;
       for (const agg of domainCfg.aggregates || []) {
         for (const ev of agg.events || []) {
@@ -298,7 +312,8 @@ function validateTemporal(systemConfig, domainConfigs, temporalCtx) {
 
   // T3-004: externalType module not found or type not declared in that module
   for (const dep of externalTypeDeps) {
-    if (!domainConfigs[dep.sourceModule] && !domainConfigs[camelCase(dep.sourceModule)]) {
+    // getDomainCfg handles both kebab-case keys ('shopping-carts') and camelCase ('shoppingCarts')
+    if (!getDomainCfg(domainConfigs, dep.sourceModule)) {
       checks['T3-004'].findings.push(
         finding(dep.consumerModule, `ExternalType '${dep.typeName}' referencia módulo '${dep.sourceModule}' que no existe en el sistema o no tiene domain.yaml`, `módulo consumidor: ${dep.consumerModule}, actividad: ${dep.activityName}`)
       );
@@ -415,6 +430,7 @@ function buildDomainEventsByModule(domainConfigs) {
           name: ev.name,
           fields: ev.fields || [],
           notifies: ev.notifies || [],
+          triggers: ev.triggers || [],
         });
       }
     }
@@ -441,6 +457,30 @@ function camelCase(str) {
   return str
     .replace(/[-_ ]+(.)/g, (_, c) => c.toUpperCase())
     .replace(/^(.)/, (c) => c.toLowerCase());
+}
+
+/**
+ * Converts camelCase/PascalCase to kebab-case.
+ * e.g. shoppingCarts → shopping-carts
+ */
+function kebabCase(str) {
+  if (!str) return '';
+  return str
+    .replace(/([A-Z])/g, '-$1')
+    .toLowerCase()
+    .replace(/^-/, '');
+}
+
+/**
+ * Looks up domainConfigs by camelCase OR kebab-case key.
+ * domainConfigs keys are raw filenames (e.g. 'shopping-carts'),
+ * but callers typically compute camelCase module names.
+ */
+function getDomainCfg(domainConfigs, moduleName) {
+  return domainConfigs[moduleName]
+    || domainConfigs[kebabCase(moduleName)]
+    || domainConfigs[camelCase(moduleName)]
+    || null;
 }
 
 function pascalCase(str) {

@@ -472,8 +472,14 @@ function runC2(domainConfigs, systemConfig) {
       }
     }
     for (const agg of config.aggregates || []) {
+      // Skip C2-004 for aggregates that have no enums — stateless entities have no transition
+      // methods, so event triggers on creation/registration cannot reference any method.
+      const aggHasEnumsWithTransitions = (agg.enums || []).some(
+        (en) => Array.isArray(en.transitions) && en.transitions.length > 0
+      );
       for (const ev of agg.events || []) {
         if (ev.lifecycle) continue; // lifecycle events don't reference transition methods
+        if (!aggHasEnumsWithTransitions) continue; // stateless aggregate — no transitions to reference
         for (const trigger of ev.triggers || []) {
           if (!allTransitionMethods.has(trigger)) {
             checks['C2-004'].findings.push(

@@ -886,10 +886,11 @@ async function evaluateSystemCommand(type, options = {}) {
   const reportData = extractReportData(systemConfig, validation, domainValidation);
   reportData.isTemporalMode = isTemporalMode;
 
+  let temporalValidation = null;
   if (isTemporalMode) {
     const modulesMap = buildModulesMap(systemConfig);
     const temporalCtx = extractTemporalReportData(systemConfig, domainConfigs, modulesMap);
-    const temporalValidation = validateTemporal(systemConfig, domainConfigs, temporalCtx);
+    temporalValidation = validateTemporal(systemConfig, domainConfigs, temporalCtx);
 
     Object.assign(reportData, {
       orchestration: temporalCtx.orchestration,
@@ -908,10 +909,42 @@ async function evaluateSystemCommand(type, options = {}) {
       console.log(chalk.bold('⏱️  Temporal Validation'));
       console.log(chalk.gray('─'.repeat(40)));
       const tv = temporalValidation.summary;
-      console.log(`  ${chalk.red('🔴 Errors:')}     ${chalk.red.bold(tv.errors)}`);
-      console.log(`  ${chalk.yellow('🟡 Warnings:')}   ${chalk.yellow.bold(tv.warnings)}`);
-      console.log(`  ${chalk.cyan('🔵 Info:')}       ${chalk.cyan.bold(tv.info)}`);
+
+      const tvErrors = [], tvWarnings = [], tvInfos = [];
+      for (const category of (temporalValidation.categories || [])) {
+        for (const check of (category.checks || [])) {
+          if (!check.findings || check.findings.length === 0) continue;
+          const prefix = `[${check.id}] ${check.label}`;
+          const messages = check.findings.map((f) => {
+            const msg = typeof f === 'string' ? f : [f.module && `[${f.module}]`, f.message, f.context && `(${f.context})`].filter(Boolean).join(' ');
+            return `  • ${prefix}: ${msg}`;
+          });
+          if (check.severity === 'error') tvErrors.push(...messages);
+          else if (check.severity === 'warning') tvWarnings.push(...messages);
+          else tvInfos.push(...messages);
+        }
+      }
+
+      console.log(`  ${chalk.red('🔴 Errors:')}     ${chalk.red.bold(tvErrors.length)}`);
+      console.log(`  ${chalk.yellow('🟡 Warnings:')}   ${chalk.yellow.bold(tvWarnings.length)}`);
+      console.log(`  ${chalk.cyan('🔵 Info:')}       ${chalk.cyan.bold(tvInfos.length)}`);
       console.log(`  ${chalk.green('🟢 OK:')}         ${chalk.green.bold(tv.ok)}`);
+
+      if (tvErrors.length > 0) {
+        console.log();
+        console.log(chalk.red('Temporal errors:'));
+        tvErrors.forEach((m) => console.log(chalk.red(m)));
+      }
+      if (tvWarnings.length > 0) {
+        console.log();
+        console.log(chalk.yellow('Temporal warnings:'));
+        tvWarnings.forEach((m) => console.log(chalk.yellow(m)));
+      }
+      if (tvInfos.length > 0) {
+        console.log();
+        console.log(chalk.cyan('Temporal info:'));
+        tvInfos.forEach((m) => console.log(chalk.cyan(m)));
+      }
     }
   }
 
@@ -933,7 +966,7 @@ async function evaluateSystemCommand(type, options = {}) {
 
   // ── 5b. Write domain assets ───────────────────────────────────────────────
   if (domainValidation) {
-    await writeDomainAssets(domainValidation, process.cwd());
+    await writeDomainAssets(domainValidation, process.cwd(), temporalValidation);
   }
 
   // ── 5c. Write system-evaluation.md ──────────────────────────────────────
@@ -1072,7 +1105,7 @@ function toPascalCase(str) {
 }
 
 // ── writeDomainAssets ─────────────────────────────────────────────────────────
-async function writeDomainAssets(domainValidation, cwd) {
+async function writeDomainAssets(domainValidation, cwd, temporalValidation = null) {
   const assetsDir = path.join(cwd, 'assets', 'evaluation');
   await fs.ensureDir(assetsDir);
 
@@ -1193,6 +1226,63 @@ async function writeDomainAssets(domainValidation, cwd) {
         if (blueprints && blueprints[m]) links.push(`[${m}-blueprint.mmd](./${m}-blueprint.mmd)`);
         lines.push(`- \`${m}\` — 🟢 no findings · ${links.join(' · ')}`);
       }
+      lines.push('');
+    }
+  }
+
+  // ── 3. Temporal Validation section ────────────────────────────────────────
+  if (temporalValidation) {
+    const tv = temporalValidation.summary;
+    const tvErrors = [], tvWarnings = [], tvInfos = [];
+    for (const category of (temporalValidation.categories || [])) {
+      for (const check of (category.checks || [])) {
+        if (!check.findings || check.findings.length === 0) continue;
+        const prefix = `**${check.id}** ${check.label}`;
+        const messages = check.findings.map((f) => {
+          const msg = typeof f === 'string' ? f : [f.module && `\`${f.module}\``, f.message, f.context && `*(${f.context})*`].filter(Boolean).join(' ');
+          return `| ${prefix} | ${msg} |`;
+        });
+        if (check.severity === 'error') tvErrors.push(...messages);
+        else if (check.severity === 'warning') tvWarnings.push(...messages);
+        else tvInfos.push(...messages);
+      }
+    }
+
+    lines.push('---');
+    lines.push('');
+    lines.push('## ⏱️ Temporal Validation');
+    lines.push('');
+    lines.push(`| 🔴 Errors | 🟡 Warnings | 🔵 Info | 🟢 OK |`);
+    lines.push(`|-----------|-------------|---------|-------|`);
+    lines.push(`| ${tvErrors.length} | ${tvWarnings.length} | ${tvInfos.length} | ${tv.ok} |`);
+    lines.push('');
+
+    if (tvErrors.length > 0) {
+      lines.push('### 🔴 Temporal Errors');
+      lines.push('');
+      lines.push('| Check | Message |');
+      lines.push('|-------|---------|');
+      tvErrors.forEach((m) => lines.push(m));
+      lines.push('');
+    }
+    if (tvWarnings.length > 0) {
+      lines.push('### 🟡 Temporal Warnings');
+      lines.push('');
+      lines.push('| Check | Message |');
+      lines.push('|-------|---------|');
+      tvWarnings.forEach((m) => lines.push(m));
+      lines.push('');
+    }
+    if (tvInfos.length > 0) {
+      lines.push('### 🔵 Temporal Info');
+      lines.push('');
+      lines.push('| Check | Message |');
+      lines.push('|-------|---------|');
+      tvInfos.forEach((m) => lines.push(m));
+      lines.push('');
+    }
+    if (tvErrors.length === 0 && tvWarnings.length === 0 && tvInfos.length === 0) {
+      lines.push('_✅ All Temporal checks passed._');
       lines.push('');
     }
   }
