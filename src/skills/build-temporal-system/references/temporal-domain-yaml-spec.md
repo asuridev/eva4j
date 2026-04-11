@@ -27,7 +27,7 @@ Propose necessary fields not mentioned, expressive Value Objects, implicit invar
 4. ❌ **No `transitions` without `initialValue`** in the enum
 5. ❌ **No invented modules in `reference.module`** — only those in `system/system.yaml`
 6. ❌ **No duplicate `endpoints:` from `system.yaml → exposes:`**
-7. ❌ **`endpoints:` NEVER a flat list** — always `{ basePath, versions: [{ version, operations }] }`
+7. ❌ **`endpoints:` NEVER a flat list** — always `{ basePath, versions: [{ version, operations }] }`. If the module has **2+ aggregates**, use `basePath: ""` and absolute paths per operation
 8. ❌ **No `listeners:` section** — Temporal replaces Kafka consumers
 9. ❌ **No `readModels:` section** — on-demand reads via Activities replace local projections
 10. ❌ **No `ports:` for internal modules** — only for external services (non-Temporal)
@@ -219,6 +219,28 @@ endpoints:
           method: GET
           path: /
 
+# ─── Multi-aggregate module example ─────────────────────────────────────────────
+# When a module contains 2+ aggregates (e.g. Product + Category),
+# use basePath: "" (empty string, NOT "/") and absolute paths:
+#
+# endpoints:
+#   basePath: ""
+#   versions:
+#     - version: v1
+#       operations:
+#         - useCase: CreateProduct
+#           method: POST
+#           path: /products
+#         - useCase: GetProduct
+#           method: GET
+#           path: /products/{id}
+#         - useCase: CreateCategory
+#           method: POST
+#           path: /categories
+#         - useCase: FindProductsByCategory
+#           method: GET
+#           path: /categories/{id}/products
+
 # ─── ports: ONLY for EXTERNAL services ──────────────────────────────────────
 # ports:
 #   - name: processCharge
@@ -398,6 +420,8 @@ validations:
 - [ ] `readOnly:` fields with `defaultValue:` where appropriate
 - [ ] `reference:` on cross-aggregate ID fields
 - [ ] `endpoints:` as object with `basePath` + `versions` (NOT flat list)
+- [ ] Module with 1 aggregate → `basePath: /resource` and relative paths
+- [ ] Module with 2+ aggregates → `basePath: ""` and absolute paths per operation
 - [ ] `events:` with `notifies:` only for cross-module workflow triggers
 - [ ] `events:` without `notifies:` for internal Domain Events
 - [ ] `activities:` section declares all capabilities referenced in system.yaml workflows

@@ -1443,6 +1443,7 @@ private String customerId;
 5. **SABER** que cualquier otro nombre genera un **scaffold** con `UnsupportedOperationException` — el desarrollador debe implementar el handler
 6. **APLICAR** la regla anti-duplicado: si el mismo useCase aparece en v1 y v2, se genera solo una vez
 7. **NOMBRAR** los controladores según la convención: `{Aggregate}{VersionCapitalized}Controller` (ej: `OrderV1Controller`)
+8. **SI** el módulo tiene **2+ agregados** → usar `basePath: ""` (string vacío, **NO** `basePath: /`) y paths absolutos por operación (ej: `/products`, `/categories/{id}`). Si tiene un solo agregado → `basePath: /recurso` con paths relativos
 
 ### Al Generar Código de Dominio
 

@@ -1,0 +1,140 @@
+# EJEMPLO: ENDPOINTS — MÓDULO CON MÚLTIPLES AGREGADOS
+# Módulo de productos con dos agregados: Product y Category.
+#
+# REGLA CLAVE:
+#   Cuando un módulo tiene 2+ agregados, NO se puede usar un solo
+#   basePath (ej: /products) porque cada agregado tiene su propio
+#   recurso REST. En este caso:
+#
+#   - Usar basePath: "" (string vacío — NUNCA basePath: / con slash)
+#   - Declarar paths ABSOLUTOS en cada operación
+#   - El controlador generado tendrá @RequestMapping("/api/v1") (limpio)
+#
+# CONTRASTE CON MÓDULO DE UN SOLO AGREGADO:
+#   basePath: /orders        → paths relativos: /, /{id}, /{id}/confirm
+#   basePath: ""             → paths absolutos: /products, /categories/{id}
+
+aggregates:
+  # ── Primer agregado: Product ──────────────────────────────────────────────
+  - name: Product
+    entities:
+      - name: product
+        isRoot: true
+        tableName: products
+        hasSoftDelete: true
+        audit:
+          enabled: true
+          trackUser: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Product name is required"
+          - name: description
+            type: String
+          - name: price
+            type: BigDecimal
+            validations:
+              - type: Positive
+          - name: categoryId
+            type: String
+            reference:
+              aggregate: Category
+          - name: status
+            type: ProductStatus
+            readOnly: true
+
+    enums:
+      - name: ProductStatus
+        initialValue: DRAFT
+        transitions:
+          - from: DRAFT
+            to: PUBLISHED
+            method: publish
+          - from: PUBLISHED
+            to: ARCHIVED
+            method: archive
+        values: [DRAFT, PUBLISHED, ARCHIVED]
+
+    events:
+      - name: ProductCreatedEvent
+        lifecycle: create
+        fields:
+          - name: productId
+            type: String
+          - name: name
+            type: String
+          - name: price
+            type: BigDecimal
+      - name: ProductPublishedEvent
+        triggers:
+          - publish
+        fields:
+          - name: productId
+            type: String
+          - name: publishedAt
+            type: LocalDateTime
+
+  # ── Segundo agregado: Category ────────────────────────────────────────────
+  - name: Category
+    entities:
+      - name: category
+        isRoot: true
+        tableName: categories
+        audit:
+          enabled: true
+        fields:
+          - name: id
+            type: String
+          - name: name
+            type: String
+            validations:
+              - type: NotBlank
+                message: "Category name is required"
+          - name: description
+            type: String
+
+# ── Endpoints: basePath vacío + paths absolutos ─────────────────────────────
+# NOTA: basePath: "" (vacío) porque hay 2 agregados.
+#       Cada path es absoluto: /products, /categories, etc.
+endpoints:
+  basePath: ""
+  versions:
+    - version: v1
+      operations:
+        # ── Product operations ──
+        - useCase: CreateProduct
+          method: POST
+          path: /products
+        - useCase: UpdateProduct
+          method: PUT
+          path: /products/{id}
+        - useCase: GetProduct
+          method: GET
+          path: /products/{id}
+        - useCase: FindAllProducts
+          method: GET
+          path: /products
+        - useCase: PublishProduct
+          method: PUT
+          path: /products/{id}/publish
+        # ── Category operations ──
+        - useCase: CreateCategory
+          method: POST
+          path: /categories
+        - useCase: UpdateCategory
+          method: PUT
+          path: /categories/{id}
+        - useCase: GetCategory
+          method: GET
+          path: /categories/{id}
+        - useCase: FindAllCategories
+          method: GET
+          path: /categories
+        # ── Cross-aggregate query ──
+        - useCase: FindProductsByCategory
+          method: GET
+          path: /categories/{id}/products

@@ -150,7 +150,7 @@ function mapField(field) {
  * @param {object|null} aggregateInfo - Aggregate info for query activity detection
  * @returns {object} context for templates
  */
-function buildActivityContext(activity, packageName, moduleName, shared = false, aggregateInfo = null, sharedNestedTypes = new Set()) {
+function buildActivityContext(activity, packageName, moduleName, shared = false, aggregateInfo = null, sharedNestedTypes = new Set(), existingSharedTypes = new Map()) {
   const activityPascalCase = toPascalCase(activity.name);
   const modulePascalCase = toPascalCase(moduleName);
   const categoryType = (activity.type || 'light').toLowerCase() === 'heavy' ? 'HeavyActivity' : 'LightActivity';
@@ -278,7 +278,7 @@ function buildActivityContext(activity, packageName, moduleName, shared = false,
     targetModule: moduleName,
     isQueryActivity,
     queryMeta,
-    ...buildNestedTypesContext(activity, packageName, moduleName, shared, inputFields, outputFields, sharedNestedTypes),
+    ...buildNestedTypesContext(activity, packageName, moduleName, shared, inputFields, outputFields, sharedNestedTypes, existingSharedTypes),
   };
 }
 
@@ -320,7 +320,7 @@ function extractCustomTypeNames(fields) {
  * @param {Array} outputFields - Already-mapped output fields
  * @returns {object} { nestedTypes, nestedTypeImportLines }
  */
-function buildNestedTypesContext(activity, packageName, moduleName, shared, inputFields, outputFields, sharedNestedTypes = new Set()) {
+function buildNestedTypesContext(activity, packageName, moduleName, shared, inputFields, outputFields, sharedNestedTypes = new Set(), existingSharedTypes = new Map()) {
   const rawNested = Array.isArray(activity.nestedTypes) ? activity.nestedTypes : [];
   const rawExternal = Array.isArray(activity.externalTypes) ? activity.externalTypes : [];
 
@@ -355,9 +355,17 @@ function buildNestedTypesContext(activity, packageName, moduleName, shared, inpu
   const importLines = [];
   for (const typeName of referencedNames) {
     if (nestedTypeNames.has(typeName)) {
-      // Local nested type — check if it's externally referenced (needs shared import)
+      // Check if an identical type already lives in shared/domain/contracts/ — if so, prefer it.
+      const alreadySharedModule = existingSharedTypes.get(typeName);
       if (sharedNestedTypes.has(typeName) || shared) {
-        importLines.push(`import ${packageName}.shared.domain.contracts.${moduleName}.${typeName};`);
+        // Prefer the module that actually owns the type in shared (first-writer-wins).
+        // This ensures Input/Output files in module B import from module A's contracts
+        // when both declared the same nestedType but A was processed first.
+        const ownerModule = existingSharedTypes.get(typeName) || moduleName;
+        importLines.push(`import ${packageName}.shared.domain.contracts.${ownerModule}.${typeName};`);
+      } else if (alreadySharedModule) {
+        // Type already generated into shared by another activity — point there, not locally.
+        importLines.push(`import ${packageName}.shared.domain.contracts.${alreadySharedModule}.${typeName};`);
       } else {
         importLines.push(`import ${packageName}.${moduleName}.application.dtos.temporal.${typeName};`);
       }
@@ -427,7 +435,7 @@ async function parseCrossModuleActivities(projectDir) {
  * @param {object} writeOptions
  * @returns {string[]} list of generated file paths (relative)
  */
-async function generateSharedContracts(actCtx, sharedBasePath, writeOptions) {
+async function generateSharedContracts(actCtx, sharedBasePath, writeOptions, existingSharedTypes = new Map()) {
   const templatesDir = path.join(__dirname, '..', '..', 'templates', 'temporal-activity');
   const contractsDir = path.join(sharedBasePath, 'domain', 'contracts', actCtx.targetModule);
   const generated = [];
@@ -466,8 +474,13 @@ async function generateSharedContracts(actCtx, sharedBasePath, writeOptions) {
   // 4. Shared NestedType records
   if (Array.isArray(actCtx.nestedTypes) && actCtx.nestedTypes.length > 0) {
     for (const nt of actCtx.nestedTypes) {
+      // Skip if an identical type already lives in *another* module's shared contracts.
+      // This prevents incompatible-types errors when the same nestedType is declared
+      // in multiple module YAMLs (e.g. CartItemDetail in carts.yaml AND products.yaml).
+      const existingOwner = existingSharedTypes.get(nt.name);
+      if (existingOwner && existingOwner !== actCtx.targetModule) continue;
       const ntPath = path.join(contractsDir, `${nt.name}.java`);
-      if (await fs.pathExists(ntPath)) continue; // Deduplicate across activities
+      if (await fs.pathExists(ntPath)) continue; // Deduplicate within same module
       await renderAndWrite(
         path.join(templatesDir, 'SharedNestedType.java.ejs'),
         ntPath,
@@ -475,6 +488,8 @@ async function generateSharedContracts(actCtx, sharedBasePath, writeOptions) {
         writeOptions
       );
       generated.push(`shared/domain/contracts/${actCtx.targetModule}/${nt.name}.java`);
+      // Update the map so subsequent activities in the same run see this type as already written.
+      existingSharedTypes.set(nt.name, actCtx.targetModule);
     }
   }
 
@@ -557,6 +572,35 @@ async function generateTemporalActivityCommand(moduleName, activityName, options
 // ─── YAML-driven generation ─────────────────────────────────────────────────
 
 /**
+ * Walk shared/domain/contracts/ and return a Map from PascalCase type simple name
+ * → camelCase sourceModule for every *.java file found.
+ * Used to detect when a local nestedType duplicates a type that already lives in shared.
+ * @param {string} sharedBasePath  - absolute path to shared/ Java root
+ * @returns {Map<string, string>}  simpleName → sourceModule
+ */
+async function scanExistingSharedTypes(sharedBasePath) {
+  const result = new Map();
+  const contractsRoot = path.join(sharedBasePath, 'domain', 'contracts');
+  if (!(await fs.pathExists(contractsRoot))) return result;
+  let moduleDirs;
+  try { moduleDirs = await fs.readdir(contractsRoot); } catch { return result; }
+  for (const mod of moduleDirs) {
+    const modDir = path.join(contractsRoot, mod);
+    let stat;
+    try { stat = await fs.stat(modDir); } catch { continue; }
+    if (!stat.isDirectory()) continue;
+    let files;
+    try { files = await fs.readdir(modDir); } catch { continue; }
+    for (const file of files) {
+      if (!file.endsWith('.java')) continue;
+      const simpleName = file.replace('.java', '');
+      if (!result.has(simpleName)) result.set(simpleName, mod);
+    }
+  }
+  return result;
+}
+
+/**
  * Scan all module domain.yaml files in the system/ directory for `externalTypes`
  * references. Returns a Map from sourceModule (camelCase) → Set of type names
  * (PascalCase) that are referenced externally and thus need shared contracts.
@@ -627,14 +671,18 @@ async function injectEagerLoadMethods(actCtx, moduleBasePath, packageName, modul
   if (await fs.pathExists(jpaRepoPath)) {
     let content = await fs.readFile(jpaRepoPath, 'utf-8');
     if (!content.includes(methodName)) {
-      // Inject @Query and @Param imports if missing
+      // Inject @Query, @Param, and Optional imports if missing
       const queryImport = 'import org.springframework.data.jpa.repository.Query;';
       const paramImport = 'import org.springframework.data.repository.query.Param;';
+      const optionalImport = 'import java.util.Optional;';
       if (!content.includes(queryImport)) {
         content = content.replace(/^(import .+;)$/m, `$1\n${queryImport}`);
       }
       if (!content.includes(paramImport)) {
         content = content.replace(/^(import .+;)$/m, `$1\n${paramImport}`);
+      }
+      if (!content.includes(optionalImport)) {
+        content = content.replace(/^(import .+;)$/m, `$1\n${optionalImport}`);
       }
       const lastBrace = content.lastIndexOf('}');
       const queryStr = `SELECT ${entityLower} FROM ${aggregateName}Jpa ${entityLower} JOIN FETCH ${entityLower}.${jpaFieldName} WHERE ${entityLower}.id = :id`;
@@ -714,17 +762,24 @@ async function generateFromYaml(yamlActivities, activityName, ctx) {
   try {
     const templatesDir = path.join(__dirname, '..', '..', 'templates', 'temporal-activity');
     const sharedBasePath = path.join(projectDir, 'src', 'main', 'java', packagePath, 'shared');
+
+    // Scan shared/domain/contracts/ for types already generated by other activities/modules.
+    // Used to prevent local nestedType files that duplicate a shared type (causing import collisions).
+    const existingSharedTypes = await scanExistingSharedTypes(sharedBasePath);
+
     const generated = [];
     const sharedGenerated = [];
 
     for (const activity of activitiesToGenerate) {
       const isShared = crossModuleSet.has(toPascalCase(activity.name));
-      const actCtx = buildActivityContext(activity, packageName, moduleName, isShared, aggregateInfo, sharedNestedTypes);
+      const actCtx = buildActivityContext(activity, packageName, moduleName, isShared, aggregateInfo, sharedNestedTypes, existingSharedTypes);
       spinner.text = `Generating ${actCtx.activityPascalCase}Activity${isShared ? ' (shared)' : ''}...`;
 
       if (isShared) {
         // Interface + Input + Output → shared/domain/contracts/{module}/
-        const sharedFiles = await generateSharedContracts(actCtx, sharedBasePath, writeOptions);
+        // Pass existingSharedTypes so generateSharedContracts can skip cross-module duplicates
+        // and update the map in-place for subsequent activities in the same run.
+        const sharedFiles = await generateSharedContracts(actCtx, sharedBasePath, writeOptions, existingSharedTypes);
         sharedGenerated.push(...sharedFiles);
       } else {
         // Interface + Input + Output → {module}/application/
@@ -750,7 +805,7 @@ async function generateFromYaml(yamlActivities, activityName, ctx) {
           actCtx,
           writeOptions
         );
-        // Local NestedType records (or shared if externally referenced)
+        // Local NestedType records (or shared if externally referenced / already in shared)
         if (Array.isArray(actCtx.nestedTypes) && actCtx.nestedTypes.length > 0) {
           for (const nt of actCtx.nestedTypes) {
             if (sharedNestedTypes.has(nt.name)) {
@@ -765,6 +820,10 @@ async function generateFromYaml(yamlActivities, activityName, ctx) {
                 writeOptions
               );
               sharedGenerated.push(`shared/domain/contracts/${moduleName}/${nt.name}.java`);
+            } else if (existingSharedTypes.has(nt.name)) {
+              // A type with the same simple name already lives in shared/domain/contracts/.
+              // Skip writing a local duplicate — the import in Output/Input already points to shared.
+              continue;
             } else {
               // Generate locally
               const ntPath = path.join(moduleBasePath, 'application', 'dtos', 'temporal', `${nt.name}.java`);
@@ -1098,6 +1157,7 @@ async function registerActivityInWorkflow(workflowImplPath, packageName, moduleN
 module.exports = generateTemporalActivityCommand;
 module.exports.generateSharedContracts = generateSharedContracts;
 module.exports.buildActivityContext = buildActivityContext;
+module.exports.scanExistingSharedTypes = scanExistingSharedTypes;
 module.exports.parseActivitiesFromYaml = parseActivitiesFromYaml;
 module.exports.parseCrossModuleActivities = parseCrossModuleActivities;
 module.exports.collectExternalTypeRefs = collectExternalTypeRefs;

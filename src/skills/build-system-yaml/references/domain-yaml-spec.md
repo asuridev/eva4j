@@ -25,7 +25,7 @@ Propón campos necesarios no mencionados, Value Objects expresivos, invariantes 
 4. ❌ **No `transitions` sin `initialValue`** en el enum
 5. ❌ **No inventar módulos en `reference.module`** — solo los de `system/system.yaml`
 6. ❌ **No duplicar en `endpoints:`** lo de `system.yaml → exposes:`
-7. ❌ **`endpoints:` NUNCA es lista plana** — siempre `{ basePath, versions: [{ version, operations }] }`
+7. ❌ **`endpoints:` NUNCA es lista plana** — siempre `{ basePath, versions: [{ version, operations }] }`. Si el módulo tiene **2+ agregados**, usar `basePath: ""` y paths absolutos por operación
 8. ❌ **No inventar eventos** — deben coincidir con `integrations.async[]` donde `producer` es este módulo
 9. ❌ **No inventar listeners** — deben coincidir con `integrations.async[].consumers[]` donde `module` es este módulo
 10. ❌ **No inventar ports** — deben coincidir con `integrations.sync[]` donde `caller` es este módulo
@@ -75,6 +75,50 @@ endpoints:
           method: GET
           path: /{id}
 ```
+
+### Módulos con múltiples agregados
+
+Cuando un módulo contiene **2 o más agregados** (ej: Product + Category), NO es posible usar un solo `basePath` porque cada agregado tiene su propio recurso REST. En este caso:
+
+- Usar `basePath: ""` (string vacío — **NO** `basePath: /` que genera slash trailing)
+- Declarar paths **absolutos** en cada operación (ej: `/products`, `/categories/{id}`)
+- El controlador generado tendrá `@RequestMapping("/api/v1")` (limpio, sin slash extra)
+
+```yaml
+# ✅ Módulo con múltiples agregados — basePath vacío + paths absolutos
+endpoints:
+  basePath: ""
+  versions:
+    - version: v1
+      operations:
+        # ── Product operations ──
+        - useCase: CreateProduct
+          method: POST
+          path: /products
+        - useCase: GetProduct
+          method: GET
+          path: /products/{id}
+        - useCase: FindAllProducts
+          method: GET
+          path: /products
+        # ── Category operations ──
+        - useCase: CreateCategory
+          method: POST
+          path: /categories
+        - useCase: GetCategory
+          method: GET
+          path: /categories/{id}
+        - useCase: FindProductsByCategory
+          method: GET
+          path: /categories/{id}/products
+```
+
+**Regla de decisión:**
+
+| Agregados en el módulo | basePath | Paths en operations |
+|---|---|---|
+| 1 agregado | `/recurso` (ej: `/orders`) | Relativos: `/`, `/{id}`, `/{id}/confirm` |
+| 2+ agregados | `""` (vacío) | Absolutos: `/products`, `/categories/{id}` |
 
 ---
 
@@ -565,7 +609,9 @@ Si un valor no es trazable → falta un endpoint o listener en el diseño.
 - [ ] `events[].triggers[]` referencia métodos existentes en `transitions[].method`
 - [ ] `{entityName}Id` en `events[].fields` cuando cruza módulos via Kafka
 - [ ] `endpoints:` con estructura `{ basePath, versions }` — no lista plana
-- [ ] `endpoints[].path` relativos al basePath
+- [ ] Módulo con 1 agregado → `basePath: /recurso` y paths relativos
+- [ ] Módulo con 2+ agregados → `basePath: ""` y paths absolutos por operación
+- [ ] `endpoints[].path` coherentes con el basePath elegido
 - [ ] `listeners[]` para todos los eventos donde este módulo es consumidor
 - [ ] `listeners[].useCase` coincide con `consumers[].useCase`
 - [ ] `listeners[].topic` bare SCREAMING_SNAKE_CASE (sin topicPrefix)

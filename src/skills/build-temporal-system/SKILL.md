@@ -308,6 +308,29 @@ Read `references/temporal-domain-yaml-spec.md` for the complete specification.
 
 For each module in `modules:`, generate `system/{module-name}.yaml` (**inside the `system/` directory**, e.g., `system/orders.yaml`, `system/payments.yaml`) with: aggregates, entities, valueObjects, enums (with transitions if applicable), events (with `notifies:` if applicable), activities, single-module workflows, endpoints, and ports (only for external services).
 
+### Endpoints in multi-aggregate modules
+
+If the module has **2 or more aggregates** (e.g., `Product` + `Category`), the `endpoints:` section must use `basePath: ""` (empty string) and **absolute** paths per operation:
+
+```yaml
+# Module with 2+ aggregates → empty basePath
+endpoints:
+  basePath: ""
+  versions:
+    - version: v1
+      operations:
+        - useCase: CreateProduct
+          method: POST
+          path: /products
+        - useCase: CreateCategory
+          method: POST
+          path: /categories
+```
+
+If the module has **a single aggregate**, use `basePath: /resource` with relative paths (e.g., `/`, `/{id}`).
+
+**NEVER use `basePath: /`** (with slash) — it produces a trailing slash in `@RequestMapping`. Use `basePath: ""` (empty).
+
 ### Key differences from broker-based domain.yaml
 
 | Section | Broker-based | Temporal-based |

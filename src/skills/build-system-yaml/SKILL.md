@@ -347,6 +347,29 @@ Lee `references/domain-yaml-spec.md` para la especificación completa de estruct
 
 Para cada módulo en `modules:`, genera `system/{nombre-del-modulo}.yaml` con: aggregates, entities, valueObjects, enums (con transitions si aplica), events, endpoints, listeners, ports y **readModels** — todo inferido del `system.yaml`.
 
+### Endpoints en módulos con múltiples agregados
+
+Si el módulo tiene **2 o más agregados** (ej: `Product` + `Category`), la sección `endpoints:` debe usar `basePath: ""` (string vacío) y paths **absolutos** en cada operación:
+
+```yaml
+# Módulo con 2+ agregados → basePath vacío
+endpoints:
+  basePath: ""
+  versions:
+    - version: v1
+      operations:
+        - useCase: CreateProduct
+          method: POST
+          path: /products
+        - useCase: CreateCategory
+          method: POST
+          path: /categories
+```
+
+Si el módulo tiene **un solo agregado**, usar `basePath: /recurso` con paths relativos (ej: `/`, `/{id}`).
+
+**NUNCA usar `basePath: /`** (con slash) — genera trailing slash en `@RequestMapping`. Usar `basePath: ""` (vacío).
+
 ### Inferencia de readModels desde system.yaml
 
 Cuando `integrations.async[].consumers[]` tiene `readModel:` y el `module` es el módulo actual:

@@ -27,21 +27,36 @@ import io.temporal.workflow.Workflow;
 
 import java.time.Duration;
 <% /* Collect imports for all shared + local activity interfaces and DTOs */ -%>
-<% const importLines = new Set(); -%>
+<%
+// Build imports with a Map keyed by simple name to prevent duplicate-simple-name
+// compile errors when a local nestedType and a shared type share the same class name.
+// Rule: shared imports (*.shared.domain.contracts.*) always win over local ones.
+const importMap = new Map(); // simpleName → full import statement
+function addImport(fqn) {
+  const simpleName = fqn.split('.').pop().replace(';', '');
+  const existing = importMap.get(simpleName);
+  if (!existing) {
+    importMap.set(simpleName, fqn);
+  } else if (existing !== fqn) {
+    // Collision: prefer shared contract over local dtos/temporal
+    if (fqn.includes('.shared.domain.contracts.')) importMap.set(simpleName, fqn);
+  }
+}
+-%>
 <% for (const stub of stubActivities) { -%>
 <%   if (stub.isLocal) { -%>
-<%     importLines.add(`import ${packageName}.${moduleName}.application.ports.${stub.interfaceName};`); -%>
-<%     if (stub.hasInput) importLines.add(`import ${packageName}.${moduleName}.application.dtos.temporal.${stub.activityName}Input;`); -%>
-<%     if (stub.hasOutput) importLines.add(`import ${packageName}.${moduleName}.application.dtos.temporal.${stub.activityName}Output;`); -%>
-<%     if (stub.nestedTypeImports) for (const nti of stub.nestedTypeImports) { importLines.add(nti.isExternal ? `import ${packageName}.shared.domain.contracts.${nti.sourceModule}.${nti.name};` : `import ${packageName}.${moduleName}.application.dtos.temporal.${nti.name};`); } -%>
+<%     addImport(`import ${packageName}.${moduleName}.application.ports.${stub.interfaceName};`); -%>
+<%     if (stub.hasInput) addImport(`import ${packageName}.${moduleName}.application.dtos.temporal.${stub.activityName}Input;`); -%>
+<%     if (stub.hasOutput) addImport(`import ${packageName}.${moduleName}.application.dtos.temporal.${stub.activityName}Output;`); -%>
+<%     if (stub.nestedTypeImports) for (const nti of stub.nestedTypeImports) { addImport(nti.isExternal ? `import ${packageName}.shared.domain.contracts.${nti.sourceModule}.${nti.name};` : `import ${packageName}.${moduleName}.application.dtos.temporal.${nti.name};`); } -%>
 <%   } else { -%>
-<%     importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.interfaceName};`); -%>
-<%     if (stub.hasInput) importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.activityName}Input;`); -%>
-<%     if (stub.hasOutput) importLines.add(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.activityName}Output;`); -%>
-<%     if (stub.nestedTypeImports) for (const nti of stub.nestedTypeImports) { importLines.add(nti.isExternal ? `import ${packageName}.shared.domain.contracts.${nti.sourceModule}.${nti.name};` : `import ${packageName}.shared.domain.contracts.${stub.targetModule}.${nti.name};`); } -%>
+<%     addImport(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.interfaceName};`); -%>
+<%     if (stub.hasInput) addImport(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.activityName}Input;`); -%>
+<%     if (stub.hasOutput) addImport(`import ${packageName}.shared.domain.contracts.${stub.targetModule}.${stub.activityName}Output;`); -%>
+<%     if (stub.nestedTypeImports) for (const nti of stub.nestedTypeImports) { addImport(nti.isExternal ? `import ${packageName}.shared.domain.contracts.${nti.sourceModule}.${nti.name};` : `import ${packageName}.shared.domain.contracts.${stub.targetModule}.${nti.name};`); } -%>
 <%   } -%>
 <% } -%>
-<%= Array.from(importLines).sort().join('\n') %>
+<%= Array.from(importMap.values()).sort().join('\n') %>
 
 public class <%= flowPascalCase %>WorkFlowImpl implements <%= flowPascalCase %>WorkFlow {
 

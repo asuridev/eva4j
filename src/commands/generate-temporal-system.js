@@ -24,6 +24,7 @@ const { parseSystemYaml, resolveFieldImports, parseTimeout } = require('../utils
 const {
   generateSharedContracts,
   buildActivityContext,
+  scanExistingSharedTypes,
 } = require('./generate-temporal-activity');
 
 async function generateTemporalSystemCommand(options = {}) {
@@ -93,17 +94,22 @@ async function generateTemporalSystemCommand(options = {}) {
     const generatedShared = [];
     const processedActivities = new Set();
 
+    // Scan shared/domain/contracts/ once before the loop so that later activities
+    // in the same run do not write duplicate nestedTypes for types already written
+    // by an earlier module (e.g. CartItemDetail in carts.yaml AND products.yaml).
+    const existingSharedTypes = await scanExistingSharedTypes(sharedBasePath);
+
     // Collect all cross-module activity names from workflows
     for (const wf of workflows) {
       for (const step of wf.steps) {
         // Only generate shared contracts for cross-module activities
         if (!step.isLocal) {
-          await processActivity(step.activityName, activityRegistry, packageName, processedActivities, generatedShared, sharedBasePath, sharedWriteOptions);
+          await processActivity(step.activityName, activityRegistry, packageName, processedActivities, generatedShared, sharedBasePath, sharedWriteOptions, existingSharedTypes);
         }
 
         // Also handle compensation activities (only cross-module)
         if (step.compensation && step.compensation.module !== wf.hostModule) {
-          await processActivity(step.compensation.name, activityRegistry, packageName, processedActivities, generatedShared, sharedBasePath, sharedWriteOptions);
+          await processActivity(step.compensation.name, activityRegistry, packageName, processedActivities, generatedShared, sharedBasePath, sharedWriteOptions, existingSharedTypes);
         }
       }
     }
@@ -146,7 +152,7 @@ async function generateTemporalSystemCommand(options = {}) {
       }
 
       // ── Compute stub activities ──────────────────────────────────────
-      const stubActivities = computeStubActivities(wf.steps, activityRegistry, wf.hostModule);
+      const stubActivities = computeStubActivities(wf.steps, activityRegistry, wf.hostModule, existingSharedTypes);
 
       // ── Compute workflow input fields ────────────────────────────────
       const inputFields = computeWorkflowInputFields(wf.steps);
@@ -273,16 +279,16 @@ async function generateTemporalSystemCommand(options = {}) {
 /**
  * Process a single activity for shared contract generation.
  */
-async function processActivity(actName, activityRegistry, packageName, processedSet, generatedList, sharedBasePath, writeOptions) {
+async function processActivity(actName, activityRegistry, packageName, processedSet, generatedList, sharedBasePath, writeOptions, existingSharedTypes = new Map()) {
   if (processedSet.has(actName)) return;
   processedSet.add(actName);
 
   const registered = activityRegistry.get(actName);
   if (!registered) return;
 
-  const actCtx = buildActivityContext(registered.definition, packageName, registered.module, true, null, new Set());
+  const actCtx = buildActivityContext(registered.definition, packageName, registered.module, true, null, new Set(), existingSharedTypes);
 
-  const files = await generateSharedContracts(actCtx, sharedBasePath, writeOptions);
+  const files = await generateSharedContracts(actCtx, sharedBasePath, writeOptions, existingSharedTypes);
   generatedList.push(...files);
 }
 
@@ -300,8 +306,12 @@ function enrichStepsWithInputSources(steps) {
     for (let j = 0; j < rawNames.length; j++) {
       const rawName = rawNames[j];
 
-      // Check if this name appears in any prior step's rawOutputNames
-      const sourceStep = steps.find(
+      // Find the most-recent prior step that produced this field (last-wins).
+      // When two steps output the same name (e.g. `items` produced by GetCartDetails
+      // and then transformed by ValidateAndGetProducts), the later step's version
+      // is the one in scope — identical semantics to overwriting a local variable.
+      // Note: Array.findLast() requires Node ≥18; [...].reverse().find() is Node 14+ safe.
+      const sourceStep = [...steps].reverse().find(
         (s) => s.index < step.index && s.rawOutputNames.includes(rawName)
       );
 
@@ -355,7 +365,8 @@ function enrichCompensationInputSources(step, allSteps) {
   const sources = [];
 
   for (const field of compInputFields) {
-    const sourceStep = allSteps.find(
+    // Same last-wins resolution as enrichStepsWithInputSources.
+    const sourceStep = [...allSteps].reverse().find(
       (s) => s.index <= step.index && s.rawOutputNames.includes(field.name)
     );
 
@@ -378,7 +389,7 @@ function enrichCompensationInputSources(step, allSteps) {
  * Compute the list of unique activity stubs needed by the workflow.
  * Includes both main step activities and compensation activities.
  */
-function computeStubActivities(steps, activityRegistry, hostModule) {
+function computeStubActivities(steps, activityRegistry, hostModule, existingSharedTypes = new Map()) {
   // Pre-scan: collect all externalType references within this workflow's stubs
   // to detect local nestedTypes that are shared across modules
   const externalRefs = new Set(); // "sourceModule:typeName"
@@ -399,6 +410,43 @@ function computeStubActivities(steps, activityRegistry, hostModule) {
     }
   }
 
+  // Pre-scan 2: collect simple names contributed by external (non-local) stubs —
+  // nestedTypes and externalTypes of external activities live in shared/domain/contracts/{module}/.
+  // Used to detect simple-name collisions with local stubs' nestedTypes so the template
+  // can emit the correct shared import instead of a local one.
+  const externalNestedNames = new Map(); // PascalCase simpleName → camelCase sourceModule
+  for (const step of steps) {
+    if (!step.isLocal) {
+      const reg = activityRegistry.get(step.activityName);
+      if (reg && reg.definition) {
+        for (const nt of (reg.definition.nestedTypes || [])) {
+          const name = toPascalCase(nt.name);
+          if (!externalNestedNames.has(name)) externalNestedNames.set(name, step.targetModule);
+        }
+        for (const et of (reg.definition.externalTypes || [])) {
+          const name = toPascalCase(et.name);
+          if (!externalNestedNames.has(name)) externalNestedNames.set(name, toCamelCase(et.module));
+        }
+      }
+    }
+    if (step.compensation) {
+      const compModule = toCamelCase(step.compensation.module || step.targetModule);
+      if (compModule !== hostModule) {
+        const compReg = activityRegistry.get(step.compensation.name);
+        if (compReg && compReg.definition) {
+          for (const nt of (compReg.definition.nestedTypes || [])) {
+            const name = toPascalCase(nt.name);
+            if (!externalNestedNames.has(name)) externalNestedNames.set(name, compModule);
+          }
+          for (const et of (compReg.definition.externalTypes || [])) {
+            const name = toPascalCase(et.name);
+            if (!externalNestedNames.has(name)) externalNestedNames.set(name, toCamelCase(et.module));
+          }
+        }
+      }
+    }
+  }
+
   const stubs = new Map();
 
   for (const step of steps) {
@@ -407,9 +455,16 @@ function computeStubActivities(steps, activityRegistry, hostModule) {
       const rawNestedTypes = registered && registered.definition && Array.isArray(registered.definition.nestedTypes)
         ? registered.definition.nestedTypes.map((nt) => {
             const name = toPascalCase(nt.name);
-            // Mark as external if this nestedType is referenced via externalTypes in another stub
+            // Mark as external if referenced via externalTypes in another stub,
+            // OR if an external stub contributes the same simple name (collision → shared wins).
+            // existingSharedTypes is the authoritative source: it reflects the actual filesystem
+            // path where generateSharedContracts wrote the file (first-writer-wins).
             const isExternallyReferenced = externalRefs.has(`${step.targetModule}:${name}`);
-            return { name, sourceModule: step.targetModule, isExternal: isExternallyReferenced };
+            const collidingExternalModule = externalNestedNames.get(name);
+            const actualOwner = existingSharedTypes.get(name);
+            const isExternal = isExternallyReferenced || !!collidingExternalModule || !!actualOwner;
+            const sourceModule = actualOwner || ((isExternal && collidingExternalModule) ? collidingExternalModule : step.targetModule);
+            return { name, sourceModule, isExternal };
           })
         : [];
       const rawExternalTypes = registered && registered.definition && Array.isArray(registered.definition.externalTypes)
@@ -448,7 +503,11 @@ function computeStubActivities(steps, activityRegistry, hostModule) {
           ? compRegistered.definition.nestedTypes.map((nt) => {
               const name = toPascalCase(nt.name);
               const isExternallyReferenced = externalRefs.has(`${compModule}:${name}`);
-              return { name, sourceModule: compModule, isExternal: isExternallyReferenced };
+              const collidingExternalModule = externalNestedNames.get(name);
+              const actualOwner = existingSharedTypes.get(name);
+              const isExternal = isExternallyReferenced || !!collidingExternalModule || !!actualOwner;
+              const sourceModule = actualOwner || ((isExternal && collidingExternalModule) ? collidingExternalModule : compModule);
+              return { name, sourceModule, isExternal };
             })
           : [];
         const compExternalTypes = compRegistered && compRegistered.definition && Array.isArray(compRegistered.definition.externalTypes)
