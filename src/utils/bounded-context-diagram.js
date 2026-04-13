@@ -8,13 +8,24 @@
  * outgoing events, sync ports, and read models — all in one diagram.
  *
  * @param {Object} domainConfigs  Plain object { [moduleName]: parsedDomainYaml }
+ * @param {Object} [systemConfig]  Parsed system.yaml (optional). When present and
+ *   orchestration.engine === 'temporal', the blueprint includes Temporal-specific
+ *   subgraphs (Activities, Local Workflows, Workflow Participation) instead of
+ *   broker-specific ones (Incoming Events, Sync Ports, Read Models).
  * @returns {{ [moduleName]: { diagram: string, useCases: Object } }}
  *   Map of module → { diagram (Mermaid text), useCases (detail metadata per UC) }
  */
-function generateBlueprintDiagrams(domainConfigs) {
+function generateBlueprintDiagrams(domainConfigs, systemConfig = {}) {
+  const orchestration = systemConfig?.orchestration || {};
+  const isTemporalMode = !!(orchestration.enabled && orchestration.engine === 'temporal');
+  const systemWorkflows = isTemporalMode ? (systemConfig.workflows || []) : [];
+
   const result = {};
   for (const [moduleName, config] of Object.entries(domainConfigs)) {
-    result[moduleName] = generateModuleBlueprint(moduleName, config);
+    result[moduleName] = generateModuleBlueprint(moduleName, config, {
+      isTemporalMode,
+      systemWorkflows,
+    });
   }
   return result;
 }
@@ -59,11 +70,16 @@ const COLORS = {
   eventsOut: { bg: '#2a2215', border: '#E67E22', text: '#E67E22' },
   ports: { bg: '#152a2a', border: '#16A085', text: '#16A085' },
   readModels: { bg: '#1e2228', border: '#7F8C8D', text: '#95A5A6' },
+  // Temporal-specific
+  activities: { bg: '#1a2a3a', border: '#3498DB', text: '#3498DB' },
+  workflows: { bg: '#2a1a2a', border: '#9B59B6', text: '#9B59B6' },
+  wfParticipation: { bg: '#1e2a1e', border: '#2ECC71', text: '#2ECC71' },
 };
 
 // ── Per-module blueprint builder ──────────────────────────────────────────────
 
-function generateModuleBlueprint(moduleName, config) {
+function generateModuleBlueprint(moduleName, config, opts = {}) {
+  const { isTemporalMode = false, systemWorkflows = [] } = opts;
   const aggregates = config.aggregates || [];
   if (aggregates.length === 0) return { diagram: '', useCases: {} };
 
@@ -134,6 +150,39 @@ function generateModuleBlueprint(moduleName, config) {
 
   // ── 6. Collect read models ──────────────────────────────────────────────
   const readModels = config.readModels || [];
+
+  // ── 7. Collect Temporal data (only when orchestration.engine === 'temporal') ──
+  const localActivities = isTemporalMode ? (config.activities || []) : [];
+  const localWorkflows = isTemporalMode ? (config.workflows || []) : [];
+
+  // Cross-module workflow participation: system workflows with at least one
+  // step targeting this module
+  const wfParticipation = [];
+  if (isTemporalMode) {
+    for (const wf of systemWorkflows) {
+      const involvedSteps = (wf.steps || []).filter((s) => s.target === moduleName);
+      if (involvedSteps.length > 0) {
+        wfParticipation.push({
+          name: wf.name,
+          saga: !!wf.saga,
+          triggerModule: wf.trigger?.module || null,
+          steps: involvedSteps,
+        });
+      }
+    }
+  }
+
+  // Events that notify (trigger) workflows
+  const eventNotifies = [];
+  if (isTemporalMode) {
+    for (const agg of aggregates) {
+      for (const ev of agg.events || []) {
+        if (ev.notifies && ev.notifies.length > 0) {
+          eventNotifies.push({ event: ev.name, workflows: ev.notifies.map((n) => n.workflow) });
+        }
+      }
+    }
+  }
 
   // ── Build subgraphs ────────────────────────────────────────────────────
 
@@ -338,6 +387,53 @@ function generateModuleBlueprint(moduleName, config) {
     styles.push(...styleSubgraph('READ_MODELS', COLORS.readModels));
   }
 
+  // ── Activities Exposed (Temporal) ───────────────────────────────────────
+  if (localActivities.length > 0) {
+    lines.push('');
+    lines.push('  subgraph ACTIVITIES["🎯 Activities Exposed"]');
+    for (const act of localActivities) {
+      const actId = toNodeId('ACT', act.name);
+      const typeTag = act.type === 'heavy' ? '⚙️' : '⚡';
+      const compTag = act.compensation ? ' ↩️' : '';
+      const timeout = act.timeout ? ` (${act.timeout})` : '';
+      const label = `${typeTag} ${act.name}${compTag}${timeout}`;
+      lines.push(`    ${actId}["${esc(label)}"]`);
+    }
+    lines.push('  end');
+    styles.push(...styleSubgraph('ACTIVITIES', COLORS.activities));
+  }
+
+  // ── Local Workflows (Temporal, single-module) ───────────────────────────
+  if (localWorkflows.length > 0) {
+    lines.push('');
+    lines.push('  subgraph LOCAL_WF["🔄 Local Workflows"]');
+    for (const wf of localWorkflows) {
+      const wfId = toNodeId('LWF', wf.name);
+      const stepCount = (wf.steps || []).length;
+      const trigger = wf.trigger?.on ? ` on:${wf.trigger.on}` : '';
+      const label = `${wf.name}${trigger}\\n${stepCount} step${stepCount !== 1 ? 's' : ''}`;
+      lines.push(`    ${wfId}["${esc(label)}"]`);
+    }
+    lines.push('  end');
+    styles.push(...styleSubgraph('LOCAL_WF', COLORS.workflows));
+  }
+
+  // ── Workflow Participation (Temporal, cross-module) ─────────────────────
+  if (wfParticipation.length > 0) {
+    lines.push('');
+    lines.push('  subgraph WF_PART["⚡ Workflow Participation"]');
+    for (const wf of wfParticipation) {
+      const wfId = toNodeId('WFP', wf.name);
+      const sagaTag = wf.saga ? '🔄 saga' : '';
+      const actNames = wf.steps.map((s) => s.activity).join(', ');
+      const from = wf.triggerModule ? ` ← ${wf.triggerModule}` : '';
+      const label = `${wf.name}${from}\\n${actNames}${sagaTag ? '\\n' + sagaTag : ''}`;
+      lines.push(`    ${wfId}["${esc(label)}"]`);
+    }
+    lines.push('  end');
+    styles.push(...styleSubgraph('WF_PART', COLORS.wfParticipation));
+  }
+
   // ── Edges ───────────────────────────────────────────────────────────────
 
   lines.push('');
@@ -389,6 +485,79 @@ function generateModuleBlueprint(moduleName, config) {
       const aggId = `AGG_${firstAgg.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
       for (const [svc] of portsByService) {
         edges.push(`  ${aggId} -.->|"sync"| ${toNodeId('PORT', svc)}`);
+      }
+    }
+  }
+
+  // ── Temporal edges ────────────────────────────────────────────────────
+  if (isTemporalMode) {
+    const aggId = firstAgg ? `AGG_${firstAgg.name.replace(/[^a-zA-Z0-9]/g, '_')}` : null;
+
+    // Aggregate → Activities (exposes)
+    if (aggId && localActivities.length > 0) {
+      for (const act of localActivities) {
+        edges.push(`  ${aggId} -.->|"exposes"| ${toNodeId('ACT', act.name)}`);
+      }
+    }
+
+    // Outgoing Events → Workflows (via notifies)
+    for (const en of eventNotifies) {
+      const evId = toNodeId('EO', en.event);
+      for (const wfName of en.workflows) {
+        // Target can be a local workflow or a system workflow
+        const localWf = localWorkflows.find((w) => w.name === wfName);
+        if (localWf) {
+          edges.push(`  ${evId} -->|"triggers"| ${toNodeId('LWF', wfName)}`);
+        }
+        const sysWf = wfParticipation.find((w) => w.name === wfName);
+        if (sysWf) {
+          edges.push(`  ${evId} -->|"triggers"| ${toNodeId('WFP', wfName)}`);
+        }
+        // If workflow is cross-module but this module doesn't participate,
+        // still show the trigger edge to a standalone node
+        if (!localWf && !sysWf) {
+          const extId = toNodeId('WFX', wfName);
+          // Only add the node once
+          if (!edges.some((e) => e.includes(extId))) {
+            lines.push(`  ${extId}("🌐 ${esc(wfName)}"):::refNode`);
+          }
+          edges.push(`  ${evId} -->|"triggers"| ${extId}`);
+        }
+      }
+    }
+
+    // Workflow Participation → Activities (invokes)
+    for (const wf of wfParticipation) {
+      const wfId = toNodeId('WFP', wf.name);
+      for (const step of wf.steps) {
+        const actNode = localActivities.find((a) => a.name === step.activity);
+        if (actNode) {
+          const asyncTag = step.type === 'async' ? ' async' : '';
+          edges.push(`  ${wfId} -->|"invokes${asyncTag}"| ${toNodeId('ACT', step.activity)}`);
+        }
+      }
+    }
+
+    // Local Workflow → Activities (step activities)
+    for (const wf of localWorkflows) {
+      const wfId = toNodeId('LWF', wf.name);
+      for (const step of wf.steps || []) {
+        if (step.activity) {
+          const actNode = localActivities.find((a) => a.name === step.activity);
+          if (actNode) {
+            edges.push(`  ${wfId} -->|"step"| ${toNodeId('ACT', step.activity)}`);
+          }
+        }
+      }
+    }
+
+    // Compensation edges (activity → compensation activity)
+    for (const act of localActivities) {
+      if (act.compensation) {
+        const compAct = localActivities.find((a) => a.name === act.compensation);
+        if (compAct) {
+          edges.push(`  ${toNodeId('ACT', act.name)} -.->|"compensates"| ${toNodeId('ACT', act.compensation)}`);
+        }
       }
     }
   }
@@ -516,6 +685,39 @@ function generateModuleBlueprint(moduleName, config) {
       }
     }
 
+    // Temporal: workflows triggered by events emitted from this UC
+    if (isTemporalMode && detail.eventsEmitted) {
+      const triggeredWfs = [];
+      for (const emitted of detail.eventsEmitted) {
+        const match = eventNotifies.find((en) => en.event === emitted.name);
+        if (match) {
+          triggeredWfs.push(...match.workflows);
+        }
+      }
+      if (triggeredWfs.length > 0) {
+        detail.triggersWorkflows = triggeredWfs;
+      }
+    }
+
+    // Temporal: activities exposed by this module
+    if (isTemporalMode && localActivities.length > 0) {
+      detail.activitiesExposed = localActivities.map((a) => ({
+        name: a.name,
+        type: a.type || 'light',
+        compensation: a.compensation || null,
+      }));
+    }
+
+    // Temporal: cross-module workflows that invoke this module
+    if (isTemporalMode && wfParticipation.length > 0) {
+      detail.workflowParticipation = wfParticipation.map((wf) => ({
+        workflow: wf.name,
+        saga: wf.saga,
+        triggerModule: wf.triggerModule,
+        activities: wf.steps.map((s) => s.activity),
+      }));
+    }
+
     // Request fields (from root entity, non-readOnly, non-audit for commands)
     if (type === 'command' && rootEntity && ep) {
       const isCreate = ucName.startsWith('Create');
@@ -544,6 +746,9 @@ function generateModuleBlueprint(moduleName, config) {
       }
       if (detail.eventsEmitted) {
         parts.push(`Emite: ${detail.eventsEmitted.map((e) => e.name).join(', ')}.`);
+      }
+      if (detail.triggersWorkflows) {
+        parts.push(`Dispara workflow${detail.triggersWorkflows.length > 1 ? 's' : ''}: ${detail.triggersWorkflows.join(', ')}.`);
       }
       if (ep && !detail.triggeredBy) {
         parts.unshift(`Endpoint: ${ep.method} ${(config.endpoints?.basePath || '') + (ep.path || '')}`);

@@ -1451,7 +1451,7 @@ function validateDomain(domainConfigs, systemConfig) {
   const { generateDomainDiagrams } = require('./domain-diagram');
   const { generateBlueprintDiagrams } = require('./bounded-context-diagram');
 
-  const blueprintResults = generateBlueprintDiagrams(domainConfigs);
+  const blueprintResults = generateBlueprintDiagrams(domainConfigs, systemConfig);
   const blueprintDiagrams = {};
   const useCaseDetails = {};
   for (const [mod, result] of Object.entries(blueprintResults)) {
