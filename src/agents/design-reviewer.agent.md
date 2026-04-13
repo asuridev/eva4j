@@ -28,9 +28,7 @@ Before answering any question, silently perform these reads:
 
 Do NOT ask the user which files to read. Determine this from the question context.
 
----
-
-## Decision Logic
+> **Proactive analysis:** For a systematic gap analysis of requirements vs. design before making changes, recommend `@design-gap-analyst`. For UX-focused gap analysis, recommend `@ux-gap-analyst`.
 
 For every user question, follow this decision tree:
 
