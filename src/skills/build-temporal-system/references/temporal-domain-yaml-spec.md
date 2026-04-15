@@ -39,6 +39,7 @@ Propose necessary fields not mentioned, expressive Value Objects, implicit invar
 16. ❌ **No `topic:` on events** — Temporal replaces Kafka topics
 17. ❌ **Events with `notifies:` must reference workflows in system.yaml** — never arbitrary names
 18. ❌ **Activities must not do cross-module data lookups** — all data comes via input
+19. ❌ **Activities invoked ONLY from workflows** — never from handlers, use cases, or REST controllers. If a handler needs cross-module data, emit an event with `notifies:` to trigger a workflow that invokes the read activity. Even local activities are invoked from single-module `workflows:` in domain.yaml, not from handlers
 
 ---
 
@@ -254,6 +255,18 @@ endpoints:
 
 ## Activities section — detailed specification
 
+### Activities vs Ports — invocation rules
+
+| Aspect | `ports:` | `activities:` |
+|---|---|---|
+| What it represents | External service clients (Feign) | Module capabilities (Temporal) |
+| Target | Payment gateways, email providers, third-party APIs | Other modules or same module |
+| Who can invoke | Handlers, use cases, activity implementations | **ONLY workflows** (via Temporal stubs) |
+| Where declared | `ports:` in domain.yaml | `activities:` in domain.yaml |
+| Invocation mechanism | Feign HTTP call | Temporal task queue dispatch |
+
+> **Key takeaway:** A handler that needs data from another module must trigger a workflow (via Domain Event + `notifies:`). The workflow then invokes the appropriate read activity. Handlers NEVER inject or call activity interfaces.
+
 ### Activity properties
 
 | Property | Required | Description |
@@ -427,6 +440,7 @@ validations:
 - [ ] `activities:` section declares all capabilities referenced in system.yaml workflows
 - [ ] Activity `input:` contains all data the activity needs (no cross-module lookups)
 - [ ] `compensation:` declared for reversible activities
+- [ ] No handler or use case directly invokes an activity — all activity calls go through workflows
 - [ ] `workflows:` only for single-module internal flows
 - [ ] No `listeners:` section (Temporal replaces it)
 - [ ] No `readModels:` section (on-demand reads replace it)

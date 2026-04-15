@@ -122,6 +122,23 @@ Combine Signal with `Workflow.await()` for request-wait pattern between services
 
 ## Activity Data Flow Rules
 
+### Rule 0: Activities are invoked ONLY from workflows
+
+Activities are Temporal constructs — they can ONLY be invoked from within a workflow execution context. Handlers, use cases, and REST controllers do NOT have access to activity stubs. If a REST endpoint needs data from another module, the handler must emit a Domain Event that triggers a workflow, and the workflow orchestrates the activity calls.
+
+```
+✅ Workflow invokes activity:
+   PlaceOrderWorkflow → GetProductsByIds (via Temporal stub)
+
+❌ Handler invokes activity:
+   AddToCartCommandHandler → GetProductById (WRONG — not a workflow context)
+
+✅ Correct handler pattern:
+   AddToCartCommandHandler → save(cart) → DomainEvent → AddToCartWorkflow → GetProductById
+```
+
+This applies to ALL activities — both cross-module and local. Even a module's own activities are invoked from its single-module `workflows:` in domain.yaml, never from handlers.
+
 ### Rule 1: Activities access ONLY their own module's DB
 
 ```

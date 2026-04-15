@@ -38,10 +38,12 @@ Narrative technical specification of the complete system. One `##` section per m
 **Events emitted:** [DomainEvent name and what workflow it triggers, or "none"]
 **Operations:**
 1. [Load entity / validate precondition — throw NotFoundException or 400 if invalid]
-2. [External port call: {PortName}.{method}() — if applicable]
+2. [External port call: {PortName}.{method}() — if applicable (**ONLY for external services** like payment gateways, NOT for other modules**)]
 3. [Invoke domain method: entity.{method}()]
 4. [Persist via repository]
 5. [Emit event → triggers {WorkflowName} — if applicable]
+
+> **⚠️ Important:** Handlers do NOT invoke activities from other modules (or their own). Cross-module data is obtained via activities orchestrated by workflows. If this use case needs external data, it should emit a Domain Event with `notifies:` that triggers a workflow containing the required read activities.
 
 ### Exposed Endpoints
 [One `####` per endpoint in exposes:]
@@ -203,6 +205,8 @@ sequenceDiagram
     API-->>Client: 201 Created {resourceId}
 ```
 
+> **Key constraint:** The handler above does NOT call any activity. It persists the entity, and the DomainEventHandler starts the workflow. Activities are ONLY invoked from within workflows (see activity invocation diagram below).
+
 > For activity invocations:
 
 ```mermaid
@@ -212,6 +216,7 @@ sequenceDiagram
     participant Activity as ActivityImpl
     participant Repo as Repository
 
+    Note over Temporal,Repo: Activities are ONLY invoked from workflows via Temporal stubs — never from handlers
     Temporal->>Worker: schedule ActivityName
     Worker->>Activity: execute(input)
     Activity->>Repo: findById(id)

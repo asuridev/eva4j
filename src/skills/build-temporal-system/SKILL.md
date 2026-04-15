@@ -58,6 +58,7 @@ Temporal replaces **both** Kafka (async messaging) and Feign (sync HTTP) for int
 3. **No Feign/HTTP between modules** — `ports:` is only for **external** services (payment gateways, email providers, third-party APIs).
 4. **Events use `notifies:`** — Domain Events reference the workflow they trigger, not a topic.
 5. **Activities = module capabilities** — each module declares what it can do. Workflows compose these capabilities.
+6. **Activities are workflow-only** — handlers, use cases, and REST controllers NEVER invoke activities directly. If a handler needs cross-module data, it emits a Domain Event → triggers a workflow → workflow invokes the required activities. Even local activities are invoked from single-module workflows in `domain.yaml`, not from handlers.
 
 ---
 
@@ -107,6 +108,8 @@ For each business event, ask: **Does something MUST happen in ANOTHER module whe
 | YES — single effect in one other module | **Simple Workflow** with 1 step (in system.yaml) |
 | NO — internal module process needing durability | **Single-module Workflow** (in domain.yaml) |
 | NO — nothing external reacts | **Domain Event internal** (no `notifies:`) |
+
+> **⚠️ CRITICAL:** If a handler needs data from another module (e.g., cart handler needs product prices), do NOT invoke the activity directly from the handler. Instead, design a workflow that orchestrates the read activity (e.g., `GetProductsByIds`) and passes the result to subsequent steps. Activities are ONLY invoked from workflows.
 
 ### Decision: Activity Type
 
@@ -186,6 +189,7 @@ workflows:
 - No `listeners:`, no `readModels:`, no `messaging:` section
 - Events use `notifies:` to reference workflows, not topics
 - All activities accessed ONLY their own module's data
+- Activities are invoked ONLY from workflows (`system.yaml` or `domain.yaml`). Handlers and use cases do NOT have access to activity interfaces
 - Compensation must be explicitly declared for reversible steps in sagas
 
 ---
@@ -205,6 +209,7 @@ Before proposing the `system.yaml`, verify:
 - [ ] Activities with `type: sync` for steps that need results
 - [ ] Task queues follow module-prefixed naming
 - [ ] No workflows that only sync data — use on-demand reads instead
+- [ ] No handler or use case directly invokes an activity — all activity calls go through workflows
 - [ ] All in English
 - [ ] File in `system/system.yaml`
 
@@ -502,6 +507,44 @@ steps:
   - activity: ReserveStock
     compensation: ReleaseStock
 ```
+
+### Do NOT invoke activities directly from handlers or use cases
+
+Activities are Temporal constructs — they can ONLY be invoked from within a workflow execution context. Handlers and use cases interact with their own module's repository and domain entities, and trigger workflows via Domain Events. They never call activity interfaces.
+
+```java
+// ❌ DON'T — handler injecting an activity to get cross-module data
+public class AddToCartCommandHandler {
+    private final ProductActivity productActivity; // ❌ WRONG
+
+    public void handle(AddToCartCommand cmd) {
+        // ❌ Activity invoked outside a workflow — will fail at runtime
+        var product = productActivity.GetProductById(cmd.productId());
+        cart.addItem(product.name(), product.price());
+        repository.save(cart);
+    }
+}
+
+// ✅ DO — handler persists + emits event → workflow orchestrates activities
+public class AddToCartCommandHandler {
+    public void handle(AddToCartCommand cmd) {
+        cart.addItem(cmd.productId(), cmd.quantity());
+        repository.save(cart);  // Domain Event triggers AddToCartWorkflow
+    }
+}
+
+// ✅ Workflow invokes the activity through Temporal
+public class AddToCartWorkflowImpl implements AddToCartWorkflow {
+    private final ProductActivity productActivity; // ✅ Temporal stub
+
+    public void execute(String cartId, String productId) {
+        var product = productActivity.GetProductById(productId); // ✅ CORRECT
+        var enrichment = cartActivity.EnrichCartItem(cartId, product);
+    }
+}
+```
+
+**Rule:** If a handler needs data from another module, design a workflow that reads the data via an activity and then acts on it. The handler's job is to persist domain state and emit events that trigger workflows.
 
 ---
 
