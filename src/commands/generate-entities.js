@@ -2391,7 +2391,10 @@ async function generateEndpointsResources(aggregate, endpoints, moduleName, modu
 
       } else {
         // Scaffold: no semantic pattern matched → generate stub with TODO
-        const scaffoldContext = { packageName, moduleName, aggregateName, useCaseName: op.useCase };
+        const hasPathVar = Boolean(op.path && op.path.includes('{'));
+        const pathVarMatch = hasPathVar ? op.path.match(/\{([^}]+)\}/) : null;
+        const pathVarName = pathVarMatch ? pathVarMatch[1] : 'id';
+        const scaffoldContext = { packageName, moduleName, aggregateName, useCaseName: op.useCase, hasPathVar, pathVarName, idType };
         const scaffoldType = op.type || (op.method === 'GET' ? 'query' : 'command');
         if (scaffoldType === 'command') {
           await renderAndWrite(

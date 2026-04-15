@@ -30,11 +30,13 @@ public class <%= useCaseName %>CommandHandler implements CommandHandler<<%= useC
     @LogExceptions
     public void handle(<%= useCaseName %>Command command) {
         // TODO: Implement business logic
+<% if (hasPathVar) { -%>
         // Example:
-        // <%= aggregateName %> entity = repository.findById(command.id())
+        // <%= aggregateName %> entity = repository.findById(command.<%= pathVarName %>())
         //         .orElseThrow(() -> new EntityNotFoundException("<%= aggregateName %> not found"));
         // entity.someBusinessMethod();
         // repository.save(entity);
+<% } -%>
 
         throw new UnsupportedOperationException("<%= useCaseName %> not yet implemented");
     }

@@ -625,6 +625,7 @@ Si un evento **no declara `triggers`** ni `lifecycle`, el desarrollador debe lla
 - **C2-008** (error): valor de `lifecycle` inválido (no es `create`, `update`, `delete` ni `softDelete`)
 - **C2-009** (warning): `lifecycle: softDelete` sin `hasSoftDelete: true` en la entidad raíz, o `lifecycle: delete` con `hasSoftDelete: true`
 - **C2-010** (error): campo de lifecycle event no existe en la entidad raíz del agregado (excluyendo `{entityName}Id` y campos `*At` + `LocalDateTime`)
+- **C2-012** (error): nombre del agregado no coincide con la entidad raíz — el generador usa `aggregate.name` para imports/mappers pero la clase de dominio se genera desde `entity.name`, causando `cannot find symbol`
 
 **Auto-wiring de broker:** Si el proyecto tiene un broker de mensajería instalado (`eva add kafka-client`), `eva g entities` genera automáticamente la capa de Integration Events para **todos** los eventos declarados — sin necesidad de ejecutar `eva g kafka-event` por separado:
 

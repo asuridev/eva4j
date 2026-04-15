@@ -7,6 +7,9 @@ import <%= packageName %>.shared.domain.interfaces.Command;
  * TODO: Add the fields required by this use case and remove the placeholder.
  */
 public record <%= useCaseName %>Command(
-        // TODO: Replace with actual command fields
-        String id
+<% if (hasPathVar) { -%>
+        <%- idType %> <%= pathVarName %>
+<% } else { -%>
+        // TODO: Add command fields if needed
+<% } -%>
 ) implements Command {}

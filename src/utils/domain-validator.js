@@ -1,6 +1,6 @@
 'use strict';
 
-const { pluralizeWord, singularizeWord } = require('./naming');
+const { pluralizeWord, singularizeWord, toPascalCase } = require('./naming');
 
 /**
  * Domain-level validator for eva evaluate system --domain
@@ -393,6 +393,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-009': { label: 'Evento lifecycle incompatible con configuración de entidad', severity: 'ok', findings: [] },
     'C2-010': { label: 'Campo de lifecycle event no existe en la entidad raíz', severity: 'ok', findings: [] },
     'C2-011': { label: 'Endpoint useCase no se resuelve a ningún agregado del módulo', severity: 'ok', findings: [] },
+    'C2-012': { label: 'Nombre del agregado no coincide con la entidad raíz (causa import incorrecto en ApplicationMapper)', severity: 'ok', findings: [] },
   };
 
   for (const [moduleName, config] of Object.entries(domainConfigs)) {
@@ -787,6 +788,22 @@ function runC2(domainConfigs, systemConfig) {
     }
   }
 
+  // C2-012: Aggregate name ≠ root entity name → ApplicationMapper imports wrong class
+  for (const [moduleName, config] of Object.entries(domainConfigs)) {
+    for (const agg of config.aggregates || []) {
+      const rootEntity = (agg.entities || []).find(e => e.isRoot);
+      if (rootEntity && toPascalCase(rootEntity.name) !== agg.name) {
+        checks['C2-012'].findings.push(
+          finding(
+            moduleName,
+            `Agregado '${agg.name}' tiene entidad raíz '${rootEntity.name}' (PascalCase: '${toPascalCase(rootEntity.name)}') — los nombres no coinciden. El generador usará '${agg.name}' para imports y mappers pero la clase de dominio se llamará '${toPascalCase(rootEntity.name)}'`,
+            `Renombre la entidad raíz a '${agg.name.charAt(0).toLowerCase() + agg.name.slice(1)}' o el agregado a '${toPascalCase(rootEntity.name)}' para que coincidan.`
+          )
+        );
+      }
+    }
+  }
+
   setDefaultSeverities(checks, {
     'C2-001': 'warning',
     'C2-002': 'info',
@@ -799,6 +816,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-009': 'warning',
     'C2-010': 'error',
     'C2-011': 'error',
+    'C2-012': 'error',
   });
 
   return checks;

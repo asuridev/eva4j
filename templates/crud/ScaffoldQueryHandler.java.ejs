@@ -29,10 +29,12 @@ public class <%= useCaseName %>QueryHandler implements QueryHandler<<%= useCaseN
     @LogExceptions
     public <%= aggregateName %>ResponseDto handle(<%= useCaseName %>Query query) {
         // TODO: Implement query logic
+<% if (hasPathVar) { -%>
         // Example:
-        // return repository.findById(query.id())
+        // return repository.findById(query.<%= pathVarName %>())
         //         .map(mapper::toDto)
         //         .orElseThrow(() -> new EntityNotFoundException("<%= aggregateName %> not found"));
+<% } -%>
 
         throw new UnsupportedOperationException("<%= useCaseName %> not yet implemented");
     }

@@ -8,6 +8,9 @@ import <%= packageName %>.shared.domain.interfaces.Query;
  * TODO: Add the parameters required by this query and adapt the return type if needed.
  */
 public record <%= useCaseName %>Query(
-        // TODO: Replace with actual query parameters
-        String id
+<% if (hasPathVar) { -%>
+        <%- idType %> <%= pathVarName %>
+<% } else { -%>
+        // TODO: Add query parameters if needed
+<% } -%>
 ) implements Query<<%= aggregateName %>ResponseDto> {}
