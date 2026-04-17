@@ -610,7 +610,18 @@ function generateModuleBlueprint(moduleName, config, opts = {}) {
 
   for (const [ucName, nodeId] of [...commandUCs, ...queryUCs]) {
     const type = queryUCs.has(ucName) ? 'query' : 'command';
-    const detail = { name: ucName, type };
+    // Find the aggregate for this use case (multi-aggregate support)
+    let aggForUC = null;
+    let rootEntityForUC = null;
+    for (const agg of aggregates) {
+      if ((agg.useCases && agg.useCases.some(u => u.name === ucName)) || (agg.entities && agg.entities.some(e => e.name && ucName.toLowerCase().includes(e.name.toLowerCase())))) {
+        aggForUC = agg;
+        rootEntityForUC = agg.entities?.find(e => e.isRoot) || agg.entities?.[0];
+        break;
+      }
+    }
+    const aggNameForUC = aggForUC?.name || aggName;
+    const detail = { name: ucName, type, aggregate: aggNameForUC };
 
     // Endpoint info
     const ep = epOperations.find((o) => o.useCase === ucName);
@@ -633,14 +644,12 @@ function generateModuleBlueprint(moduleName, config, opts = {}) {
       };
     }
 
-    // Aggregate
-    detail.aggregate = aggName;
-
-    // State transitions triggered
+    // State transitions triggered (precise match by aggregate)
     const matchedTransitions = allTransitions.filter((t) => {
-      // Match by method name similarity to UC name
-      // e.g. confirm → ConfirmOrder, cancel → CancelOrder
-      return ucName.toLowerCase().includes(t.method.toLowerCase());
+      if (aggForUC && t.enum && aggForUC.enums && aggForUC.enums.some(e => e.name === t.enum)) {
+        return ucName.toLowerCase().includes(t.method.toLowerCase());
+      }
+      return false;
     });
     if (matchedTransitions.length > 0) {
       detail.stateTransitions = matchedTransitions.map((t) => ({
@@ -652,16 +661,16 @@ function generateModuleBlueprint(moduleName, config, opts = {}) {
       }));
     }
 
-    // Events emitted
+    // Events emitted (precise match by aggregate)
     const matchedEvents = allEvents.filter((ev) => {
-      // Match by triggers
-      if (ev.triggers) {
-        return ev.triggers.some((trigger) => ucName.toLowerCase().includes(trigger.toLowerCase()));
-      }
-      // Match by lifecycle
-      if (ev.lifecycle) {
-        const lcMap = { create: 'Create', update: 'Update', delete: 'Delete', softDelete: 'Delete' };
-        return ucName.startsWith(lcMap[ev.lifecycle] || '');
+      if (aggForUC && aggForUC.events && aggForUC.events.some(e => e.name === ev.name)) {
+        if (ev.triggers) {
+          return ev.triggers.some((trigger) => ucName.toLowerCase().includes(trigger.toLowerCase()));
+        }
+        if (ev.lifecycle) {
+          const lcMap = { create: 'Create', update: 'Update', delete: 'Delete', softDelete: 'Delete' };
+          return ucName.startsWith(lcMap[ev.lifecycle] || '');
+        }
       }
       return false;
     });
@@ -672,8 +681,7 @@ function generateModuleBlueprint(moduleName, config, opts = {}) {
       }));
     }
 
-    // Ports used (we can't know exactly which UC calls which port from domain.yaml,
-    // but we list all available ports as "available sync dependencies")
+    // Ports used (same as antes)
     if (ports.length > 0) {
       detail.availablePorts = [];
       for (const [svc, methods] of portsByService) {
@@ -718,14 +726,18 @@ function generateModuleBlueprint(moduleName, config, opts = {}) {
       }));
     }
 
-    // Request fields (from root entity, non-readOnly, non-audit for commands)
-    if (type === 'command' && rootEntity && ep) {
-      const isCreate = ucName.startsWith('Create');
-      const reqFields = (rootEntity.fields || [])
-        .filter((f) => !AUDIT_FIELDS.has(f.name) && f.name !== 'id' && f.name !== 'deletedAt')
-        .filter((f) => !f.readOnly)
-        .map((f) => ({ name: f.name, type: f.type, required: !!(f.validations?.length) }));
-      if (reqFields.length > 0) detail.requestFields = reqFields;
+    // Request fields: para listeners usar listener.fields, para comandos normales usar rootEntityForUC
+    const isDeleteUC = ucName.startsWith('Delete');
+    if (type === 'command' && !isDeleteUC && !detail.stateTransitions) {
+      if (listener && Array.isArray(listener.fields)) {
+        detail.requestFields = listener.fields;
+      } else if (rootEntityForUC) {
+        const reqFields = (rootEntityForUC.fields || [])
+          .filter((f) => !AUDIT_FIELDS.has(f.name) && f.name !== 'id' && f.name !== 'deletedAt')
+          .filter((f) => !f.readOnly)
+          .map((f) => ({ name: f.name, type: f.type, required: !!(f.validations?.length) }));
+        if (reqFields.length > 0) detail.requestFields = reqFields;
+      }
     }
 
     // Description
@@ -751,7 +763,7 @@ function generateModuleBlueprint(moduleName, config, opts = {}) {
         parts.push(`Dispara workflow${detail.triggersWorkflows.length > 1 ? 's' : ''}: ${detail.triggersWorkflows.join(', ')}.`);
       }
       if (ep && !detail.triggeredBy) {
-        parts.unshift(`Endpoint: ${ep.method} ${(config.endpoints?.basePath || '') + (ep.path || '')}`);
+        parts.unshift(`Endpoint: ${ep.method} ${((config.endpoints?.basePath || '') + (ep.path || '')).replace(/\/+/g, '/')}`);
       }
       detail.description = parts.length > 0
         ? parts.join(' ')

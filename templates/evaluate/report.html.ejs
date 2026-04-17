@@ -598,17 +598,34 @@
       const eventEdgesMapRef           = useRef({});
       const edgeLabelMapRef            = useRef({});
       const temporalEdgeActivitiesRef  = useRef({});  // edgeId → { activities[], color, wfLabel }
-      const [physicsOn, setPhysicsOn]             = useState(true);
+      const [physicsOn, setPhysicsOn]             = useState(false);
       const [hoveredNode,  setHoveredNode]        = useState(null);
       const [hoveredEvent, setHoveredEvent]       = useState(null);  // { name, producer, consumers[] }
       const [hoveredTemporalEdge, setHoveredTemporalEdge] = useState(null); // { activities[], color, wfLabel }
 
       // Build vis datasets from injected data
       function buildDatasets() {
-        const visNodes = MODULES_LIST.map(mod => ({
+        // ── Fixed-position layout: modules top row, hub bottom ──
+        const modCount   = MODULES_LIST.length;
+        const modSpacing = Math.max(200, 900 / Math.max(modCount, 1));
+        const totalWidth = modSpacing * (modCount - 1);
+        const startX     = -totalWidth / 2;
+        const MOD_Y      = 0;   // modules row
+        const HUB_Y      = 350; // hub row (broker or temporal)
+
+        // Pre-compute module positions for reuse
+        const modPositions = {};  // moduleId → x
+        MODULES_LIST.forEach((mod, idx) => {
+          modPositions[mod.id] = startX + idx * modSpacing;
+        });
+
+        const visNodes = MODULES_LIST.map((mod, idx) => ({
           id:    mod.id,
           label: mod.icon + "\n" + mod.label,
           title: mod.desc,
+          x:     modPositions[mod.id],
+          y:     MOD_Y,
+          fixed: { x: true, y: true },
           color: {
             background: mod.color + "22",
             border:     mod.color,
@@ -621,6 +638,66 @@
           borderWidthSelected: 3,
           margin: 10,
         }));
+
+        // ── Hub bar: tiled anchor nodes below each module ──
+        // Instead of one central node (all edges converge to center = angled lines),
+        // create one anchor per module column so edges are perfectly vertical.
+        const hasHub = (IS_TEMPORAL_MODE && Array.isArray(TEMPORAL_WORKFLOWS)) || EVENTS.length > 0;
+        const hubAnchorPrefix = "__hub_";
+
+        if (hasHub) {
+          const isTemporal  = IS_TEMPORAL_MODE && Array.isArray(TEMPORAL_WORKFLOWS);
+          const centerIdx   = Math.floor(modCount / 2);
+          const anchorWidth = modSpacing;  // flush — no gap between segments
+
+          // Hub style — border matches background so ALL seams are invisible
+          const hubBg      = isTemporal ? "#3b1f6e" : "#e8b800";
+          const hubBorder  = isTemporal ? "#3b1f6e" : "#e8b800";  // same as bg = seamless
+          const hubHlBg    = isTemporal ? "#5a2fa8" : "#ffd84d";
+          const hubHoverBg = isTemporal ? "#4a2890" : "#ffd84d";
+          const hubFontClr = isTemporal ? "#e8e8f0" : "#0d1f3c";
+
+          // Label for center segment only
+          let hubLabel;
+          if (isTemporal) {
+            const ns = (TEMPORAL_ORCHESTRATION && TEMPORAL_ORCHESTRATION.namespace) || "default";
+            hubLabel = "⏱️ Temporal Server · " + ns;
+          } else {
+            const bn = window.__EVA_DATA__.brokerName || "Kafka";
+            hubLabel = "⚡ " + bn + " Broker";
+          }
+          const hubTitle = isTemporal
+            ? ("Temporal Server: " + ((TEMPORAL_ORCHESTRATION && TEMPORAL_ORCHESTRATION.target) || "localhost:7233") + " — orquesta todos los workflows")
+            : "Message broker — retransmite eventos asíncronos entre módulos";
+
+          MODULES_LIST.forEach((mod, idx) => {
+            const isCenter = idx === centerIdx;
+            visNodes.push({
+              id:    hubAnchorPrefix + mod.id,
+              label: isCenter ? hubLabel : "",
+              title: hubTitle,
+              x:     modPositions[mod.id],
+              y:     HUB_Y,
+              fixed: { x: true, y: true },
+              widthConstraint: { minimum: anchorWidth },
+              heightConstraint: { minimum: 36 },
+              color: {
+                background: hubBg,
+                border: hubBorder,
+                highlight: { background: hubHlBg, border: hubBorder },
+                hover:     { background: hubHoverBg, border: hubBorder },
+              },
+              font:  { color: hubFontClr, size: 13, face: "'Plus Jakarta Sans', sans-serif", bold: true },
+              shape: "box",
+              borderWidth: 1,
+              borderWidthSelected: 1,
+              margin: 12,
+            });
+          });
+        }
+
+        // Helper: resolve hub anchor directly below a module
+        function hubAnchor(moduleId) { return hubAnchorPrefix + moduleId; }
 
         const visEdges = [];
 
@@ -653,22 +730,9 @@
             camelToNodeId[cc] = m.id;
           });
 
-          // Central Temporal Server node
+          // Central Temporal Server — hub anchors already created above
           const temporalTarget = (TEMPORAL_ORCHESTRATION && TEMPORAL_ORCHESTRATION.target) || "localhost:7233";
           const temporalNs     = (TEMPORAL_ORCHESTRATION && TEMPORAL_ORCHESTRATION.namespace) || "default";
-          visNodes.push({
-            id:    "__temporal__",
-            label: "⏱️ Temporal\n" + temporalNs,
-            title: `Temporal Server: ${temporalTarget} — orquesta todos los workflows`,
-            color: {
-              background: "#3b1f6e",
-              border:     C.purple,
-              highlight:  { background: "#5a2fa8", border: C.purple },
-              hover:      { background: "#4a2890", border: C.purple },
-            },
-            font:  { color: "#e8e8f0", size: 13, face: "'Plus Jakarta Sans', sans-serif", bold: true },
-            shape: "ellipse", borderWidth: 3, borderWidthSelected: 4, margin: 14,
-          });
 
           const WF_COLORS = [C.blue, C.orange, C.green, C.accent, C.gold, "#c084fc"];
           const temporalEdgeActivities = {};  // populated below, stored in ref after build
@@ -684,7 +748,7 @@
             visEdges.push({
               id:     `temporal-trigger-${wfIdx}`,
               from:   orchId,
-              to:     "__temporal__",
+              to:     hubAnchor(orchId),
               label:  shortLabel,
               dashes: [5, 3],
               color:  { color: color + "cc", highlight: color, hover: color },
@@ -692,7 +756,7 @@
                         background: C.bg, strokeWidth: 0, align: "middle" },
               arrows: { to: { enabled: true, scaleFactor: 0.6 } },
               width:  1.5,
-              smooth: { enabled: true, type: "dynamic" },
+              smooth: false,
             });
 
             // Mejora 4: determine dashes per target (all-async → dashed, else solid)
@@ -719,7 +783,7 @@
               temporalEdgeActivities[edgeId] = { activities, color, wfLabel: shortLabel };
               visEdges.push({
                 id:     edgeId,
-                from:   "__temporal__",
+                from:   hubAnchor(tgtId),
                 to:     tgtId,
                 label:  shortLabel,
                 dashes: allAsync ? [4, 3] : false,
@@ -728,7 +792,7 @@
                           background: C.bg, strokeWidth: 0, align: "middle" },
                 arrows: { to: { enabled: true, scaleFactor: 0.7 } },
                 width:  2,
-                smooth: { enabled: true, type: "curvedCW", roundness: 0.12 + wfIdx * 0.18 },
+                smooth: false,
               });
 
               // Mejora 5: compensation edges (red dashed, Temporal → same target, thin)
@@ -737,7 +801,7 @@
                 const compId = `temporal-comp-${wfIdx}-${tgtId}-${aIdx}`;
                 visEdges.push({
                   id:     compId,
-                  from:   "__temporal__",
+                  from:   hubAnchor(tgtId),
                   to:     tgtId,
                   label:  "↩ " + act.compensation,
                   dashes: [3, 4],
@@ -746,7 +810,7 @@
                             background: C.bg, strokeWidth: 0, align: "middle" },
                   arrows: { to: { enabled: true, scaleFactor: 0.5 } },
                   width:  1,
-                  smooth: { enabled: true, type: "curvedCCW", roundness: 0.35 },
+                  smooth: { enabled: true, type: "curvedCCW", roundness: 0.25 },
                 });
               });
             });
@@ -755,21 +819,9 @@
           temporalEdgeActivitiesRef.current = temporalEdgeActivities;
         }
 
-        // Broker node — shown only if there are async events
+        // Broker node — hub anchors already created above
         if (EVENTS.length > 0) {
-          const brokerLabel = ((window.__EVA_DATA__.brokerName || "Kafka") + "\nBroker");
-          visNodes.push({
-            id:    "__broker__",
-            label: "⚡ " + brokerLabel,
-            title: "Message broker — retransmite eventos asíncronos entre módulos",
-            color: {
-              background: C.gold, border: "#c49a00",
-              highlight: { background: "#ffd84d", border: "#c49a00" },
-              hover:     { background: "#ffd84d", border: "#c49a00" },
-            },
-            font:  { color: "#0d1f3c", size: 13, face: "'Plus Jakarta Sans', sans-serif", bold: true },
-            shape: "box", borderWidth: 2, borderWidthSelected: 3, margin: 12,
-          });
+          const brokerName = window.__EVA_DATA__.brokerName || "Kafka";
         }
 
         // Async edges — routed through broker + group maps for hover highlighting
@@ -787,7 +839,7 @@
           visEdges.push({
             id:     pubId,
             from:   ev.producer,
-            to:     "__broker__",
+            to:     hubAnchor(ev.producer),
             label:  shortLabel,
             dashes: [6, 4],
             color:  { color: C.gold + "cc", highlight: C.gold, hover: C.gold },
@@ -795,7 +847,7 @@
                       background: C.bg, strokeWidth: 0, align: "middle" },
             arrows: { to: { enabled: true, scaleFactor: 0.6 } },
             width:  1.5,
-            smooth: { enabled: true, type: "dynamic" },
+            smooth: false,
           });
           // broker → each consumer
           (ev.consumers || []).forEach((consumer, j) => {
@@ -805,7 +857,7 @@
             edgeLabelMap[subId] = "";
             visEdges.push({
               id:     subId,
-              from:   "__broker__",
+              from:   hubAnchor(consumer),
               to:     consumer,
               label:  "",
               dashes: [4, 4],
@@ -813,15 +865,40 @@
               font:   { color: "rgba(0,0,0,0)", strokeWidth: 0 },
               arrows: { to: { enabled: true, scaleFactor: 0.5 } },
               width:  1.5,
-              smooth: { enabled: true, type: "dynamic" },
+              smooth: false,
             });
+          });
+        });
+
+        // ── Spread parallel edges so overlapping arrows fan out ──
+        const pairBuckets = {};
+        visEdges.forEach((e, idx) => {
+          const key = [e.from, e.to].slice().sort().join("|");
+          if (!pairBuckets[key]) pairBuckets[key] = [];
+          pairBuckets[key].push(idx);
+        });
+        Object.values(pairBuckets).forEach(indices => {
+          const n = indices.length;
+          if (n < 2) return;
+          indices.forEach((ei, i) => {
+            const slot = i - (n - 1) / 2;          // centered: −1, 0, 1 for n=3
+            if (slot === 0) {
+              visEdges[ei].smooth = false;           // center edge stays straight
+            } else {
+              const roundness = Math.min(Math.abs(slot) * 0.2 + 0.05, 0.5);
+              visEdges[ei].smooth = {
+                enabled: true,
+                type: slot > 0 ? "curvedCW" : "curvedCCW",
+                roundness,
+              };
+            }
           });
         });
 
         return { visNodes, visEdges, edgeGroupMap, eventEdgesMap, edgeLabelMap };
       }
 
-      function initNetwork(phys) {
+      function initNetwork() {
         if (!containerRef.current) return;
         if (networkRef.current) { networkRef.current.destroy(); }
 
@@ -836,24 +913,15 @@
           edges: edgesDS,
         };
         const options = {
-          physics: {
-            enabled: phys,
-            solver: "forceAtlas2Based",
-            forceAtlas2Based: { gravitationalConstant: -60, springLength: 160, springConstant: 0.05, damping: 0.5 },
-            stabilization: { iterations: 400, updateInterval: 25 },
-          },
+          physics: { enabled: false },
           interaction: { dragNodes: true, zoomView: true, hover: true, tooltipDelay: 150 },
           edges: { selectionWidth: 2 },
           nodes: { chosen: true },
-          layout: { randomSeed: 42 },
         };
 
         const net = new vis.Network(containerRef.current, data, options);
-        net.once("stabilizationIterationsDone", () => {
-          net.setOptions({ physics: { enabled: false } });
-          net.fit({ animation: { duration: 300, easingFunction: "easeInOutQuad" } });
-          setPhysicsOn(false);
-        });
+        net.fit({ animation: { duration: 300, easingFunction: "easeInOutQuad" } });
+        setPhysicsOn(false);
         net.on("hoverNode", (p) => setHoveredNode(p.node));
         net.on("blurNode",  ()  => setHoveredNode(null));
         net.on("hoverEdge", (p) => {
@@ -914,7 +982,7 @@
       }
 
       useEffect(() => {
-        initNetwork(true);
+        initNetwork();
         return () => { if (networkRef.current) networkRef.current.destroy(); };
       }, []);
 
@@ -925,11 +993,12 @@
       };
 
       const fitView  = () => networkRef.current && networkRef.current.fit({ animation: { duration: 400, easingFunction: "easeInOutQuad" } });
-      const resetNet = () => initNetwork(true);
+      const resetNet = () => initNetwork();
 
-      const hoveredMod      = (hoveredNode && hoveredNode !== "__broker__" && hoveredNode !== "__temporal__") ? MODULES[hoveredNode] : null;
-      const hoveredBroker   = hoveredNode === "__broker__";
-      const hoveredTemporal = hoveredNode === "__temporal__";
+      const isHubAnchor     = hoveredNode && typeof hoveredNode === "string" && hoveredNode.startsWith("__hub_");
+      const hoveredMod      = (hoveredNode && !isHubAnchor) ? MODULES[hoveredNode] : null;
+      const hoveredBroker   = isHubAnchor && !IS_TEMPORAL_MODE;
+      const hoveredTemporal = isHubAnchor && IS_TEMPORAL_MODE;
       // overlay priority: hoveredTemporalEdge > hoveredEvent > node tooltips
       const showOverlay   = hoveredTemporalEdge || hoveredEvent || hoveredMod || hoveredBroker || hoveredTemporal;
 
@@ -1039,28 +1108,28 @@
             {IS_TEMPORAL_MODE ? (
               <>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <svg width="36" height="12">
-                    <line x1="0" y1="6" x2="36" y2="6"
+                  <svg width="14" height="24">
+                    <line x1="7" y1="0" x2="7" y2="24"
                       stroke={C.blue} strokeWidth="1.5" strokeDasharray="5 3" strokeLinecap="round" />
-                    <polygon points="32,3 36,6 32,9" fill={C.blue} />
+                    <polygon points="4,20 7,24 10,20" fill={C.blue} />
                   </svg>
-                  <span style={{ color: C.textMuted, fontSize: 12 }}>Trigger (por workflow)</span>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>↓ Trigger</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <svg width="36" height="12">
-                    <line x1="0" y1="6" x2="36" y2="6"
+                  <svg width="14" height="24">
+                    <line x1="7" y1="0" x2="7" y2="24"
                       stroke={C.blue} strokeWidth="2" strokeLinecap="round" />
-                    <polygon points="32,3 36,6 32,9" fill={C.blue} />
+                    <polygon points="4,4 7,0 10,4" fill={C.blue} />
                   </svg>
-                  <span style={{ color: C.textMuted, fontSize: 12 }}>Dispatch sync</span>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>↑ Dispatch sync</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <svg width="36" height="12">
-                    <line x1="0" y1="6" x2="36" y2="6"
+                  <svg width="14" height="24">
+                    <line x1="7" y1="0" x2="7" y2="24"
                       stroke={C.blue} strokeWidth="2" strokeDasharray="4 3" strokeLinecap="round" />
-                    <polygon points="32,3 36,6 32,9" fill={C.blue} />
+                    <polygon points="4,4 7,0 10,4" fill={C.blue} />
                   </svg>
-                  <span style={{ color: C.textMuted, fontSize: 12 }}>Dispatch async</span>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>↑ Dispatch async</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <svg width="36" height="12">
@@ -1085,15 +1154,23 @@
                   <span style={{ color: C.textMuted, fontSize: 12 }}>Síncrono (HTTP)</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <svg width="36" height="12">
-                    <line x1="0" y1="6" x2="36" y2="6"
+                  <svg width="14" height="24">
+                    <line x1="7" y1="0" x2="7" y2="24"
                       stroke={C.gold} strokeWidth="1.5" strokeDasharray="6 4" strokeLinecap="round" />
-                    <polygon points="32,3 36,6 32,9" fill={C.gold} />
+                    <polygon points="4,20 7,24 10,20" fill={C.gold} />
                   </svg>
-                  <span style={{ color: C.textMuted, fontSize: 12 }}>Asíncrono (Kafka)</span>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>↓ Publicar evento</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="14" height="24">
+                    <line x1="7" y1="0" x2="7" y2="24"
+                      stroke={C.gold} strokeWidth="1.5" strokeDasharray="4 4" strokeLinecap="round" />
+                    <polygon points="4,4 7,0 10,4" fill={C.gold} />
+                  </svg>
+                  <span style={{ color: C.textMuted, fontSize: 12 }}>↑ Consumir evento</span>
                 </div>
                 <div style={{ color: C.textMuted, fontSize: 11, marginLeft: "auto" }}>
-                  {MODULES_LIST.length} módulos · {SYNC_INTEGRATIONS.length} puertos sync · {EVENTS.length} eventos
+                  {MODULES_LIST.length} módulos · {SYNC_INTEGRATIONS.length} puertos sync · {EVENTS.length} eventos · hover edges para detalles
                 </div>
               </>
             )}
