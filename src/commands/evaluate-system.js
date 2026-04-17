@@ -757,6 +757,69 @@ function buildModulesMap(systemConfig) {
   return modulesMap;
 }
 
+// ── Choreography Saga Report Extraction ─────────────────────────────────────
+
+function extractSagaReportData(systemConfig, domainConfigs) {
+  const rawSagas = systemConfig.sagas || [];
+  if (rawSagas.length === 0) return [];
+
+  return rawSagas.map((saga) => {
+    const steps = (saga.steps || []).map((step) => {
+      const isFinal = !step.emits || step.emits === null;
+      const isFirst = step.order === 1 || step.compensation === null;
+      const isCompensable = !!step.compensationEvent;
+
+      // Verify listener exists in domain config for compensation
+      let compensationListenerExists = false;
+      if (step.compensationEvent && step.compensationModule) {
+        const compDomCfg = domainConfigs[step.compensationModule]
+          || domainConfigs[step.compensationModule.replace(/-/g, '')] || null;
+        if (compDomCfg) {
+          compensationListenerExists = (compDomCfg.listeners || [])
+            .some((l) => l.event === step.compensationEvent);
+        }
+      }
+
+      return {
+        order: step.order,
+        module: step.module,
+        trigger: step.trigger || null,
+        topic: step.topic || null,
+        action: step.action || null,
+        emits: step.emits || null,
+        successTopic: step.successTopic || null,
+        compensationEvent: step.compensationEvent || null,
+        compensationTopic: step.compensationTopic || null,
+        compensationModule: step.compensationModule || null,
+        compensationUseCase: step.compensationUseCase || null,
+        compensation: step.compensation !== undefined ? step.compensation : undefined,
+        isFinal,
+        isFirst,
+        isCompensable,
+        compensationListenerExists,
+      };
+    }).sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    const hasMissingCompensations = steps.some(
+      (s) => !s.isFinal && !s.isFirst && s.compensation !== null && !s.isCompensable
+    );
+
+    const hasMissingListeners = steps.some(
+      (s) => s.isCompensable && !s.compensationListenerExists
+    );
+
+    return {
+      name: saga.name || 'Unnamed Saga',
+      description: saga.description || null,
+      trigger: saga.trigger || null,
+      steps,
+      observers: saga.observers || [],
+      hasMissingCompensations,
+      hasMissingListeners,
+    };
+  });
+}
+
 function extractReportData(systemConfig, validation, domainValidation) {
   const modulesConfig = systemConfig.modules || [];
   const asyncEvents = (systemConfig.integrations || {}).async || [];
@@ -885,6 +948,32 @@ async function evaluateSystemCommand(type, options = {}) {
 
   const reportData = extractReportData(systemConfig, validation, domainValidation);
   reportData.isTemporalMode = isTemporalMode;
+
+  // ── Choreography sagas ──────────────────────────────────────────────────
+  const choreographySagas = extractSagaReportData(systemConfig, domainConfigs);
+  reportData.choreographySagas = choreographySagas;
+
+  if (choreographySagas.length > 0) {
+    console.log();
+    console.log(chalk.bold('🔄 Choreography Sagas'));
+    console.log(chalk.gray('─'.repeat(40)));
+
+    const s6Errors = (validation.errors || []).filter((e) => e.startsWith('[S6-'));
+    const s6Warnings = (validation.warnings || []).filter((w) => w.startsWith('[S6-'));
+
+    console.log(`  ${chalk.cyan('📋 Sagas declaradas:')} ${chalk.cyan.bold(choreographySagas.length)}`);
+    if (s6Errors.length > 0) {
+      console.log(`  ${chalk.red('🔴 Errores S6:')} ${chalk.red.bold(s6Errors.length)}`);
+      s6Errors.forEach((e) => console.log(chalk.red(`     ${e}`)));
+    }
+    if (s6Warnings.length > 0) {
+      console.log(`  ${chalk.yellow('🟡 Advertencias S6:')} ${chalk.yellow.bold(s6Warnings.length)}`);
+      s6Warnings.forEach((w) => console.log(chalk.yellow(`     ${w}`)));
+    }
+    if (s6Errors.length === 0 && s6Warnings.length === 0) {
+      console.log(chalk.green('  ✅ Todas las sagas tienen compensaciones completas'));
+    }
+  }
 
   let temporalValidation = null;
   if (isTemporalMode) {

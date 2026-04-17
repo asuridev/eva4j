@@ -58,7 +58,10 @@
       queueTopology: QUEUE_TOPOLOGY,
       externalTypeDeps: EXTERNAL_TYPE_DEPS,
       temporalValidation: TEMPORAL_VALIDATION,
+      choreographySagas: CHOREOGRAPHY_SAGAS_RAW,
     } = window.__EVA_DATA__;
+
+    const CHOREOGRAPHY_SAGAS = CHOREOGRAPHY_SAGAS_RAW || [];
 
     // Convert arrays to maps for fast lookup
     const MODULES = Object.fromEntries(MODULES_LIST.map(m => [m.id, m]));
@@ -2399,6 +2402,265 @@
       );
     }
 
+    // ─── SagaChoreographyTab ─────────────────────────────────────────────────
+    function SagaChoreographyTab() {
+      const sagas = CHOREOGRAPHY_SAGAS || [];
+      const [selectedIdx, setSelectedIdx] = useState(0);
+      const [failAtStep, setFailAtStep] = useState(null);
+      const saga = sagas[selectedIdx] || null;
+
+      if (!sagas.length) return (
+        <div style={{ color: C.textMuted, padding: 60, textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>🔄</div>
+          No hay sagas de coreografía declaradas. Agrega una sección <code style={{ color: C.accent }}>sagas:</code> en <code style={{ color: C.accent }}>system.yaml</code>
+        </div>
+      );
+
+      const steps = saga ? (saga.steps || []) : [];
+      const lifo = [...steps].reverse().filter((s) => s.isCompensable);
+
+      const isRolledBack = (order) => failAtStep !== null && order > failAtStep;
+      const isFailPoint = (order) => order === failAtStep;
+
+      return (
+        <div>
+          {/* Saga selector */}
+          {sagas.length > 1 && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+              {sagas.map((s, i) => (
+                <button key={i} onClick={() => { setSelectedIdx(i); setFailAtStep(null); }} style={{
+                  background: i === selectedIdx ? C.accent + "22" : C.surface,
+                  border: `1px solid ${i === selectedIdx ? C.accent : C.border}`,
+                  color: i === selectedIdx ? C.accent : C.textMuted,
+                  borderRadius: 8, padding: "7px 14px", cursor: "pointer",
+                  fontWeight: i === selectedIdx ? 700 : 400, fontSize: 12,
+                  transition: "all 0.15s", fontFamily: "inherit",
+                }}>🔄 {s.name}</button>
+              ))}
+            </div>
+          )}
+
+          {/* Saga header */}
+          <div style={{ background: C.surface, border: `1px solid ${C.accent}44`, borderRadius: 12, padding: 20, marginBottom: 24 }}>
+            <div style={{ fontWeight: 800, fontSize: 18, color: C.text, marginBottom: 6 }}>🔄 {saga.name}</div>
+            {saga.description && (
+              <div style={{ color: C.textMuted, fontSize: 12, marginBottom: 12 }}>{saga.description}</div>
+            )}
+            <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>
+                <span style={{ color: C.text, fontWeight: 700 }}>{steps.length}</span> pasos
+              </span>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>
+                <span style={{ color: C.green, fontWeight: 700 }}>{steps.filter(s => s.isCompensable).length}</span> con compensación
+              </span>
+              {saga.hasMissingCompensations && (
+                <span style={{ color: C.gold, fontWeight: 700, fontSize: 12 }}>⚠ Hay pasos sin compensación declarada</span>
+              )}
+              {saga.hasMissingListeners && (
+                <span style={{ color: C.accent, fontWeight: 700, fontSize: 12 }}>🔴 Listeners de compensación faltantes</span>
+              )}
+            </div>
+            {saga.trigger && (
+              <div style={{ marginTop: 10, fontSize: 11, color: C.textMuted }}>
+                Disparado por: <code style={{ color: C.blue, background: C.bg, padding: "1px 6px", borderRadius: 4 }}>
+                  {saga.trigger.httpMethod} {saga.trigger.path}
+                </code>
+                <span style={{ marginLeft: 8 }}>en <span style={{ color: C.textDim }}>{saga.trigger.module}</span></span>
+              </div>
+            )}
+          </div>
+
+          {/* Fail simulator */}
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, marginBottom: 24 }}>
+            <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>
+              🔴 SIMULAR FALLO EN PASO:
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <button onClick={() => setFailAtStep(null)} style={{
+                background: failAtStep === null ? C.green + "22" : C.bg,
+                border: `1px solid ${failAtStep === null ? C.green : C.border}`,
+                color: failAtStep === null ? C.green : C.textMuted,
+                borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+              }}>✅ Sin fallo</button>
+              {steps.filter(s => !s.isFinal).map((s) => (
+                <button key={s.order} onClick={() => setFailAtStep(s.order)} style={{
+                  background: failAtStep === s.order ? C.accent + "22" : C.bg,
+                  border: `1px solid ${failAtStep === s.order ? C.accent : C.border}`,
+                  color: failAtStep === s.order ? C.accent : C.textMuted,
+                  borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+                }}>Paso {s.order} — {s.action || s.module}</button>
+              ))}
+            </div>
+            {failAtStep !== null && (
+              <div style={{ marginTop: 12, padding: "10px 14px", background: C.accent + "11", border: `1px solid ${C.accent}44`, borderRadius: 8 }}>
+                <div style={{ color: C.accent, fontWeight: 700, fontSize: 12, marginBottom: 6 }}>
+                  💥 Fallo en paso {failAtStep} — Compensaciones LIFO que se ejecutan:
+                </div>
+                {lifo.filter(s => s.order < failAtStep).length === 0 ? (
+                  <div style={{ color: C.gold, fontSize: 11 }}>⚠ Ningún paso previo tiene compensación declarada</div>
+                ) : (
+                  <div style={{ color: C.textDim, fontSize: 11, lineHeight: 1.8 }}>
+                    {lifo.filter(s => s.order < failAtStep).map((s, i, arr) => (
+                      <span key={i}>
+                        <code style={{ color: C.accent, background: C.surface, padding: "1px 5px", borderRadius: 3 }}>
+                          {s.compensationUseCase || s.compensationEvent}
+                        </code>
+                        {" en "}<span style={{ color: C.textDim }}>{s.compensationModule}</span>
+                        {s.compensationListenerExists === false && (
+                          <span style={{ color: C.gold, marginLeft: 4 }}>⚠ listener faltante</span>
+                        )}
+                        {i < arr.length - 1 ? " → " : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Execution chain */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>
+              ▶ CADENA DE EJECUCIÓN (orden cronológico)
+            </div>
+            {steps.map((step, i) => {
+              const rolledBack = isRolledBack(step.order);
+              const failPoint = isFailPoint(step.order);
+              const color = failPoint ? C.accent
+                : rolledBack ? C.textMuted
+                : step.isFinal ? C.blue
+                : step.isCompensable ? C.green
+                : C.gold;
+
+              return (
+                <div key={i} style={{ display: "flex", gap: 12, marginBottom: 6, opacity: rolledBack ? 0.35 : 1 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 36, flexShrink: 0 }}>
+                    <div style={{
+                      width: 34, height: 34, borderRadius: "50%",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: color + "22", border: `2px solid ${color}55`,
+                      color, fontWeight: 800, fontSize: 12,
+                    }}>
+                      {failPoint ? "💥" : rolledBack ? "○" : step.order}
+                    </div>
+                    {i < steps.length - 1 && (
+                      <div style={{ width: 2, flex: 1, minHeight: 12, background: C.border, marginTop: 3 }} />
+                    )}
+                  </div>
+                  <div style={{
+                    flex: 1,
+                    background: failPoint ? C.accent + "11" : C.surface,
+                    border: `1px solid ${failPoint ? C.accent : rolledBack ? C.border : color + "44"}`,
+                    borderRadius: 8, padding: "10px 14px",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 700, color: failPoint ? C.accent : C.text, fontSize: 13 }}>
+                        {step.action || '(action)'}
+                      </span>
+                      <span style={{ color: C.textMuted, fontSize: 11 }}>en</span>
+                      <span style={{ color: C.blue, fontSize: 11, fontWeight: 600 }}>{step.module}</span>
+                      {step.isCompensable && <Tag color={C.green}>compensable</Tag>}
+                      {!step.isCompensable && !step.isFinal && step.compensation !== null && <Tag color={C.gold}>sin compensación</Tag>}
+                      {step.isFinal && <Tag color={C.blue}>final</Tag>}
+                      {failPoint && <Tag color={C.accent}>FALLO AQUÍ</Tag>}
+                    </div>
+                    {step.trigger && (
+                      <div style={{ marginTop: 4, fontSize: 11, color: C.textMuted }}>
+                        ← escucha: <code style={{ color: C.gold, background: C.bg, padding: "1px 4px", borderRadius: 3 }}>{step.trigger}</code>
+                        {step.topic && <span style={{ color: C.textMuted }}> ({step.topic})</span>}
+                      </div>
+                    )}
+                    {step.emits && (
+                      <div style={{ marginTop: 2, fontSize: 11, color: C.textMuted }}>
+                        → emite: <code style={{ color: C.green, background: C.bg, padding: "1px 4px", borderRadius: 3 }}>{step.emits}</code>
+                        {step.successTopic && <span style={{ color: C.textMuted }}> ({step.successTopic})</span>}
+                      </div>
+                    )}
+                    {step.isCompensable && (
+                      <div style={{ marginTop: 4, fontSize: 11, color: C.textMuted }}>
+                        ↩ si falla: <code style={{ color: C.accent, background: C.bg, padding: "1px 4px", borderRadius: 3 }}>{step.compensationEvent}</code>
+                        {" → "}<span style={{ color: C.accent }}>{step.compensationUseCase || '?'}</span>
+                        {" en "}<span style={{ color: C.textDim }}>{step.compensationModule}</span>
+                        {step.compensationListenerExists === false && (
+                          <span style={{ marginLeft: 6, color: C.gold, fontWeight: 700 }}>⚠ listener faltante</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* LIFO compensation chain */}
+          {lifo.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>
+                ↩ CADENA DE COMPENSACIÓN LIFO (si falla el último paso)
+              </div>
+              {lifo.map((step, i, arr) => (
+                <div key={i} style={{ display: "flex", gap: 12, marginBottom: 6 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 36, flexShrink: 0 }}>
+                    <div style={{
+                      width: 34, height: 34, borderRadius: "50%",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: C.accent + "22", border: `2px solid ${C.accent}55`,
+                      color: C.accent, fontWeight: 800, fontSize: 12,
+                    }}>{i + 1}</div>
+                    {i < arr.length - 1 && (
+                      <div style={{ width: 2, flex: 1, minHeight: 12, background: C.accent + "33", marginTop: 3 }} />
+                    )}
+                  </div>
+                  <div style={{ flex: 1, background: C.accent + "08", border: `1px solid ${C.accent}33`, borderRadius: 8, padding: "10px 14px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ color: C.accent, fontWeight: 700, fontSize: 12 }}>
+                        ↩ {step.compensationUseCase || step.compensationEvent}
+                      </span>
+                      <span style={{ color: C.textMuted, fontSize: 11 }}>
+                        en <span style={{ color: C.textDim }}>{step.compensationModule}</span>
+                      </span>
+                      <span style={{ color: C.textMuted, fontSize: 11 }}>
+                        (revierte paso {step.order}: {step.action})
+                      </span>
+                      {step.compensationListenerExists === false && (
+                        <Tag color={C.gold}>⚠ listener faltante</Tag>
+                      )}
+                    </div>
+                    {step.compensationTopic && (
+                      <div style={{ marginTop: 4, fontSize: 11, color: C.textMuted }}>
+                        topic: <code style={{ color: C.textDim, background: C.bg, padding: "1px 4px", borderRadius: 3 }}>{step.compensationTopic}</code>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Observers */}
+          {saga.observers && saga.observers.length > 0 && (
+            <div>
+              <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>
+                👁 OBSERVERS (reaccionan sin ser pasos formales de la saga)
+              </div>
+              {saga.observers.map((obs, i) => (
+                <div key={i} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px", marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, color: C.text, fontSize: 13, marginBottom: 6 }}>{obs.module}</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {(obs.on || []).map((evName, j) => (
+                      <code key={j} style={{ color: C.gold, background: C.bg, padding: "2px 6px", borderRadius: 4, fontSize: 11 }}>
+                        {evName}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     // ─── ActivityCatalogTab ─────────────────────────────────────────────────
     function ActivityCatalogTab() {
       const catalog = ACTIVITY_CATALOG || [];
@@ -2698,6 +2960,7 @@
         : [
             { id: "validation",   label: "Validación",           icon: "🔍" },
             { id: "flows",        label: "Simulador de flujos",   icon: "▶" },
+            ...(CHOREOGRAPHY_SAGAS.length > 0 ? [{ id: "sagas", label: "Sagas", icon: "🔄" }] : []),
             { id: "architecture", label: "Arquitectura",          icon: "🗺️" },
             { id: "diagram",      label: "Diagrama",              icon: "◈" },
             ...(DOMAIN_VALIDATION ? [{ id: "domain", label: "Dominio", icon: "🏛️" }] : []),
@@ -2737,6 +3000,9 @@
                     )}
                     {sys.syncIntegrations && sys.syncIntegrations.length > 0 && (
                       <Tag color={C.blue}>Sync · {sys.syncIntegrations.length} ports</Tag>
+                    )}
+                    {CHOREOGRAPHY_SAGAS.length > 0 && (
+                      <Tag color={C.accent}>🔄 {CHOREOGRAPHY_SAGAS.length} saga{CHOREOGRAPHY_SAGAS.length > 1 ? 's' : ''}</Tag>
                     )}
                   </>
                 )}
@@ -2780,6 +3046,7 @@
             {IS_TEMPORAL_MODE && tab === "architecture" && <TemporalArchitectureTab />}
             {/* Broker-mode tabs */}
             {!IS_TEMPORAL_MODE && tab === "flows"        && <FlowSimulator />}
+            {!IS_TEMPORAL_MODE && tab === "sagas"        && CHOREOGRAPHY_SAGAS.length > 0 && <SagaChoreographyTab />}
             {!IS_TEMPORAL_MODE && tab === "architecture" && <ArchitectureTab />}
             {/* Shared tabs */}
             {tab === "diagram"      && <DiagramTab />}

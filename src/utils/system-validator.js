@@ -566,6 +566,111 @@ function validateSystem(systemConfig, domainConfigs = {}) {
     }
   }
 
+  // ── S6 — Saga Integrity (Choreography) ──────────────────────────────────
+
+  const sagas = systemConfig.sagas || [];
+
+  if (sagas.length === 0) {
+    ok.push('[S6-000] No hay sagas de coreografía declaradas en system.yaml (opcional) ✓');
+  } else {
+    let s6_001_found = false;
+    let s6_002_found = false;
+    let s6_003_found = false;
+    let s6_004_found = false;
+    let s6_005_found = false;
+    let s6_006_found = false;
+
+    // Build a flat set of all event names produced across all domain configs
+    const allProducedEvents = new Set();
+    for (const [, domCfg] of Object.entries(domainConfigs)) {
+      for (const agg of (domCfg.aggregates || [])) {
+        for (const ev of (agg.events || [])) {
+          if (ev.name) allProducedEvents.add(ev.name);
+        }
+      }
+    }
+
+    for (const saga of sagas) {
+      const sagaName = saga.name || '(sin nombre)';
+      const steps = saga.steps || [];
+
+      for (const step of steps) {
+        const stepNum = step.order || '?';
+        const stepModule = step.module;
+        const domCfg = stepModule ? (domainConfigs[stepModule] || domainConfigs[toCamelCase(stepModule)] || null) : null;
+
+        // S6-001: step.module not in modules[]
+        if (stepModule && !moduleNames.has(stepModule) && !moduleNames.has(toCamelCase(stepModule))) {
+          errors.push(`[S6-001] Saga '${sagaName}' paso ${stepNum}: módulo '${stepModule}' no está declarado en modules[]`);
+          s6_001_found = true;
+        }
+
+        // S6-002: step.emits event not found in module's domain.yaml events[]
+        if (step.emits && domCfg) {
+          const moduleEvents = new Set();
+          for (const agg of (domCfg.aggregates || [])) {
+            for (const ev of (agg.events || [])) {
+              if (ev.name) moduleEvents.add(ev.name);
+            }
+          }
+          if (!moduleEvents.has(step.emits)) {
+            errors.push(`[S6-002] Saga '${sagaName}' paso ${stepNum}: el evento '${step.emits}' no está declarado en events[] del módulo '${stepModule}' — agrégalo en el domain.yaml`);
+            s6_002_found = true;
+          }
+        }
+
+        // S6-003: compensationEvent declared but compensationModule has no listener for it
+        if (step.compensationEvent && step.compensationModule) {
+          const compModuleName = step.compensationModule;
+          const compDomCfg = domainConfigs[compModuleName] || domainConfigs[toCamelCase(compModuleName)] || null;
+          if (compDomCfg) {
+            const compListeners = compDomCfg.listeners || [];
+            const hasListener = compListeners.some((l) => l.event === step.compensationEvent);
+            if (!hasListener) {
+              errors.push(`[S6-003] Saga '${sagaName}' paso ${stepNum}: compensationEvent '${step.compensationEvent}' declarado pero el módulo '${compModuleName}' no tiene un listener para ese evento en su domain.yaml — agrega:\n          listeners:\n            - event: ${step.compensationEvent}\n              topic: ${step.compensationTopic || step.compensationEvent.replace(/([A-Z])/g, '_$1').toUpperCase().replace(/^_/, '').replace(/EVENT$/, '').replace(/_$/, '')}\n              useCase: ${step.compensationUseCase || 'TODO'}`);
+              s6_003_found = true;
+            } else if (step.compensationUseCase) {
+              // S6-005: listener exists but useCase doesn't match
+              const matchingListener = compListeners.find((l) => l.event === step.compensationEvent);
+              if (matchingListener && matchingListener.useCase !== step.compensationUseCase) {
+                warnings.push(`[S6-005] Saga '${sagaName}' paso ${stepNum}: compensationUseCase declarado es '${step.compensationUseCase}' pero el listener en '${compModuleName}' usa '${matchingListener.useCase}' — verifica que el useCase sea el correcto`);
+                s6_005_found = true;
+              }
+            }
+          } else if (moduleNames.has(compModuleName) || moduleNames.has(toCamelCase(compModuleName))) {
+            warnings.push(`[S6-003] Saga '${sagaName}' paso ${stepNum}: no se encontró el domain.yaml de '${compModuleName}' para verificar el listener de '${step.compensationEvent}'`);
+            s6_003_found = true;
+          }
+        }
+
+        // S6-004: intermediate step without compensationEvent (warn, except step 1 and final step)
+        const isFinalStep = !step.emits || step.emits === null;
+        const isFirstStep = stepNum === 1 || step.compensation === null;
+        if (!isFinalStep && !isFirstStep && step.compensation !== null && !step.compensationEvent) {
+          warnings.push(`[S6-004] Saga '${sagaName}' paso ${stepNum} (${step.action || '?'}): paso sin compensationEvent declarado — si este paso puede fallar y deja efectos secundarios, declara una compensación o marca compensation: null para indicar que es intencional`);
+          s6_004_found = true;
+        }
+      }
+
+      // S6-006: observer module references event not found anywhere
+      for (const observer of (saga.observers || [])) {
+        for (const evName of (observer.on || [])) {
+          if (!allProducedEvents.has(evName)) {
+            info.push(`[S6-006] Saga '${sagaName}' observer '${observer.module}': el evento '${evName}' no está declarado en events[] de ningún módulo`);
+            s6_006_found = true;
+          }
+        }
+      }
+    }
+
+    if (!s6_001_found) ok.push('[S6-001] Todos los módulos referenciados en sagas[] están declarados en modules[] ✓');
+    if (!s6_002_found) ok.push('[S6-002] Todos los eventos emitidos en sagas[] están declarados en el domain.yaml del módulo correspondiente ✓');
+    if (!s6_003_found) ok.push('[S6-003] Todos los compensationEvents tienen un listener declarado en el módulo compensador ✓');
+    if (!s6_004_found) ok.push('[S6-004] Todos los pasos intermedios tienen compensación declarada ✓');
+    if (!s6_005_found) ok.push('[S6-005] Todos los compensationUseCase coinciden con el useCase del listener en el módulo compensador ✓');
+    if (!s6_006_found) ok.push('[S6-006] Todos los eventos en observers[] están declarados en algún módulo ✓');
+  }
+
   // ── Score (info items do not affect score) ────────────────────────────────
 
   const total = ok.length + errors.length + warnings.length * 0.5;
