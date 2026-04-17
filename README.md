@@ -543,6 +543,9 @@ All commands are fully documented with examples, use cases, and best practices:
 - **[DOMAIN_YAML_GUIDE.md](DOMAIN_YAML_GUIDE.md)** - Complete YAML syntax reference
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Command cheat sheet  
 - **[examples/](examples/)** - 10+ YAML examples for different scenarios
+- **[docs/CHOREOGRAPHY_SAGAS_GUIDE.md](docs/CHOREOGRAPHY_SAGAS_GUIDE.md)** - Choreography sagas: single, chained and parallel compensation patterns
+- **[docs/KAFKA_PRODUCTION_CONFIG.md](docs/KAFKA_PRODUCTION_CONFIG.md)** - Kafka production configuration reference
+- **[docs/RABBITMQ_PRODUCTION_CONFIG.md](docs/RABBITMQ_PRODUCTION_CONFIG.md)** - RabbitMQ production configuration reference
 
 ---
 

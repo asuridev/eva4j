@@ -42,7 +42,8 @@ Antes de generar nada, lee estos archivos del proyecto para obtener contexto:
 | Paso | Archivo generado | Referencia |
 |------|------------------|------------|
 | 1 | _(recopilación de info)_ | Este archivo |
-| 2–5 | `system/system.yaml` | Este archivo + `references/system-yaml-spec.md` |
+| 2–5 | `system/system.yaml` (estructura base) | Este archivo + `references/system-yaml-spec.md` |
+| 2b | `sagas:` en `system/system.yaml` (flujos críticos) | Este archivo (Paso 2b) |
 | 6 | `system/system.md` | `references/module-spec.md` (sección system.md) |
 | 6.5 | `system/c4-context.mmd` + `system/c4-container.mmd` | Este archivo (sección C4) |
 | 7 | `system/{module}.yaml` (uno por módulo) | `references/domain-yaml-spec.md` |
@@ -156,6 +157,144 @@ integrations:
 
 ---
 
+## Paso 2b — Identificar flujos críticos con compensación (sagas de coreografía)
+
+Antes de finalizar el `system.yaml`, analiza los flujos async para detectar cuáles son **multi-paso con efectos secundarios distribuidos**. Estos flujos se declaran en la sección `sagas:` del `system.yaml` para documentar el comportamiento de compensación y habilitarlo en el reporte de `eva evaluate system`.
+
+### Criterios de identificación — ¿cuándo declarar una saga?
+
+Un flujo async es una **saga candidata** cuando cumple 2 o más de estas condiciones:
+
+| Criterio | Señal en el diseño |
+|---|---|
+| ≥ 3 módulos participan en cadena de eventos | A emite → B consume y emite → C consume y emite |
+| Algún paso modifica estado no fácilmente reversible | Reserva de stock, cargo financiero, llamada a API externa |
+| Un fallo tardío deja el sistema en estado inconsistente | Pago cobrado pero stock sin reservar |
+| El flujo involucra recursos externos vía `ports:` | Pasarelas de pago, sistemas de envío, APIs de terceros |
+| El flujo requiere rollback ordenado LIFO de pasos anteriores | Varios pasos acumulan estado antes del paso final |
+
+> **Regla práctica:** Si ante la pregunta "¿qué pasa si falla el paso N?" la respuesta es "quedan datos inconsistentes en otro módulo", necesitas declarar una saga.
+
+### Cuándo NO declarar una saga
+
+- Flujo de un solo módulo (sin coordinación cross-module)
+- Todos los pasos son idempotentes y sin efectos secundarios acumulados
+- Los fallos son manejables con reintentos + dead letter queue
+- El negocio acepta inconsistencia temporal sin necesidad de rollback explícito
+
+### Proceso de identificación (3 pasos)
+
+1. **Mapea la cadena:** `EventoA → MóduloB → EventoB → MóduloC → EventoC → …`
+2. **Marca pasos compensables:** Para cada paso intermedio (no el primero ni el último), pregunta: ¿modifica estado en su módulo? Si sí → es compensable.
+3. **Asigna compensador LIFO:** El paso N es compensado por el módulo del paso N-1. Esto garantiza que cada módulo solo revierte lo que el paso anterior inició.
+
+### Convenciones de nombres para sagas
+
+| Elemento | Convención | Ejemplo correcto | Ejemplo incorrecto |
+|---|---|---|---|
+| Nombre de saga | PascalCase + sufijo `Saga` | `PlaceOrderSaga` | `OrderFlow`, `OrderSagaProcess` |
+| Step `action` | PascalCase, verbo+sustantivo | `ReserveStock`, `ProcessPayment` | `reserve_stock`, `doPayment` |
+| Use case de compensación | `Compensate` + sustantivo de lo que se revierte | `CompensateStockReservation` | `RollbackStock`, `UndoPayment` |
+| Evento de compensación | PascalCase + pasado + fallo + `Event` | `PaymentFailedEvent` | `PaymentError`, `FailedPaymentEvent` |
+| Topic de compensación | SCREAMING_SNAKE_CASE semántico | `PAYMENT_FAILED` | `paymentFailed`, `PAYMENT-FAILED` |
+
+**Regla crítica para `compensationUseCase`:**
+Debe describir **la acción de deshacer**, con prefijo `Compensate` seguido del sustantivo del paso que se revierte — no el evento que lo dispara ni el módulo que lo procesa.
+
+| El step hizo... | La compensación es... |
+|---|---|
+| `ReserveStock` | `CompensateStockReservation` |
+| `ProcessPayment` | `CompensatePayment` |
+| `CreateOrder` | `CompensateOrderPlacement` |
+| `ScheduleDelivery` | `CompensateDeliveryScheduling` |
+
+El valor de `compensationUseCase` en la saga **debe coincidir exactamente** con el `useCase` del listener que lo implementa en el `domain.yaml` del `compensationModule`. El validador S6-005 detecta cualquier discrepancia.
+
+### Estructura `sagas:` en system.yaml
+
+```yaml
+sagas:
+  - name: PlaceOrderSaga                            # PascalCase + "Saga"
+    description: "Order creation with stock reservation and payment processing"
+    trigger:
+      module: orders
+      useCase: CreateOrder
+      httpMethod: POST
+      path: /orders
+    steps:
+      - order: 1
+        module: orders
+        action: CreateOrder                          # Primer paso: iniciador de la saga
+        emits: OrderPlacedEvent
+        topic: ORDER_PLACED
+        compensation: null                           # null explícito — no se compensa a sí mismo
+
+      - order: 2
+        module: inventory
+        trigger: OrderPlacedEvent                    # Escucha este evento del paso anterior
+        topic: ORDER_PLACED
+        action: ReserveStock                         # Modifica estado → es compensable
+        emits: StockReservedEvent
+        successTopic: STOCK_RESERVED
+        compensationEvent: StockReservationFailedEvent
+        compensationTopic: STOCK_RESERVATION_FAILED
+        compensationModule: orders                   # El módulo del paso anterior (paso 1) compensa
+        compensationUseCase: CompensateOrderPlacement  # Debe coincidir con listener.useCase en orders.yaml
+
+      - order: 3
+        module: payments
+        trigger: StockReservedEvent
+        topic: STOCK_RESERVED
+        action: ProcessPayment
+        emits: PaymentApprovedEvent
+        successTopic: PAYMENT_APPROVED
+        compensationEvent: PaymentFailedEvent
+        compensationTopic: PAYMENT_FAILED
+        compensationModule: inventory                # El módulo del paso 2 compensa el paso 3
+        compensationUseCase: CompensateStockReservation
+
+      - order: 4
+        module: orders
+        trigger: PaymentApprovedEvent
+        topic: PAYMENT_APPROVED
+        action: ConfirmOrder                         # Paso final: destino exitoso de la saga
+        emits: OrderConfirmedEvent
+        successTopic: ORDER_CONFIRMED
+        compensation: null                           # null explícito — último paso no tiene compensación
+
+    observers:                                       # Módulos que reaccionan sin ser pasos formales de la saga
+      - module: notifications
+        on: [OrderPlacedEvent, PaymentApprovedEvent, PaymentFailedEvent]
+```
+
+### Wiring en domain.yaml — listeners de compensación
+
+Por cada step con `compensationEvent`, el `compensationModule` **debe declarar un listener** en su `domain.yaml`. Esto se completa en el **Paso 7**:
+
+```yaml
+# En orders.yaml — compensationModule del paso 2
+listeners:
+  - event: StockReservationFailedEvent
+    topic: STOCK_RESERVATION_FAILED
+    useCase: CompensateOrderPlacement        # Idéntico a compensationUseCase del step 2
+    fields:
+      - name: orderId
+        type: String
+
+# En inventory.yaml — compensationModule del paso 3
+listeners:
+  - event: PaymentFailedEvent
+    topic: PAYMENT_FAILED
+    useCase: CompensateStockReservation      # Idéntico a compensationUseCase del step 3
+    fields:
+      - name: orderId
+        type: String
+```
+
+> **Validación automática:** `eva evaluate system` ejecuta reglas S6. S6-003 detecta listeners de compensación faltantes y sugiere el snippet YAML exacto. S6-005 detecta discrepancias de nombre entre `compensationUseCase` y el `useCase` del listener.
+
+---
+
 ## Paso 3 — Reglas obligatorias (resumen)
 
 | Elemento | Convención | Ejemplo |
@@ -165,6 +304,10 @@ integrations:
 | Topics | SCREAMING_SNAKE_CASE sin prefix | `ORDER_PLACED` |
 | Ports | PascalCase + `Service` único/módulo | `OrderCustomerService` |
 | useCases | PascalCase, verbo+sustantivo | `CreateOrder`, `ConfirmOrder` |
+| Sagas | PascalCase + sufijo `Saga` | `PlaceOrderSaga`, `CheckoutSaga` |
+| Use case de compensación | `Compensate` + sustantivo del paso revertido | `CompensateStockReservation`, `CompensatePayment` |
+| Eventos de compensación | PascalCase + pasado + fallo + `Event` | `PaymentFailedEvent`, `StockReservationFailedEvent` |
+| Topics de compensación | SCREAMING_SNAKE_CASE con semántica clara | `PAYMENT_FAILED`, `STOCK_RESERVATION_FAILED` |
 
 **Restricciones críticas:**
 - Sin dependencias circulares síncronas
@@ -192,6 +335,13 @@ Antes de proponer el `system.yaml`, verifica:
 - [ ] Módulos pasivos no son `caller`
 - [ ] Todo en inglés
 - [ ] Archivo en `system/system.yaml`
+- [ ] Si hay flujos async multi-paso con efectos acumulados → `sagas:` declarado en system.yaml
+- [ ] Nombres de saga en PascalCase + sufijo `Saga`
+- [ ] Step `action` en PascalCase, verbo+sustantivo
+- [ ] `compensationUseCase` usa prefijo `Compensate` + sustantivo del paso que se revierte
+- [ ] `compensationUseCase` de cada step coincide exactamente con el `useCase` del listener en `compensationModule`
+- [ ] Pasos iniciador y final tienen `compensation: null` explícito
+- [ ] Cada `compensationModule` tiene listener declarado en su `domain.yaml` (completar en Paso 7)
 
 ---
 
@@ -346,6 +496,25 @@ Antes de guardar, verifica:
 Lee `references/domain-yaml-spec.md` para la especificación completa de estructura, reglas, restricciones y checklist del `system/{module}.yaml`.
 
 Para cada módulo en `modules:`, genera `system/{nombre-del-modulo}.yaml` con: aggregates, entities, valueObjects, enums (con transitions si aplica), events, endpoints, listeners, ports y **readModels** — todo inferido del `system.yaml`.
+
+### Wiring de listeners de compensación desde `sagas:`
+
+Si `system.yaml` tiene una sección `sagas:`, **por cada step con `compensationEvent`**, verifica que el `compensationModule` tenga el listener declarado en su `domain.yaml`. Si no existe, agrégalo:
+
+1. Localiza el step: extrae `compensationEvent`, `compensationTopic`, `compensationModule`, `compensationUseCase`
+2. En el `domain.yaml` del `compensationModule`, agrega a `listeners:`:
+   ```yaml
+   - event: {compensationEvent}           # Ej: StockReservationFailedEvent
+     topic: {compensationTopic}           # Ej: STOCK_RESERVATION_FAILED
+     useCase: {compensationUseCase}       # Ej: CompensateOrderPlacement — DEBE ser idéntico al step
+     fields:
+       - name: {aggregateId}              # Siempre incluir el id del agregado raíz de la saga
+         type: String
+   ```
+3. Si el mismo `compensationModule` aparece en múltiples steps, agrupa todos los listeners en el mismo `domain.yaml`
+4. El `useCase` del listener es el **punto de entrada** de la compensación — el developer implementa el `CommandHandler` generado con la lógica de reversión
+
+> **Invariante:** `step.compensationUseCase` en `system.yaml` == `listeners[].useCase` en `{compensationModule}.yaml`. Error S6-005 detecta cualquier discrepancia.
 
 ### Endpoints en módulos con múltiples agregados
 
