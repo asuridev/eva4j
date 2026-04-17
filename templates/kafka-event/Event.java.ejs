@@ -5,8 +5,13 @@ package <%= packageName %>.<%= moduleName %>.application.events;
 <% const needsList = eventFields && eventFields.some(f => f.isCollection); %>
 <%
   const _STANDARD_TYPES = new Set(['String','Integer','Long','Double','Float','Boolean','BigDecimal','LocalDate','LocalDateTime','LocalTime','Instant','UUID']);
+  // Types inside List<X> where X is custom (e.g. List<CartCheckoutItem>)
   const _customElementTypes = eventFields
     ? [...new Set(eventFields.filter(f => f.isCollection && f.collectionElementType && !_STANDARD_TYPES.has(f.collectionElementType)).map(f => f.collectionElementType))]
+    : [];
+  // Direct custom types that are NOT collections and NOT standard (e.g. CheckoutAddress)
+  const _customDirectTypes = eventFields
+    ? [...new Set(eventFields.filter(f => !f.isCollection && !_STANDARD_TYPES.has(f.javaType) && !f.isEnum).map(f => f.javaType))]
     : [];
 %>
 <% if (needsBigDecimal) { %>
@@ -24,6 +29,9 @@ import java.util.List;
 <% } %>
 <% _customElementTypes.forEach(typeName => { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.events.<%- typeName %>;
+<% }); %>
+<% _customDirectTypes.forEach(typeName => { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.<%- typeName %>;
 <% }); %>
 
 /**

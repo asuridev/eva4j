@@ -26,12 +26,20 @@ import java.util.List;
 <% } %>
 <%
   const _STANDARD_DOMAIN_TYPES = new Set(['String','Integer','Long','Double','Float','Boolean','BigDecimal','LocalDate','LocalDateTime','LocalTime','Instant','UUID']);
+  // Types inside List<X> where X is custom (e.g. List<CartCheckoutItem>)
   const _customDomainElementTypes = _ownFields
     ? [...new Set(_ownFields.filter(f => f.isCollection && f.collectionElementType && !_STANDARD_DOMAIN_TYPES.has(f.collectionElementType)).map(f => f.collectionElementType))]
+    : [];
+  // Direct custom types that are NOT collections and NOT standard (e.g. CheckoutAddress)
+  const _customDomainDirectTypes = _ownFields
+    ? [...new Set(_ownFields.filter(f => !f.isCollection && !_STANDARD_DOMAIN_TYPES.has(f.javaType) && !f.isEnum).map(f => f.javaType))]
     : [];
 %>
 <% _customDomainElementTypes.forEach(typeName => { %>
 import <%= packageName %>.<%= moduleName %>.domain.models.events.<%- typeName %>;
+<% }); %>
+<% _customDomainDirectTypes.forEach(typeName => { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.valueObjects.<%- typeName %>;
 <% }); %>
 
 /**

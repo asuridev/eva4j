@@ -29,7 +29,67 @@ Especificación técnica narrativa del sistema completo. Una sección `##` por c
 [One `####` section per useCase in exposes: and consumers[].useCase]
 
 #### {UseCaseName}
+**Type:** `HTTP Command` | `HTTP Query` | `Incoming Event`
 **What it does:** [detailed business logic description]
+**Endpoint:** [required for HTTP use cases — `METHOD /path`]
+**Path params:** _(HTTP only — use table or `none`)_
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| {param} | `String` | Yes | [description] |
+
+**Query params:** _(HTTP only — use table or `none`)_
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| {param} | `String` | No | — | [description] |
+
+**Request body:** _(HTTP only — use table or `none`)_
+
+| Field | Type | Required | Constraints | Description |
+|-------|------|----------|-------------|-------------|
+| {field} | `String` | Yes | [constraint] | [description] |
+
+**Response body:** _(HTTP Query only — use table(s); HTTP Command must declare `none` because commands return status only)_
+
+Single resource response:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | `String` | [description] |
+| {field} | `Type` | [description] |
+
+Paginated response wrapper:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| content | `Array<{Item}>` | Page content |
+| totalElements | `Long` | Total records |
+| page | `Integer` | Current page |
+| size | `Integer` | Page size |
+
+Paginated response item:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | `String` | [description] |
+| {field} | `Type` | [description] |
+
+**Trigger event:** [required for incoming event use cases only]
+**Consumed payload:** _(Incoming Event only — use table or `none`)_
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| {field} | `String` | Yes | [description] |
+
+**Produced payload:** _(Incoming Event only — use one table per emitted event, or `none`)_
+
+`{EventName}`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| {field} | `String` | Yes | [description] |
+
 **Preconditions:** [required state, entities that must exist]
 **Postconditions:** [system state after successful execution]
 **Validations and errors:** [exception conditions and error types]
@@ -42,15 +102,12 @@ Especificación técnica narrativa del sistema completo. Una sección `##` por c
 5. [Emit event — if applicable]
 
 ### Exposed Endpoints
-[One `####` per endpoint in exposes:]
+[One `####` per endpoint in exposes: as a summary-only index]
 
 #### {METHOD} {/path}
+**Use case:** `{UseCase}`
 **Purpose:** [endpoint description and usage context]
-**Path params:** [param — Type — Description; omit if none]
-**Query params:** [GET/DELETE only — param: Type, required/optional, default, description; omit if none]
-**Request body:** [POST/PUT/PATCH only — field: Type — constraint; omit for GET/DELETE]
-**Response:** [GET only — field: Type — business meaning; list endpoints include {content:[...], totalElements, page, size}]
-**Errors:** [HTTP status — condition]
+**Contract location:** [reference the `#### {UseCaseName}` section where path params, query params, request body, response body, and errors are defined]
 
 ### Emitted Events
 [Only if module is producer in integrations.async]
@@ -88,7 +145,11 @@ Especificación técnica narrativa del sistema completo. Una sección `##` por c
 - **Incluir useCases de consumers** como casos de uso del módulo consumidor.
 - **Referenciar módulos por nombre**.
 - **Máquinas de estado** cuando hay ciclos de vida.
-- **Endpoints detallados**: separar path params de query params. Para GETs indicar los campos clave de la respuesta con sus tipos. Para POST/PUT/PATCH listar los campos del body con tipo y constraint. Nunca "ver request" como descripción de response.
+- **Los casos de uso HTTP son la fuente canónica del contrato HTTP**: cada `HTTP Command` o `HTTP Query` debe declarar `Endpoint`, `Path params`, `Query params`, `Request body` y, según corresponda, `Response body` dentro de su propia sección.
+- **Semántica CQRS obligatoria**: los `HTTP Command` deben declarar `Response body: none`; los `HTTP Query` deben declarar un `Response body` detallado con tipos y wrapper de paginación cuando aplique.
+- **Contratos de eventos obligatorios**: cada `Incoming Event` debe declarar `Trigger event`, `Consumed payload` y `Produced payload` cuando corresponda.
+- **Formato de parámetros obligatorio**: `Path params`, `Query params`, `Request body`, `Response body`, `Consumed payload` y `Produced payload` deben expresarse en tablas Markdown. Solo se permite `none` cuando la sección no aplica.
+- **Exposed Endpoints es un índice/resumen**: nunca debe duplicar tablas, JSON schemas ni contratos completos ya definidos dentro de `Use Cases`.
 - **Operations en casos de uso**: el campo `**Operations:**` es obligatorio en cada `#### {UseCaseName}`. Cada ítem describe un paso concreto del handler referenciando nombres reales de repositorios, ports, métodos de dominio y eventos. No usar items genéricos como "execute business logic".
 - Omitir secciones no aplicables.
 
@@ -217,8 +278,67 @@ sequenceDiagram
 [One `###` per useCase in exposes: and consumers[].useCase]
 
 ### {UseCaseName}
-**Type:** `HTTP` | `Incoming Event` (specify which)
+**Type:** `HTTP Command` | `HTTP Query` | `Incoming Event`
 **What it does:** [detailed business logic description]
+**Endpoint:** [required for HTTP use cases — `METHOD /path`]
+**Path params:** _(HTTP only — use table or `none`)_
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| {param} | `String` | Yes | [description] |
+
+**Query params:** _(HTTP only — use table or `none`)_
+
+| Param | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| {param} | `String` | No | — | [description] |
+
+**Request body:** _(HTTP only — use table or `none`)_
+
+| Field | Type | Required | Constraints | Description |
+|-------|------|----------|-------------|-------------|
+| {field} | `String` | Yes | [constraint] | [description] |
+
+**Response body:** _(HTTP Query only — use table(s); HTTP Command must declare `none` because commands return status only)_
+
+Single resource response:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | `String` | [description] |
+| {field} | `Type` | [description] |
+
+Paginated response wrapper:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| content | `Array<{Item}>` | Page content |
+| totalElements | `Long` | Total records |
+| page | `Integer` | Current page |
+| size | `Integer` | Page size |
+
+Paginated response item:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | `String` | [description] |
+| {field} | `Type` | [description] |
+
+**Trigger event:** [required for incoming event use cases only]
+**Consumed payload:** _(Incoming Event only — use table or `none`)_
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| {field} | `String` | Yes | [description] |
+
+**Produced payload:** _(Incoming Event only — use one table per emitted event, or `none`)_
+
+`{EventName}`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| {field} | `String` | Yes | [description] |
+
 **Preconditions:** [valid states, entities that must exist]
 **Postconditions:** [system state after successful execution]
 **Invariants verified:** [ID list — e.g., INV-01, INV-03]
@@ -250,42 +370,7 @@ flowchart TD
 ### {METHOD} {/path}
 **Use case:** `{UseCase}`
 **Purpose:** [description]
-**Path params:** _(omit table if none)_
-
-| Param | Type | Description |
-|-------|------|-------------|
-| {param} | `String` | [description] |
-
-**Query params:** _(GET / DELETE only — omit table if none)_
-
-| Param | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| {param} | `String` | No | — | [description] |
-
-**Request body:** _(POST / PUT / PATCH only — omit for GET / DELETE)_
-```json
-{
-  "field": "String",       // required — [constraint]
-  "otherField": "Integer"  // optional — [constraint]
-}
-```
-
-**Response schema:** _(GET single only — omit for mutations)_
-```json
-{
-  "id": "String",
-  "field": "Type"          // [business meaning]
-}
-```
-_(For GET list: `{ "content": [...], "totalElements": "Long", "page": "Integer", "size": "Integer" }`)_
-
-**Errors:**
-
-| Status | Condition |
-|--------|-----------|
-| 404 | [entity] not found |
-| 400 | [validation failure] |
-| 409 | [invariant violated] |
+**Contract location:** `### {UseCase}` in the `Use Cases` section above.
 
 ## Emitted Events
 [Only if module is producer in integrations.async]
@@ -337,7 +422,13 @@ _(For GET list: `{ "content": [...], "totalElements": "Long", "page": "Integer",
 - **Diagrama de flujo por caso de uso**: `flowchart TD` dentro de cada `### {UseCase}` con trigger, invariantes, lógica y eventos.
 - **Máquina de estados condicional**: solo si hay entidades con ciclo de vida. Restricciones de transición son invariantes implícitas.
 - **Referenciar invariantes** en cada caso de uso (INV-01, INV-02...).
-- **Endpoints con contratos ricos**: para cada endpoint separar path params, query params, body y response en bloques distintos con tipos y constraints reales del dominio. Para GETs incluir el JSON schema de respuesta; para POST/PUT/PATCH el JSON del body. Listas incluyen wrapper de paginación `{ content, totalElements, page, size }`. Nunca usar placeholders genéricos.
+- **Contratos HTTP obligatorios dentro del caso de uso**: cada `HTTP Command` o `HTTP Query` debe declarar `**Endpoint:**`, `**Path params:**`, `**Query params:**` y `**Request body:**` dentro de su propia sección. Esto evita separar el endpoint del caso de uso en otra sección del documento.
+- **Semántica CQRS obligatoria**: los `HTTP Command` deben declarar `**Response body:** none` porque devuelven solo estado HTTP; los `HTTP Query` sí deben declarar el esquema detallado del response body.
+- **Contratos de eventos obligatorios**: cada `Incoming Event` debe declarar `**Trigger event:**`, `**Consumed payload:**` y, cuando aplique, `**Produced payload:**`.
+- **Formato de parámetros obligatorio**: todos los detalles de parámetros y payloads se presentan en tablas Markdown dentro del caso de uso. Solo se permite `none` cuando la sección no aplica.
+- **Los contratos HTTP ricos viven en `Use Cases`**: los params, bodies, response bodies, errors y semántica command/query se describen ahí. `Exposed Endpoints` es solo un índice navegable.
+- **Binding obligatorio endpoint → use case**: cada `modules[].exposes[]` del `system.yaml` debe mapear a exactamente un caso de uso de tipo `HTTP Command` o `HTTP Query` en el módulo correspondiente.
+- **Binding obligatorio consumer → use case**: cada `integrations.async[].consumers[].useCase` del `system.yaml` debe mapear a exactamente un caso de uso de tipo `Incoming Event`.
 - **Operations en casos de uso**: el campo `**Operations:**` es **obligatorio** en cada `### {UseCase}`. Lista los pasos del handler con nombres concretos: repositorio, port, método de dominio, evento. Sirve como contrato de implementación evaluable por revisores humanos antes de generar código.
 - **No duplicar** system.md — el `.md` del módulo es la especificación completa.
 - Archivos en `system/{module-name}.md`.
@@ -422,16 +513,108 @@ flowchart TD
 
 ## Use Cases
 
+### GetPayment
+**Type:** `HTTP Query`
+**What it does:** Returns the current payment snapshot by identifier.
+**Endpoint:** `GET /payments/{id}`
+**Path params:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | `String` | Yes | Payment identifier |
+
+**Query params:** none.
+**Request body:** none.
+**Response body:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | `String` | Payment identifier |
+| reservationId | `String` | Related reservation identifier |
+| amount | `BigDecimal` | Charged amount |
+| status | `PaymentStatus` | Current payment state |
+| providerReference | `String?` | External gateway reference |
+| approvedAt | `LocalDateTime?` | Approval timestamp |
+| failedAt | `LocalDateTime?` | Failure timestamp |
+| refundedAt | `LocalDateTime?` | Refund timestamp |
+**Preconditions:** Payment exists.
+**Postconditions:** Current payment snapshot is returned.
+**Invariants verified:** INV-01, INV-03
+**Validations and errors:** Unknown `id` returns `404`.
+**Events emitted:** none.
+**Operations:**
+1. Load `Payment` by ID.
+2. Map aggregate data to `PaymentResponse`.
+
+### RefundPayment
+**Type:** `HTTP Command`
+**What it does:** Requests a refund for an approved payment.
+**Endpoint:** `POST /payments/{id}/refund`
+**Path params:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | `String` | Yes | Payment identifier |
+
+**Query params:** none.
+**Request body:** none.
+**Response body:** none. HTTP status only.
+**Preconditions:** Payment exists and is in `APPROVED` state.
+**Postconditions:** Payment moves to `REFUNDED` if the gateway accepts the request.
+**Invariants verified:** INV-04
+**Validations and errors:** Unknown `id` returns `404`; invalid state returns `409`.
+**Events emitted:** `PaymentRefundedEvent`
+**Operations:**
+1. Load `Payment` by ID.
+2. Call `PaymentGatewayService.refund()`.
+3. Invoke `payment.refund()`.
+4. Persist aggregate.
+5. Publish `PaymentRefundedEvent`.
+
 ### HandleReservationCreated
-**Type:** Incoming Event (`ReservationCreatedEvent`)
+**Type:** `Incoming Event`
 **What it does:** Extracts `reservationId` and `totalAmount` from payload and triggers
 `CreatePayment` internally to start charging automatically.
+**Trigger event:** `ReservationCreatedEvent`
+**Consumed payload:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| reservationId | `String` | Yes | Upstream reservation identifier |
+| totalAmount | `BigDecimal` | Yes | Amount that must be charged |
+
+**Produced payload:**
+
+`PaymentApprovedEvent`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| paymentId | `String` | Yes | Created payment identifier |
+| reservationId | `String` | Yes | Upstream reservation identifier |
+| amount | `BigDecimal` | Yes | Approved amount |
+| approvedAt | `LocalDateTime` | Yes | Approval timestamp |
+
+`PaymentFailedEvent`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| paymentId | `String` | Yes | Created payment identifier |
+| reservationId | `String` | Yes | Upstream reservation identifier |
+| amount | `BigDecimal` | Yes | Rejected amount |
+| failedAt | `LocalDateTime` | Yes | Failure timestamp |
 **Preconditions:** Payload contains valid `reservationId` and `totalAmount > 0`.
 **Postconditions:** Payment created in PENDING state.
 **Invariants verified:** INV-01, INV-03
 **Validations and errors:** If INV-01 violated (active payment exists), discard event
 and log warning. If `totalAmount ≤ 0`, throw `400`.
-**Events emitted:** none directly; approval arrives asynchronously.
+**Events emitted:** `PaymentApprovedEvent` or `PaymentFailedEvent` after payment processing.
+
+**Operations:**
+1. Validate the consumed payload.
+2. Ensure there is no active payment for the reservation.
+3. Create `Payment` aggregate in `PENDING` state.
+4. Persist aggregate.
+5. Publish `PaymentApprovedEvent` or `PaymentFailedEvent` after processing.
 
 **Flow diagram:**
 ```mermaid
@@ -443,6 +626,7 @@ flowchart TD
     INV2 -->|"No"| ERR[/"400 Bad Request"/]
     INV2 -->|"Yes"| CREATE["Create Payment PENDING"]
     CREATE --> SAVE["Persist Payment"]
-    SAVE --> FIN([end — approval arrives async])
+    SAVE --> EV["📤 PaymentApprovedEvent or PaymentFailedEvent"]
+    EV --> FIN([end])
 ```
 ```

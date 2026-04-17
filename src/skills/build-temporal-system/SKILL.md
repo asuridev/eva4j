@@ -212,6 +212,13 @@ Before proposing the `system.yaml`, verify:
 - [ ] No handler or use case directly invokes an activity — all activity calls go through workflows
 - [ ] All in English
 - [ ] File in `system/system.yaml`
+- [ ] Each `modules[].exposes[]` has an HTTP use case planned in `system.md` and `system/{module}.md`
+- [ ] Each cross-module `workflows[]` has a technical specification planned in `system.md` and `system/{module}.md`
+- [ ] All HTTP Commands declare `Response body: none`
+- [ ] All HTTP Queries declare detailed `Response body`
+- [ ] All Workflows declare `Trigger`, `Task Queue`, `Steps` with activities and target modules, and expected outcome per step
+- [ ] `Exposed Endpoints` used only as index/summary — does not duplicate full contracts
+- [ ] All use case parameter details expressed in Markdown tables or `none` when not applicable
 
 ---
 
@@ -235,6 +242,14 @@ Before proposing the `system.yaml`, verify:
 Read `references/temporal-module-spec.md` (section "system.md structure") for the mandatory structure.
 
 Save as `system/system.md` (inside the `system/` directory). The `system/system.md` is the **narrative technical specification** of the system. One `##` section per module with: detailed role, use cases, endpoints, activities exposed, workflows triggered.
+
+Mandatory rules for `system/system.md`:
+- HTTP use cases are the **canonical source** of HTTP contracts.
+- Each `HTTP Command` must include within the use case: `Endpoint`, `Path params`, `Query params`, `Request body` and `Response body: none`.
+- Each `HTTP Query` must include within the use case: `Endpoint`, `Path params`, `Query params`, `Request body: none` and detailed `Response body`.
+- Each `Workflow Trigger` use case must include: `Trigger event`, `Task Queue`, `Steps` (activity + target module + expected result), and `Compensation` when applicable.
+- The detail of `Path params`, `Query params`, `Request body`, `Response body`, and workflow `Steps` must be presented in **Markdown tables** to facilitate reading and comparison between use cases.
+- The `Exposed Endpoints` section in `system.md` is only a **navigable index/summary** and must never repeat tables, JSON schemas or detailed contracts already defined in `Use Cases`.
 
 ---
 
@@ -436,6 +451,14 @@ For each module, generate `system/{module-name}.md` (**inside the `system/` dire
 - **Workflows Triggered** section describes what workflows each event triggers
 - **Interaction diagrams** show workflow invocations instead of event flows
 - **Sequence diagrams** show activity invocations through Temporal
+
+Mandatory rules for `system/{module}.md`:
+- `Use Cases` are the **single source of truth** for HTTP contracts.
+- Each endpoint defined in `system.yaml → modules[].exposes[]` must map to exactly one use case of type `HTTP Command` or `HTTP Query` in the corresponding module.
+- Each cross-module workflow where this module is the trigger must map to exactly one use case of type `Workflow Trigger`.
+- The parameter detail of each use case must be presented in **Markdown tables** within the use case itself. Only `none` is allowed when the section does not apply.
+- `Exposed Endpoints` must function as a navigable index: `Use case`, `Purpose` and reference to the contract embedded in the use case. It must not duplicate `Path params`, `Query params`, `Request body`, `Response body` or activity tables.
+- If an HTTP use case does not declare `Endpoint`, `Path params`, `Query params` and `Request body`, the generation is incomplete.
 
 ---
 

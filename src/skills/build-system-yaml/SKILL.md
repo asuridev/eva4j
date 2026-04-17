@@ -19,7 +19,7 @@ Eres dos roles simultáneos:
 Antes de generar nada, lee estos archivos del proyecto para obtener contexto:
 - `system/system.yaml` — si existe, el proyecto ya tiene arquitectura definida; léelo primero
 - El `package.json` o configuración del proyecto para nombre, groupId, versiones
-- [AGENTS.md](/AGENTS.md) — patrones y convenciones de eva4j
+- [AGENTS.md](../../../AGENTS.md) — patrones y convenciones de eva4j
 
 ## Idioma de los archivos generados
 
@@ -342,6 +342,13 @@ Antes de proponer el `system.yaml`, verifica:
 - [ ] `compensationUseCase` de cada step coincide exactamente con el `useCase` del listener en `compensationModule`
 - [ ] Pasos iniciador y final tienen `compensation: null` explícito
 - [ ] Cada `compensationModule` tiene listener declarado en su `domain.yaml` (completar en Paso 7)
+- [ ] Cada `modules[].exposes[]` tiene un caso de uso HTTP planificado en `system.md` y `system/{module}.md`
+- [ ] Cada `integrations.async[].consumers[].useCase` tiene un caso de uso de tipo `Incoming Event` planificado en `system.md` y `system/{module}.md`
+- [ ] Todos los `HTTP Command` declaran `Response body: none`
+- [ ] Todos los `HTTP Query` declaran `Response body` detallado
+- [ ] Todos los `Incoming Event` declaran `Trigger event`, `Consumed payload` y `Produced payload` cuando corresponda
+- [ ] `Exposed Endpoints` se usa solo como índice/resumen y no duplica contratos completos
+- [ ] Todos los detalles de parámetros por caso de uso se expresan en tablas Markdown o en `none` cuando no aplican
 
 ---
 
@@ -361,7 +368,15 @@ Antes de proponer el `system.yaml`, verifica:
 
 Lee `references/module-spec.md` (sección "Estructura del system.md") para la estructura obligatoria.
 
-El `system/system.md` es la **especificación técnica narrativa** del sistema. Una sección `##` por módulo con: rol detallado, casos de uso, endpoints, eventos emitidos, puertos síncronos.
+El `system/system.md` es la **especificación técnica narrativa** del sistema. Una sección `##` por módulo con: rol detallado, casos de uso, índice de endpoints, eventos emitidos, puertos síncronos y read models si aplican.
+
+Reglas obligatorias para `system/system.md`:
+- Los casos de uso HTTP son la **fuente canónica** del contrato HTTP.
+- Cada `HTTP Command` debe incluir dentro del caso de uso: `Endpoint`, `Path params`, `Query params`, `Request body` y `Response body: none`.
+- Cada `HTTP Query` debe incluir dentro del caso de uso: `Endpoint`, `Path params`, `Query params`, `Request body: none` y `Response body` detallado.
+- Cada `Incoming Event` debe incluir dentro del caso de uso: `Trigger event`, `Consumed payload` y `Produced payload` cuando aplique.
+- El detalle de `Path params`, `Query params`, `Request body`, `Response body`, `Consumed payload` y `Produced payload` debe presentarse en **tablas Markdown** para facilitar lectura y comparación entre casos de uso.
+- La sección `Exposed Endpoints` en `system.md` es solo un **índice/resumen** y nunca debe repetir tablas, JSON schemas ni contratos detallados ya definidos en `Use Cases`.
 
 ---
 
@@ -633,7 +648,15 @@ aggregates:
 
 Lee `references/module-spec.md` para la estructura obligatoria del `system/{module}.md`.
 
-Para cada módulo, genera `system/{nombre-del-modulo}.md` con: rol del módulo, invariantes, máquina de estados, diagrama de interacciones, diagrama de secuencia, casos de uso detallados, endpoints, eventos y puertos.
+Para cada módulo, genera `system/{nombre-del-modulo}.md` con: rol del módulo, invariantes, máquina de estados, diagrama de interacciones, diagrama de secuencia, casos de uso detallados, índice de endpoints, eventos, puertos y read models si aplican.
+
+Reglas obligatorias para `system/{module}.md`:
+- Los `Use Cases` son la **única fuente de verdad** de los contratos HTTP.
+- Cada endpoint definido en `system.yaml -> modules[].exposes[]` debe mapear a exactamente un caso de uso de tipo `HTTP Command` o `HTTP Query` en el módulo correspondiente.
+- Cada consumer definido en `system.yaml -> integrations.async[].consumers[].useCase` debe mapear a exactamente un caso de uso de tipo `Incoming Event`.
+- El detalle de parámetros de cada caso de uso debe presentarse en **tablas Markdown** dentro del propio caso de uso. Solo se permite `none` cuando la sección no aplica.
+- `Exposed Endpoints` debe funcionar como índice navegable: `Use case`, `Purpose` y referencia al contrato embebido en el caso de uso. No debe duplicar `Path params`, `Query params`, `Request body`, `Response body` ni tablas de errores.
+- Si un caso de uso HTTP no declara `Endpoint`, `Path params`, `Query params` y `Request body`, la generación es incompleta.
 
 ---
 
