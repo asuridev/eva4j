@@ -17,22 +17,18 @@ import java.util.UUID;
 <% } %><% if (needsList) { %>
 import java.util.List;
 <% } %>
-<% (responseNestedTypes || []).forEach(nt => { %>
-import <%= packageName %>.<%= moduleName %>.domain.models.<%= adapterPackage %>.<%= nt.name %>;
-<% }); %>
 /**
- * Domain model for the <%- name %> concept consumed from <%= target || serviceName %>.
+ * Domain-layer nested type for the {@code <%= adapterPackage %>} port.
  *
- * <p>ACL (Anti-Corruption Layer): this record is the domain-side abstraction.
- * The corresponding infra DTO lives in
- * {@code infrastructure.adapters.<%= adapterPackage %>} and is mapped
- * by the Feign adapter — if the external API changes, only the adapter
- * mapper needs to be updated; domain logic using this type remains untouched.
+ * <p>Lives alongside the domain model in {@code domain.models.<%= adapterPackage %>}
+ * so that domain models can reference it without depending on the application layer.
  */
 public record <%= name %>(
 <% if (fields && fields.length > 0) { %>
-<% fields.forEach((f, i) => { %>
-    <%- f.javaType %> <%= f.name %><%= i < fields.length - 1 ? ',' : '' %>
+<% fields.forEach((field, idx) => { %>
+    <%- field.javaType %> <%= field.name %><%= idx < fields.length - 1 ? ',' : '' %>
 <% }); %>
+<% } else { %>
+    // TODO: Add fields
 <% } %>
 ) {}

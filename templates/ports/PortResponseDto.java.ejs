@@ -17,6 +17,9 @@ import java.util.UUID;
 <% } %><% if (needsList) { %>
 import java.util.List;
 <% } %>
+<% (responseNestedTypes || []).forEach(nt => { %>
+import <%= packageName %>.<%= moduleName %>.domain.models.<%= adapterPackage %>.<%= nt.name %>;
+<% }); %>
 public record <%= dtoName %>(
 <% if (fields && fields.length > 0) { %>
 <% fields.forEach((f, i) => { %>

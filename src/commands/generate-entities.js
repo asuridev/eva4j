@@ -794,6 +794,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
 
     // ── Generate listeners (integration events CONSUMED from external producers) ──
     if (listeners && listeners.length > 0) {
+
       if (broker === 'kafka') {
         spinner.start(`Generating ${listeners.length} Kafka listener(s)...`);
         for (const listener of listeners) {
@@ -899,7 +900,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
             path: `${moduleName}/application/commands/${listener.commandClassName}.java`
           });
 
-          // 5. Use case handler that processes the command
+          // 5. Use case handler stub
           const handlerPath = path.join(
             moduleBasePath, 'application', 'usecases',
             `${listener.useCase}CommandHandler.java`
@@ -988,7 +989,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
           );
           generatedFiles.push({ type: 'Listener Command', name: listener.commandClassName, path: `${moduleName}/application/commands/${listener.commandClassName}.java` });
 
-          // 5. Use case handler stub
+          // 5. Use case handler stub — one handler per listener
           const mockHandlerPath = path.join(moduleBasePath, 'application', 'usecases', `${listener.useCase}CommandHandler.java`);
           await renderAndWrite(
             path.join(__dirname, '..', '..', 'templates', 'kafka-listener', 'ListenerCommandHandler.java.ejs'),
@@ -1119,7 +1120,7 @@ async function generateEntitiesCommand(moduleName, options = {}) {
             path: `${moduleName}/application/commands/${listener.commandClassName}.java`
           });
 
-          // 5. Use case handler that processes the command
+          // 5. Use case handler stub
           const handlerPath = path.join(
             moduleBasePath, 'application', 'usecases',
             `${listener.useCase}CommandHandler.java`
@@ -1187,30 +1188,51 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         };
 
         // 0. Nested type records (shared across methods in the same service)
+        // Response nestedTypes → domain/models/{adapterPackage}/ (same layer as domain models)
+        // Body-only nestedTypes → application/dtos/ (unchanged)
         for (const nt of nestedTypes) {
-          const ntPath = path.join(
-            moduleBasePath, 'application', 'dtos', `${nt.name}.java`
-          );
-          await renderAndWrite(
-            path.join(__dirname, '..', '..', 'templates', 'ports', 'PortNestedType.java.ejs'),
-            ntPath,
-            { packageName, moduleName, name: nt.name, fields: nt.fields },
-            writeOptions
-          );
-          generatedFiles.push({
-            type: 'Port DTO',
-            name: nt.name,
-            path: `${moduleName}/application/dtos/${nt.name}.java`
-          });
+          if (nt.usedInResponse) {
+            const ntPath = path.join(moduleBasePath, 'domain', 'models', adapterPackage, `${nt.name}.java`);
+            await renderAndWrite(
+              path.join(__dirname, '..', '..', 'templates', 'ports', 'PortDomainNestedType.java.ejs'),
+              ntPath,
+              { packageName, moduleName, name: nt.name, fields: nt.fields, adapterPackage },
+              writeOptions
+            );
+            generatedFiles.push({
+              type: 'Port Domain NestedType',
+              name: nt.name,
+              path: `${moduleName}/domain/models/${adapterPackage}/${nt.name}.java`
+            });
+          } else {
+            const ntPath = path.join(
+              moduleBasePath, 'application', 'dtos', `${nt.name}.java`
+            );
+            await renderAndWrite(
+              path.join(__dirname, '..', '..', 'templates', 'ports', 'PortNestedType.java.ejs'),
+              ntPath,
+              { packageName, moduleName, name: nt.name, fields: nt.fields },
+              writeOptions
+            );
+            generatedFiles.push({
+              type: 'Port DTO',
+              name: nt.name,
+              path: `${moduleName}/application/dtos/${nt.name}.java`
+            });
+          }
         }
 
         // 1a. Domain models in domain/models/{adapterPackage}/ (ACL: domain-side abstraction)
         for (const dm of (domainModels || [])) {
           const dmPath = path.join(moduleBasePath, 'domain', 'models', adapterPackage, `${dm.name}.java`);
+          // Collect response nestedTypes referenced by THIS domain model's fields
+          const dmResponseNestedTypes = nestedTypes.filter(
+            nt => nt.usedInResponse && dm.fields.some(f => f.javaType === nt.name)
+          );
           await renderAndWrite(
             path.join(__dirname, '..', '..', 'templates', 'ports', 'PortDomainModel.java.ejs'),
             dmPath,
-            { packageName, moduleName, name: dm.name, fields: dm.fields, target, serviceName, adapterPackage },
+            { packageName, moduleName, name: dm.name, fields: dm.fields, target, serviceName, adapterPackage, responseNestedTypes: dmResponseNestedTypes },
             writeOptions
           );
           generatedFiles.push({
@@ -1223,10 +1245,14 @@ async function generateEntitiesCommand(moduleName, options = {}) {
         // 1b. Infra DTOs (one per method that has fields:) — live in infrastructure/adapters/{service}/dtos/
         for (const method of methods.filter(m => m.hasResponse)) {
           const infraDtoPath = path.join(adapterDir, 'dtos', `${method.infraDtoName}.java`);
+          // Pass responseNestedTypes so the infra DTO can import them from domain.models
+          const methodResponseNestedTypes = nestedTypes.filter(
+            nt => nt.usedInResponse && method.fields.some(f => f.javaType === nt.name)
+          );
           await renderAndWrite(
             path.join(__dirname, '..', '..', 'templates', 'ports', 'PortResponseDto.java.ejs'),
             infraDtoPath,
-            { packageName, moduleName, dtoName: method.infraDtoName, fields: method.fields, adapterPackage },
+            { packageName, moduleName, dtoName: method.infraDtoName, fields: method.fields, adapterPackage, responseNestedTypes: methodResponseNestedTypes },
             writeOptions
           );
           generatedFiles.push({

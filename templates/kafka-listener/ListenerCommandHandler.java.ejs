@@ -6,14 +6,12 @@ import <%= packageName %>.shared.domain.annotations.LogExceptions;
 import <%= packageName %>.shared.domain.interfaces.CommandHandler;
 
 /**
- * Handles <%= commandClassName %> dispatched when <%= event %> is received.
- * Produced by: <%= producer %>.
+ * Handles <%= useCase %> triggered by event: <%= event %> (producer: <%= producer %>).
  */
 @ApplicationComponent
 public class <%= useCase %>CommandHandler implements CommandHandler<<%= commandClassName %>> {
 
   public <%= useCase %>CommandHandler() {
-
   }
 
   @Override
@@ -21,5 +19,5 @@ public class <%= useCase %>CommandHandler implements CommandHandler<<%= commandC
   public void handle(<%= commandClassName %> command) {
     // TODO: implement <%= useCase %> logic
   }
-
 }
+

@@ -1083,7 +1083,16 @@ function parseListeners(domainData) {
     // Generic suffix — broker-specific suffix applied in generate-entities.js
     const listenerClassName = `${baseName}Listener`;
     const useCaseName = toPascalCase(listener.useCase);
-    const commandClassName = `${useCaseName}Command`;
+    // Optional explicit command name — when declared, each listener gets its own
+    // typed command record instead of sharing {UseCaseName}Command.
+    // Accepts with or without trailing 'Command' suffix (auto-appended if missing).
+    let commandClassName;
+    if (listener.command) {
+      const raw = toPascalCase(listener.command);
+      commandClassName = raw.endsWith('Command') ? raw : `${raw}Command`;
+    } else {
+      commandClassName = `${useCaseName}Command`;
+    }
     const topic = listener.topic || null;
     const fields = (listener.fields || []).map(f => ({
       name: toCamelCase(f.name),
@@ -1179,13 +1188,19 @@ function parsePorts(domainData, moduleName = '') {
       : [];
 
     // nestedTypes per method
-    const nestedTypes = (entry.nestedTypes || []).map(nt => ({
-      name: toPascalCase(nt.name),
-      fields: (nt.fields || []).map(f => ({
-        name: toCamelCase(f.name),
-        javaType: f.type
-      }))
-    }));
+    const nestedTypes = (entry.nestedTypes || []).map(nt => {
+      const ntName = toPascalCase(nt.name);
+      return {
+        name: ntName,
+        // true when this nestedType is referenced as a response field type
+        // (and must live in domain/models/{service}/ instead of application/dtos/)
+        usedInResponse: responseFields.some(f => f.javaType === ntName),
+        fields: (nt.fields || []).map(f => ({
+          name: toCamelCase(f.name),
+          javaType: f.type
+        }))
+      };
+    });
 
     const returnList      = entry.returnList === true;
     const hasResponse     = responseFields.length > 0;
@@ -1238,10 +1253,14 @@ function parsePorts(domainData, moduleName = '') {
       group.baseUrl = entry.baseUrl;
     }
 
-    // Deduplicate nestedTypes within the service group
+    // Deduplicate nestedTypes within the service group;
+    // escalate usedInResponse if any method references this type in its response fields.
     for (const nt of nestedTypes) {
-      if (!group.nestedTypes.some(existing => existing.name === nt.name)) {
-        group.nestedTypes.push(nt);
+      const existing = group.nestedTypes.find(e => e.name === nt.name);
+      if (!existing) {
+        group.nestedTypes.push({ ...nt });
+      } else if (nt.usedInResponse && !existing.usedInResponse) {
+        existing.usedInResponse = true;
       }
     }
 

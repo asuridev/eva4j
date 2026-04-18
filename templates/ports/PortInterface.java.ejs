@@ -23,8 +23,8 @@ import java.time.LocalTime;
 <% /* Import request DTOs */ %>
 <% allMethods.filter(m => m.hasBody).forEach(m => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= m.requestDtoName %>;
 <% }); %>
-<% /* Import nested types */ %>
-<% (nestedTypes || []).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
+<% /* Import nested types (body-only; response nestedTypes live in domain.models) */ %>
+<% (nestedTypes || []).filter(nt => !nt.usedInResponse).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
 <% }); %>
 /**
  * Secondary port — HTTP client to <%= target || serviceName %>.

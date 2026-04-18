@@ -354,6 +354,8 @@ El validador **S6-006** verifica que cada evento en `on[]` esté declarado en al
 | `ScheduleDelivery` | `CompensateDeliveryScheduling` |
 | `AllocateWarehouseSlot` | `CompensateWarehouseAllocation` |
 
+> ⚠️ **Estos nombres son ejemplos para una sola saga.** Si en el mismo sistema otro módulo también necesita compensar `ReserveStock` por un motivo diferente (ej: `inventory` revierte una reserva al fallar el pago), NO puede reutilizar `CompensateStockReservation` — generaría `ConflictingBeanDefinitionException` (C3-007). Usa un nombre que incluya el contexto del trigger, ej: `ReleaseStockReservationOnPaymentFailed`.
+
 ---
 
 ### Ejemplo completo anotado
@@ -447,6 +449,33 @@ listeners:
         type: String
 ```
 
+> **Dos reglas de unicidad para `compensationUseCase`:**
+>
+> **Regla 1 — Intra-módulo (C2-013):** Cuando el mismo `compensationModule` aparece en ≥2 steps, usa un **`compensationUseCase` distinto por step**. `UseCaseAutoRegister` solo registra un tipo genérico por handler; compartir el mismo nombre entre múltiples listeners del mismo módulo causa `IllegalArgumentException` en runtime.
+>
+> **Regla 2 — Cross-módulo (C3-007):** El `compensationUseCase` debe ser **globalmente único en todo el sistema**. Si el módulo A usa `CompensateStockReservation` y el módulo B también usa `CompensateStockReservation`, Spring genera dos beans `CompensateStockReservationCommandHandler` en el mismo classpath → `ConflictingBeanDefinitionException`. Usa nombres semánticos que incluyan el contexto del paso revertido.
+>
+> ```yaml
+> # ✅ CORRECTO — 3 compensationUseCase distintos por step Y globalmente únicos
+> sagas:
+>   - name: CartCheckoutSaga
+>     steps:
+>       - ...
+>       - compensationEvent: OrderDraftCreationFailedEvent
+>         compensationModule: carts
+>         compensationUseCase: CompensateOrderDraftCreation   # único global
+>       - compensationEvent: StockReservationFailedEvent
+>         compensationModule: carts
+>         compensationUseCase: CompensateStockReservation     # único global
+>       - compensationEvent: PaymentFailedEvent
+>         compensationModule: carts
+>         compensationUseCase: CompensatePayment              # único global
+> ```
+>
+> Si otro módulo también compensara stock por un motivo distinto, no podría reusar `CompensateStockReservation` — debería llamarse ej: `ReleaseStockReservationOnPaymentFailed`.
+>
+> `eva evaluate system` valida ambas reglas automáticamente: **C2-013** (intra-módulo) y **C3-007** (cross-módulo).
+
 `eva evaluate system` valida automáticamente estas coincidencias en cada ejecución.
 
 ---
@@ -482,3 +511,5 @@ listeners:
 - [ ] Paso 1 y paso final tienen `compensation: null` explícito
 - [ ] `compensationModule` sigue el patrón LIFO (módulo del paso N-1 compensa el paso N)
 - [ ] Cada `compensationModule` tiene su listener declarado en `domain.yaml` con `useCase` idéntico al `compensationUseCase`
+- [ ] Si el mismo `compensationModule` aparece en ≥2 steps → usar `compensationUseCase` distinto por step (C2-013 — intra-módulo)
+- [ ] `compensationUseCase` globalmente único entre todos los módulos del sistema (C3-007 — cross-módulo: dos módulos distintos no pueden compartir el mismo `compensationUseCase` aunque compensen cosas diferentes)

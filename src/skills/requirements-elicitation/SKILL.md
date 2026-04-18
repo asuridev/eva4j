@@ -67,52 +67,110 @@ Ejecuta rondas de preguntas hasta tener cobertura suficiente en estas 5 dimensio
 ✅ BORDES E INTEGS — qué pasa cuando algo falla, qué sistemas externos participan
 ```
 
+### Regla de UI — OBLIGATORIA
+
+**Nunca hagas preguntas como texto libre en el chat.** Siempre usa `vscode_askQuestions` para cada ronda. Esto renderiza las preguntas como paneles interactivos nativos de VS Code donde el usuario puede hacer clic en opciones en lugar de escribir.
+
+#### Cómo construir cada pregunta
+
+```json
+{
+  "header": "identificador_unico",          // snake_case, sin espacios
+  "question": "¿Pregunta concisa?",         // una sola oración
+  "options": [                              // siempre incluir opciones
+    { "label": "Opción A", "description": "Detalle opcional", "recommended": true },
+    { "label": "Opción B", "description": "Detalle opcional" }
+  ],
+  "multiSelect": false,                     // true para preguntas donde aplican varias opciones
+  "allowFreeformInput": true                // true (default) para permitir respuesta libre además de opciones
+}
+```
+
+#### Reglas de construcción
+
+- **Llama `vscode_askQuestions` una sola vez por ronda** con todas las preguntas en un único array `questions`.
+- **Máximo 5 preguntas por llamada.** Si tienes más, prioriza y guarda el resto para la siguiente ronda.
+- **Marca `"recommended": true`** en la opción más común o estándar de cada pregunta.
+- **Usa `multiSelect: true`** cuando apliquen múltiples selecciones simultáneas (ej: métodos de pago, actores, integraciones externas).
+- **Usa `allowFreeformInput: false`** solo cuando las opciones sean exhaustivas y no quieras respuestas abiertas.
+- Las preguntas deben usar **lenguaje de negocio**, nunca términos técnicos (no "aggregate", no "event", no "endpoint").
+- Los `header` deben ser descriptivos y únicos dentro de la ronda (ej: `modelo_negocio`, `actores`, `metodos_pago`).
+
+#### Ejemplo de llamada para Ronda 1 (contexto y actores)
+
+```json
+[
+  {
+    "header": "modelo_negocio",
+    "question": "¿Qué tipo de negocio es?",
+    "options": [
+      { "label": "B2C — Una sola tienda vende directamente a consumidores finales", "recommended": true },
+      { "label": "Marketplace — Múltiples proveedores/vendedores ofrecen productos" },
+      { "label": "Híbrido — Tienda propia + proveedores externos" }
+    ]
+  },
+  {
+    "header": "actores",
+    "question": "¿Qué actores existen en el sistema?",
+    "multiSelect": true,
+    "options": [
+      { "label": "Cliente (compra productos)", "recommended": true },
+      { "label": "Administrador (gestiona catálogo, precios, stock)", "recommended": true },
+      { "label": "Repartidor (entrega pedidos)" },
+      { "label": "Proveedor (carga y gestiona sus propios productos)" },
+      { "label": "Operador de almacén (prepara pedidos)" }
+    ]
+  }
+]
+```
+
 ### Guía de Entrevista por Rondas
 
 Lee `references/interview-framework.md` para el detalle completo de preguntas por dimensión y ejemplos de preguntas efectivas.
 
-**Ronda 1 — Contexto y valor**
+**Ronda 1 — Contexto y actores** (usar `vscode_askQuestions`)
 
-Empieza aquí si la idea es muy vaga (menos de 2–3 oraciones de descripción):
-- ¿Cuál es el problema principal que este sistema resuelve? ¿Para quién?
-- ¿Quiénes son los usuarios finales y cuántos tipos de usuarios hay?
-- ¿Cuál es el "momento de oro" — la acción más importante que el sistema permite hacer?
+Preguntas clave (hasta 5):
+- ¿Qué tipo de negocio es? (B2C, marketplace, híbrido)
+- ¿Cuáles son los actores del sistema? (`multiSelect: true`)
+- ¿Cuál es el "momento de oro" — la acción central del producto?
+- Si aplica al dominio: ¿Hay entregas físicas? ¿Cómo funciona la entrega?
+- Si aplica al dominio: ¿Qué métodos de pago? (`multiSelect: true`)
 
-**Ronda 2 — Flujo principal**
+**Ronda 2 — Flujo principal** (usar `vscode_askQuestions`)
 
 Una vez conocido el qué y el quién:
-- Cuéntame el flujo completo de principio a fin: ¿qué hace el usuario paso a paso?
-- ¿Qué tiene que pasar *antes* de que ese flujo sea posible?
-- ¿Qué pasa exactamente *después* de que el flujo termina? ¿Quién es notificado? ¿Qué se registra?
+- ¿Qué tan complejo es el flujo principal? (simple directo, varios pasos de aprobación, multi-actor)
+- ¿Hay un paso crítico de validación antes de completarse? (stock, crédito, documentos, aprobación)
+- ¿Qué pasa inmediatamente después de que el flujo termina? (notificaciones, registros, cobros automáticos)
 
-**Ronda 3 — Estados y ciclos de vida**
+**Ronda 3 — Estados y ciclos de vida** (usar `vscode_askQuestions`)
 
 Una vez conocido el flujo principal:
-- Para la entidad más importante del sistema (ej: "el pedido", "la reserva", "la solicitud") — ¿cuáles son todos los estados que puede tener?
-- ¿Qué transiciones están permitidas? ¿Quién puede hacer cuál transición?
-- ¿Se puede cancelar? ¿Se puede revertir? ¿Bajo qué condiciones?
+- ¿Cuáles son los estados principales de la entidad central del negocio? (opciones inferidas del dominio)
+- ¿Se puede cancelar? ¿Por quién y bajo qué condición?
+- ¿Hay estados intermedios de procesamiento (pendiente, en revisión, en preparación)?
 
-**Ronda 4 — Reglas de negocio**
+**Ronda 4 — Reglas de negocio** (usar `vscode_askQuestions`)
 
 La ronda más importante: descubrir los invariantes:
-- ¿Qué validaciones son críticas? (cosas que si fallan, el negocio tiene un problema real)
-- ¿Hay límites o cuotas? (máximo de items, stock mínimo, saldo suficiente, cupos limitados)
-- ¿Hay reglas de tiempo? (expiración, ventanas de tiempo, deadlines, recordatorios)
-- ¿Quién tiene autoridad para hacer qué? ¿Hay aprobaciones necesarias?
+- ¿Hay reglas de stock o disponibilidad? (reserva inmediata, validación al pagar, sin control)
+- ¿Hay límites cuantitativos? (máximo por pedido, stock mínimo, saldo suficiente)
+- ¿Hay reglas de tiempo? (expiración de carrito, ventana de cancelación, recordatorios)
+- ¿Hay aprobaciones manuales necesarias en algún paso?
 
-**Ronda 5 — Casos de borde e integraciones**
+**Ronda 5 — Casos de borde e integraciones** (usar `vscode_askQuestions`)
 
-- ¿Qué pasa si el pago falla? ¿Si el stock se agota? ¿Si el usuario no hace algo a tiempo?
-- ¿Hay sistemas externos involucrados? (pasarelas de pago, correo, SMS, ERP, CRM...)
-- ¿Hay reportes o dashboards necesarios? ¿Analytics?
-- ¿Hay requerimientos de multitenancy o multi-empresa?
+- ¿Qué pasa cuando algo falla? (pago rechazado, stock agotado, entrega fallida)
+- ¿Qué sistemas externos participan? (`multiSelect: true`: pasarelas de pago, correo/SMS, ERP, logistics API...)
+- ¿Hay necesidad de reportes o dashboards?
+- ¿Es multi-empresa o multi-tenant?
 
 ### Reglas de la Entrevista
 
-- **Máximo 5 preguntas por ronda.** Si tienes más, prioriza las que desbloquean más entendimiento.
-- **Una ronda a la vez.** Espera respuesta antes de continuar.
-- **Si el usuario es un experto técnico**, puedes ir más rápido y saltar rondas que ya cubrió.
-- **Si el usuario no sabe responder algo**, sugiere opciones comunes del dominio y pide confirmación.
+- **Una ronda a la vez.** Espera respuesta de `vscode_askQuestions` antes de continuar.
+- **Si el usuario ya respondió algo en el chat**, extrae esa información y no vuelvas a preguntar — inclúyela directamente.
+- **Si el usuario es experto técnico**, puedes saltar rondas que ya cubrió en su descripción inicial.
 - **Anota cada respuesta mentalmente** en la dimensión correspondiente (✅ arriba).
 
 ---

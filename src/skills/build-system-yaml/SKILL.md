@@ -527,9 +527,33 @@ Si `system.yaml` tiene una sección `sagas:`, **por cada step con `compensationE
          type: String
    ```
 3. Si el mismo `compensationModule` aparece en múltiples steps, agrupa todos los listeners en el mismo `domain.yaml`
-4. El `useCase` del listener es el **punto de entrada** de la compensación — el developer implementa el `CommandHandler` generado con la lógica de reversión
+4. **Dos reglas de unicidad para `compensationUseCase`** (ambas se validan con `eva evaluate system`):
 
-> **Invariante:** `step.compensationUseCase` en `system.yaml` == `listeners[].useCase` en `{compensationModule}.yaml`. Error S6-005 detecta cualquier discrepancia.
+   - **Regla 1 — Intra-módulo (C2-013):** Si el mismo `compensationModule` tiene ≥2 steps, usa un `compensationUseCase` distinto por step. `UseCaseAutoRegister` solo registra un tipo genérico por handler — compartir el mismo nombre entre múltiples listeners del mismo módulo causa `IllegalArgumentException` en runtime.
+
+   - **Regla 2 — Cross-módulo (C3-007):** El `compensationUseCase` debe ser **globalmente único en todo el sistema**. Si módulo A usa `CompensateStockReservation` y módulo B también usa `CompensateStockReservation` (aunque compensen cosas distintas), Spring genera dos beans `CompensateStockReservationCommandHandler` → `ConflictingBeanDefinitionException`. Usa nombres semánticos que incluyan el contexto del paso revertido.
+
+   ```yaml
+   # ✅ CORRECTO — 3 useCases distintos por step Y globalmente únicos en el sistema
+   sagas:
+     - name: CartCheckoutSaga
+       steps:
+         - ...
+         - compensationEvent: OrderDraftCreationFailedEvent
+           compensationModule: carts
+           compensationUseCase: CompensateOrderDraftCreation   # único global
+         - compensationEvent: StockReservationFailedEvent
+           compensationModule: carts
+           compensationUseCase: CompensateStockReservation     # único global
+         - compensationEvent: PaymentFailedEvent
+           compensationModule: carts
+           compensationUseCase: CompensatePayment              # único global
+   ```
+   Si otro módulo (ej: `inventory`) también necesitara compensar stock por otro motivo, NO puede reutilizar `CompensateStockReservation` — debe usar un nombre distinto como `ReleaseStockReservationOnPaymentFailed`.
+
+5. El `useCase` del listener es el **punto de entrada** de la compensación — el developer implementa el `CommandHandler` generado con la lógica de reversión
+
+> **Invariante:** `step.compensationUseCase` en `system.yaml` == `listeners[].useCase` en `{compensationModule}.yaml` Y globalmente único entre todos los módulos. S6-005 detecta discrepancias; C2-013 y C3-007 detectan colisiones.
 
 ### Endpoints en módulos con múltiples agregados
 

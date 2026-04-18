@@ -394,6 +394,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-010': { label: 'Campo de lifecycle event no existe en la entidad raíz', severity: 'ok', findings: [] },
     'C2-011': { label: 'Endpoint useCase no se resuelve a ningún agregado del módulo', severity: 'ok', findings: [] },
     'C2-012': { label: 'Nombre del agregado no coincide con la entidad raíz (causa import incorrecto en ApplicationMapper)', severity: 'ok', findings: [] },
+    'C2-013': { label: 'useCase duplicado entre listeners del mismo módulo (falla UseCaseAutoRegister en runtime)', severity: 'ok', findings: [] },
   };
 
   for (const [moduleName, config] of Object.entries(domainConfigs)) {
@@ -653,8 +654,32 @@ function runC2(domainConfigs, systemConfig) {
       }
     }
 
+    // C2-013: duplicate useCase across listeners within the same module
+    // UseCaseAutoRegister.getGenericType() only registers the FIRST CommandHandler<X> it finds.
+    // If multiple listeners share the same useCase, only one Command type gets registered;
+    // dispatching any other type causes IllegalArgumentException at runtime.
+    const listenerUseCaseMap = {};
+    for (const listener of config.listeners || []) {
+      const uc = listener.useCase;
+      if (!uc) continue;
+      if (!listenerUseCaseMap[uc]) listenerUseCaseMap[uc] = [];
+      listenerUseCaseMap[uc].push(listener.event || '(sin event)');
+    }
+    for (const [uc, events] of Object.entries(listenerUseCaseMap)) {
+      if (events.length < 2) continue;
+      checks['C2-013'].findings.push(
+        finding(
+          moduleName,
+          `useCase '${uc}' está declarado en ${events.length} listeners: ${events.join(', ')}`,
+          `UseCaseAutoRegister solo registra un tipo genérico por handler — usa useCase: distintos en cada listener (ej: Notify${uc.replace(/^Notify/, '')}OnX, Notify${uc.replace(/^Notify/, '')}OnY).`
+        )
+      );
+    }
+
     // C2-006: useCase name collision between endpoints and listeners
-    // Both generate "{UseCase}Command.java" — the endpoint run overwrites the listener version.
+    // Endpoints generate "{UseCase}Command.java". Listeners with no explicit command: also use
+    // "{UseCase}Command.java". With explicit command: the listener uses a different class name,
+    // so a collision only happens when the listener has no command: override.
     const domainEpUseCases = new Set();
     for (const ver of (config.endpoints && config.endpoints.versions) || []) {
       for (const op of ver.operations || []) {
@@ -663,12 +688,14 @@ function runC2(domainConfigs, systemConfig) {
     }
     for (const listener of config.listeners || []) {
       const uc = listener.useCase;
-      if (uc && domainEpUseCases.has(uc)) {
+      // Only flag collision if the listener has NO explicit command: (i.e. commandClassName === useCaseName + 'Command')
+      const hasExplicitCommand = !!listener.command;
+      if (uc && !hasExplicitCommand && domainEpUseCases.has(uc)) {
         checks['C2-006'].findings.push(
           finding(
             moduleName,
             `UseCase '${uc}' está declarado en endpoints: y en listeners: (evento '${listener.event}')`,
-            `Ambos generan '${uc}Command.java' — el endpoint sobreescribe el comando del listener. Renombra el useCase del listener, p.ej. '${uc.replace(/^Create/, 'Initialize')}'.`
+            `Ambos generan '${uc}Command.java' — el endpoint sobreescribe el comando del listener. Añade command: <NombreExplícito> al listener, o renombra el useCase del listener.`
           )
         );
       }
@@ -817,6 +844,7 @@ function runC2(domainConfigs, systemConfig) {
     'C2-010': 'error',
     'C2-011': 'error',
     'C2-012': 'error',
+    'C2-013': 'error',
   });
 
   return checks;
@@ -1408,6 +1436,113 @@ function setDefaultSeverities(checks, defaults) {
   }
 }
 
+// ─── C6 — ReadModel Integrity ────────────────────────────────────────────────
+
+function runC6(domainConfigs) {
+  const checks = {
+    'RM-001': { label: 'Nombre de readModel no termina en "ReadModel"', severity: 'ok', findings: [] },
+    'RM-002': { label: 'tableName de readModel no comienza con "rm_"', severity: 'ok', findings: [] },
+    'RM-004': { label: 'readModel no declara campo "id" en fields', severity: 'ok', findings: [] },
+    'RM-005': { label: 'readModel sin ninguna entrada en syncedBy', severity: 'ok', findings: [] },
+    'RM-006': { label: 'Acción en syncedBy no es UPSERT, DELETE ni SOFT_DELETE', severity: 'ok', findings: [] },
+    'RM-010': { label: 'source.module del readModel es el mismo módulo actual', severity: 'ok', findings: [] },
+  };
+
+  const VALID_RM_ACTIONS = new Set(['UPSERT', 'DELETE', 'SOFT_DELETE']);
+
+  for (const [moduleName, config] of Object.entries(domainConfigs)) {
+    for (const rm of config.readModels || []) {
+      const name = rm.name || '(sin nombre)';
+
+      // RM-001: name must end with 'ReadModel'
+      if (!name.endsWith('ReadModel')) {
+        checks['RM-001'].findings.push(
+          finding(
+            moduleName,
+            `ReadModel "${name}": el nombre debe terminar con el sufijo "ReadModel"`,
+            `Renombrar a "${name}ReadModel" o elegir un nombre que lo incluya`
+          )
+        );
+      }
+
+      // RM-002: tableName must start with 'rm_'
+      if (rm.tableName && !rm.tableName.startsWith('rm_')) {
+        checks['RM-002'].findings.push(
+          finding(
+            moduleName,
+            `ReadModel "${name}": tableName "${rm.tableName}" debe comenzar con "rm_"`,
+            `Cambiar a "rm_${rm.tableName}" para identificación visual en BD`
+          )
+        );
+      }
+
+      // RM-004: fields must include an 'id' field
+      const rmFields = rm.fields || [];
+      if (!rmFields.some((f) => f.name === 'id')) {
+        checks['RM-004'].findings.push(
+          finding(
+            moduleName,
+            `ReadModel "${name}": fields debe incluir un campo "id"`,
+            `Agregar { name: id, type: String } como primer campo de fields`
+          )
+        );
+      }
+
+      // RM-005: syncedBy must have at least one entry
+      const syncedBy = rm.syncedBy || [];
+      if (syncedBy.length === 0) {
+        checks['RM-005'].findings.push(
+          finding(
+            moduleName,
+            `ReadModel "${name}": syncedBy debe tener al menos una entrada`,
+            `Declarar al menos un evento de sincronización con acción UPSERT, DELETE o SOFT_DELETE`
+          )
+        );
+      }
+
+      // RM-006: action must be valid
+      for (const sync of syncedBy) {
+        const action = (sync.action || '').toUpperCase();
+        if (action && !VALID_RM_ACTIONS.has(action)) {
+          checks['RM-006'].findings.push(
+            finding(
+              moduleName,
+              `ReadModel "${name}", evento "${sync.event || '?'}": acción "${sync.action}" no es válida`,
+              `Valores válidos: UPSERT, DELETE, SOFT_DELETE`
+            )
+          );
+        }
+      }
+
+      // RM-010: source.module must differ from current module
+      if (rm.source && rm.source.module) {
+        const srcNorm = (rm.source.module || '').toLowerCase().replace(/-/g, '');
+        const curNorm = (moduleName || '').toLowerCase().replace(/-/g, '');
+        if (srcNorm === curNorm) {
+          checks['RM-010'].findings.push(
+            finding(
+              moduleName,
+              `ReadModel "${name}": source.module "${rm.source.module}" es el mismo módulo actual`,
+              `Los readModels son exclusivamente para proyecciones cross-module — moverlo al módulo consumidor`
+            )
+          );
+        }
+      }
+    }
+  }
+
+  setDefaultSeverities(checks, {
+    'RM-001': 'error',
+    'RM-002': 'error',
+    'RM-004': 'error',
+    'RM-005': 'error',
+    'RM-006': 'error',
+    'RM-010': 'error',
+  });
+
+  return checks;
+}
+
 // ── Main export ──────────────────────────────────────────────────────────────
 
 /**
@@ -1421,6 +1556,7 @@ function validateDomain(domainConfigs, systemConfig) {
   const c3Checks = runC3(domainConfigs, systemConfig);
   const c4Checks = runC4(domainConfigs, systemConfig);
   const c5Checks = runC5(domainConfigs, systemConfig);
+  const c6Checks = runC6(domainConfigs);
 
   const categories = [
     {
@@ -1452,6 +1588,12 @@ function validateDomain(domainConfigs, systemConfig) {
       label: 'Integridad de Workflows Temporal',
       description: 'Verifica que las actividades, compensaciones y contratos de tipos en workflows Temporal sean coherentes.',
       checks: checksToArray(c5Checks),
+    },
+    {
+      id: 'C6',
+      label: 'Integridad de ReadModels',
+      description: 'Verifica que los readModels tengan estructura válida: nombre, tableName, campo id, syncedBy y source correctos.',
+      checks: checksToArray(c6Checks),
     },
   ];
 

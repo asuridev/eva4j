@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 <% /* Request DTOs and nested types stay in application.dtos */ %>
 <% allMethods.filter(m => m.hasBody).forEach(m => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= m.requestDtoName %>;
 <% }); %>
-<% (nestedTypes || []).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
+<% (nestedTypes || []).filter(nt => !nt.usedInResponse).forEach(nt => { %>import <%= packageName %>.<%= moduleName %>.application.dtos.<%= nt.name %>;
 <% }); %>
 @Component("<%= moduleName %>.<%= feignAdapterClassName %>")
 public class <%= feignAdapterClassName %> implements <%= serviceName %> {

@@ -779,6 +779,7 @@ listeners:
     producer: payments             # Módulo que lo produce (referencia documental)
     topic: PAYMENT_APPROVED        # Topic Kafka — obligatorio en módulos standalone
     useCase: ConfirmOrder          # Caso de uso que maneja el evento (PascalCase)
+    command: PaymentApproved       # Opcional — nombre del Command tipado (ver sección command:)
     fields:                        # Campos del payload recibido
       - name: orderId
         type: String
@@ -805,7 +806,7 @@ Genera por cada entrada (hasta **6 artefactos**):
 | `application/events/PaymentApprovedIntegrationEvent.java` | Record tipado con los `fields` declarados |
 | `infrastructure/kafkaListener/PaymentApprovedKafkaListener.java` | `@KafkaListener` → deserializa y despacha al `useCase` |
 | `parameters/*/kafka.yaml` | Registro del topic en `topics:` |
-| `application/commands/ConfirmOrderCommand.java` | Command tipado para el `useCase` |
+| `application/commands/PaymentApprovedCommand.java` | Command tipado — nombre viene de `command:` si se declara, o de `useCase:` si no |
 | `application/usecases/ConfirmOrderCommandHandler.java` | Handler stub — implementar la lógica de negocio aquí |
 
 **Deserialización:** el listener usa `EventEnvelope<Map<String,Object>>` + `objectMapper.convertValue()` para deserializar cada campo del payload de forma robusta y tipada.
@@ -819,6 +820,45 @@ Genera por cada entrada (hasta **6 artefactos**):
 Declara un `nestedType` cuando un campo del payload es un **objeto anidado** (no un escalar). El generador produce un record en el mismo paquete `application/events/`, que tanto la `IntegrationEvent` como el `Command` y el `KafkaListener` usan directamente.
 
 **Colisión de nombres entre módulos:** cuando varios módulos consumen el mismo evento Kafka, el generador produce clases listener con el mismo nombre (ej: `PaymentApprovedKafkaListener` en `orders` y en `notifications`). Esto es seguro porque el generador usa `@Component("<moduleName>.<listenerClassName>")` para calificar el bean y evitar `ConflictingBeanDefinitionException`. **No se requiere acción del agente** — a diferencia de `ports[]`, donde el nombre de `service:` debe ser único por módulo.
+
+#### Propiedad `command:` — nombre explícito del Command record
+
+`command:` es **opcional** y permite desacoplar el nombre del Command generado del nombre del `useCase:`. Útil cuando el nombre automático `{UseCaseName}Command` no es suficientemente descriptivo.
+
+```yaml
+- event: PaymentApprovedEvent
+  topic: PAYMENT_APPROVED
+  useCase: ConfirmOrder
+  command: PaymentApproved    # → PaymentApprovedCommand.java (en vez de ConfirmOrderCommand.java)
+  fields: [...]
+```
+
+**Reglas:**
+- El sufijo `Command` se auto-agrega si falta (`PaymentApproved` → `PaymentApprovedCommand`).
+- C2-006 detecta colisión cuando un `useCase:` de listener coincide con un `useCase:` de endpoint (ambos generarían el mismo `{UseCase}Command.java`). Con `command:` explícito la colisión se elimina.
+- C2-013 detecta cuando ≥2 listeners del mismo módulo comparten el mismo `useCase:` — falla `UseCaseAutoRegister` en runtime porque solo puede registrar un tipo genérico por handler.
+- C3-007 detecta cuando listeners de módulos distintos comparten el mismo `useCase:` — causa `ConflictingBeanDefinitionException` de Spring al arrancar.
+
+> **Saga de compensación fan-in:** Cuando varios eventos de fallo deben compensarse en el mismo módulo, usa **`useCase:` distintos** por listener — cada uno genera su propio `CommandHandler` independiente. No uses el mismo `useCase:` para múltiples listeners: aunque `command:` evitaría la colisión en los archivos Command, el `UseCaseAutoRegister` sólo puede registrar **un** tipo genérico por handler y los demás fallarían en runtime.
+>
+> ```yaml
+> # ✅ CORRECTO — 3 eventos, 3 useCases distintos
+> listeners:
+>   - event: OrderDraftCreationFailedEvent
+>     topic: ORDER_DRAFT_CREATION_FAILED
+>     useCase: CompensateOrderDraftCreation    # → handler independiente
+>     fields: [...]
+>
+>   - event: StockReservationFailedEvent
+>     topic: STOCK_RESERVATION_FAILED
+>     useCase: CompensateStockReservation      # → handler independiente
+>     fields: [...]
+>
+>   - event: PaymentFailedEvent
+>     topic: PAYMENT_FAILED
+>     useCase: CompensatePayment               # → handler independiente
+>     fields: [...]
+> ```
 
 **Contraste eventos producidos vs. consumidos:**
 ```
@@ -1689,6 +1729,7 @@ Al generar o modificar código, verificar:
 - [ ] Consumo de eventos externos → declarar en `listeners[]` (nivel raíz); `topic:` obligatorio en módulos standalone
 - [ ] Cada `listener` genera hasta 6 artefactos: NestedType(s) → IntegrationEvent → KafkaListener → kafka.yaml → Command → CommandHandler
 - [ ] Varios módulos pueden consumir el mismo evento Kafka sin colisión — el generador califica el bean automáticamente con `@Component("moduleName.listenerClassName")`
+- [ ] Múltiples listeners para la misma operación de compensación → usar `useCase:` distintos por listener (no compartir el mismo `useCase:` entre múltiples listeners)
 - [ ] Campos de tipo objeto en listeners → declarar `nestedTypes:` para generar records auxiliares en `application/events/`
 - [ ] Endpoints REST específicos → declarar `endpoints:` con versiones y operaciones; usar nombres estándar para implementación completa
 - [ ] Clientes HTTP síncronos → declarar en `ports[]` (nivel raíz); `baseUrl:` en la primera entrada de cada `service:`

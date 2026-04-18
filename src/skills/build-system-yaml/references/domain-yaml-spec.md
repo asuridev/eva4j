@@ -281,6 +281,7 @@ listeners:
     producer: payments
     topic: PAYMENT_APPROVED
     useCase: ConfirmOrder
+    command: PaymentApproved       # Optional — explicit name for the generated Command record
     fields:
       - name: orderId
         type: String
@@ -308,6 +309,56 @@ ports:
       - name: email
         type: String
 ```
+
+---
+
+## `command:` — explicit Command record name
+
+`command:` is **optional** and decouples the generated Command class name from the `useCase:` name. Useful when the auto-derived name `{UseCaseName}Command` is not descriptive enough.
+
+```yaml
+- event: PaymentApprovedEvent
+  topic: PAYMENT_APPROVED
+  useCase: ConfirmOrder
+  command: PaymentApproved    # → PaymentApprovedCommand.java (instead of ConfirmOrderCommand.java)
+  fields: [...]
+```
+
+**Rules:**
+- The `Command` suffix is auto-added if missing (`PaymentApproved` → `PaymentApprovedCommand`).
+- C2-006 detects collision when a listener `useCase:` matches an endpoint `useCase:` (both generate `{UseCase}Command.java`). An explicit `command:` eliminates the collision.
+- C2-013 detects when ≥2 listeners **in the same module** share the same `useCase:` — `UseCaseAutoRegister` can only register one generic type per handler, so the others fail at runtime with `IllegalArgumentException`.
+- C3-007 detects when listeners **across different modules** share the same `useCase:` — Spring's component scan registers all `CommandHandler` beans in a single context, causing `ConflictingBeanDefinitionException` at startup.
+
+> **Two uniqueness rules for listener `useCase:`:**
+>
+> **Rule 1 — Intra-module (C2-013):** No two listeners in the same module can share a `useCase:`. This includes compensation fan-in: if `carts` compensates 3 failure events, each listener needs a distinct `useCase:`.
+>
+> **Rule 2 — Cross-module (C3-007):** The `useCase:` name must be **globally unique across all modules in the application**. If module `carts` uses `CompensateStockReservation` and module `inventory` also uses `CompensateStockReservation` (even for a different event), Spring generates two beans with the same class name → `ConflictingBeanDefinitionException`.
+>
+> ```yaml
+> # ✅ CORRECT — 3 events, 3 distinct useCases (intra-module unique)
+> # AND each name appears in only one module system-wide (cross-module unique)
+> listeners:
+>   - event: OrderDraftCreationFailedEvent
+>     topic: ORDER_DRAFT_CREATION_FAILED
+>     useCase: CompensateOrderDraftCreation    # → independent handler, globally unique
+>     fields: [...]
+>
+>   - event: StockReservationFailedEvent
+>     topic: STOCK_RESERVATION_FAILED
+>     useCase: CompensateStockReservation      # → independent handler, globally unique
+>     fields: [...]
+>
+>   - event: PaymentFailedEvent
+>     topic: PAYMENT_FAILED
+>     useCase: CompensatePayment               # → independent handler, globally unique
+>     fields: [...]
+> ```
+>
+> If another module also needed to compensate stock (e.g., `inventory` releasing a reservation on payment failure), it CANNOT reuse `CompensateStockReservation` — it must use a semantically distinct name like `ReleaseStockReservationOnPaymentFailed`.
+>
+> `eva evaluate system` validates both rules automatically: **C2-013** (intra-module) and **C3-007** (cross-module).
 
 ---
 
@@ -615,6 +666,7 @@ Si un valor no es trazable → falta un endpoint o listener en el diseño.
 - [ ] `listeners[]` para todos los eventos donde este módulo es consumidor
 - [ ] `listeners[].useCase` coincide con `consumers[].useCase`
 - [ ] `listeners[].topic` bare SCREAMING_SNAKE_CASE (sin topicPrefix)
+- [ ] Múltiples listeners para la misma operación de compensación → usar `useCase:` distintos (no compartir el mismo `useCase:` entre múltiples listeners)
 - [ ] `ports[]` para todas las entradas sync donde `caller = este módulo`
 - [ ] `ports[].baseUrl` solo en primera entrada de cada `service:`
 - [ ] `nestedTypes[]` para campos de tipo objeto en listeners/ports
